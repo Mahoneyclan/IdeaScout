@@ -8,20 +8,44 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Keys.weightMomentum) private var wMomentum = 1.0
     @AppStorage(AppSettings.Keys.weightViability) private var wViability = 1.0
     @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
+    @AppStorage(AppSettings.Keys.aboutMe) private var aboutMe = ""
+    @State private var usage = UsageTracker.summary()
 
     @State private var claudeKey = Keychain.get(.claudeAPIKey) ?? ""
     @State private var productHuntToken = Keychain.get(.productHuntToken) ?? ""
     @State private var notificationsAllowed: Bool?
+    @FocusState private var keyboardOpen: Bool
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("e.g. ai agent, llm, mcp", text: $topics, axis: .vertical)
+                    // Wraps over several lines; Return closes the keyboard instead of adding a line break.
+                    TextField("e.g. ai agent, saas, mcp", text: $topics, axis: .vertical)
+                        .lineLimit(2...6)
+                        .submitLabel(.done)
+                        .textInputAutocapitalization(.never)
+                        .focused($keyboardOpen)
+                        .onChange(of: topics) { _, value in
+                            guard value.contains(where: \.isNewline) else { return }
+                            if value.last?.isNewline == true { keyboardOpen = false }
+                            topics = value.split(whereSeparator: \.isNewline).joined(separator: ", ")
+                        }
                 } header: {
                     Text("Topics")
                 } footer: {
                     Text("Comma-separated. Used to search GitHub (first \(GitHubFetcher.maxTopics) topics) and to group items when no AI is available.")
+                }
+
+                Section {
+                    TextField("e.g. Swift/iOS developer, enterprise IT in energy, evenings only, small budget",
+                              text: $aboutMe, axis: .vertical)
+                        .lineLimit(3...8)
+                        .focused($keyboardOpen)
+                } header: {
+                    Text("About me")
+                } footer: {
+                    Text("Your skills, industry, time and budget. Claude uses this to score how well each killer idea fits you. Stored only on this iPhone and sent to Claude with each refresh.")
                 }
 
                 Section("Sources") {
@@ -47,6 +71,7 @@ struct SettingsView: View {
                     }
                     LabeledContent("Apple Intelligence", value: AppleSummarizer.statusText)
                     SecureField("Claude API key", text: $claudeKey)
+                        .focused($keyboardOpen)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onSubmit { Keychain.set(claudeKey, for: .claudeAPIKey) }
@@ -58,7 +83,34 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    LabeledContent("Today", value: usage.today.cost.formatted(.currency(code: "USD")))
+                    LabeledContent("This month", value: usage.thisMonth.cost.formatted(.currency(code: "USD")))
+                    LabeledContent("All time", value: usage.allTime.cost.formatted(.currency(code: "USD")))
+                    DisclosureGroup("Details") {
+                        ForEach(usage.byFeatureThisMonth, id: \.feature) { row in
+                            LabeledContent(row.feature, value: row.usage.cost.formatted(.currency(code: "USD")))
+                        }
+                        LabeledContent("Calls this month", value: "\(usage.thisMonth.calls)")
+                        LabeledContent("Tokens this month",
+                                       value: "\((usage.thisMonth.input + usage.thisMonth.cacheRead + usage.thisMonth.cacheWrite).formatted()) in · \(usage.thisMonth.output.formatted()) out")
+                        ForEach(usage.lastDays, id: \.day) { day in
+                            LabeledContent(day.day, value: day.cost.formatted(.currency(code: "USD")))
+                                .font(.caption)
+                        }
+                        Button("Reset cost tracker", role: .destructive) {
+                            UsageTracker.reset()
+                            usage = UsageTracker.summary()
+                        }
+                    }
+                } header: {
+                    Text("AI costs (Claude)")
+                } footer: {
+                    Text("Estimated from the token counts Claude reports, at Claude Opus 5.5 list prices ($4 in / $20 out per million tokens). Apple's on-device AI is free. Check console.anthropic.com for your actual bill.")
+                }
+
+                Section {
                     SecureField("Product Hunt developer token", text: $productHuntToken)
+                        .focused($keyboardOpen)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onChange(of: productHuntToken) { _, value in Keychain.set(value, for: .productHuntToken) }
@@ -87,6 +139,14 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .scrollDismissesKeyboard(.interactively)
+            .onAppear { usage = UsageTracker.summary() }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { keyboardOpen = false }
+                }
+            }
         }
     }
 }

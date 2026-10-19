@@ -270,3 +270,100 @@ struct GamesSourceTests {
         #expect(try SteamStore.parseFeatured(Data(json.utf8)).map(\.name) == ["Reshine", "Sky Farm"])
     }
 }
+
+struct KillerEngineTests {
+    private func wrap(_ json: String) throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": json]], "stop_reason": "end_turn"])
+    }
+
+    @Test func parsesCandidatesAndReviews() throws {
+        let c = try KillerEngine.parseCandidates(wrap(#"{"ideas":[{"title":"Shift Meals","pitch":"p","buyer":"nurses","pricing":"$5/mo","why_now":"w","one_week_test":"t","evidence_numbers":[1],"same_as":""}]}"#))
+        #expect(c.first?.title == "Shift Meals")
+        let r = try KillerEngine.parseReviews(wrap(#"{"reviews":[{"title":"Shift Meals","survives":true,"objection":"o","competitors":"none found","verdict":"v","pain":4,"willing_to_pay":9,"timing":3,"gap":4,"fit":0}]}"#))
+        #expect(r.first?.willingToPay == 5)
+        #expect(r.first?.fit == 0)
+    }
+
+    @Test func keepsOnlySurvivorsBestFirstMaxTwo() {
+        func cand(_ t: String) -> KillerEngine.Candidate {
+            .init(title: t, pitch: "", buyer: "", pricing: "", whyNow: "", oneWeekTest: "", evidenceNumbers: [], sameAs: "")
+        }
+        func rev(_ t: String, _ s: Bool, _ score: Int) -> KillerEngine.Review {
+            .init(title: t, survives: s, objection: "", competitors: "", verdict: "", pain: score, willingToPay: score,
+                  timing: score, gap: score, fit: score)
+        }
+        let out = KillerEngine.survivors(candidates: [cand("A"), cand("B"), cand("C"), cand("D")],
+                                         reviews: [rev("a", true, 3), rev("B", false, 5), rev("C", true, 4), rev("D", true, 2)])
+        #expect(out.map(\.candidate.title) == ["C", "A"])
+    }
+
+    @Test func promptIncludesProfileAndLeaderboard() {
+        let p = KillerEngine.generatePrompt(.init(themes: [], items: [], aboutMe: "iOS dev", leaderboard: ["Shift Meals: p"]))
+        #expect(p.contains("About me: iOS dev"))
+        #expect(p.contains("- Shift Meals: p"))
+    }
+
+    @Test func leaderboardRewardsReturningIdeas() {
+        #expect(KillerIdea.leaderboardScore(killer: 3.0, timesSeen: 1) == 3.0)
+        #expect(KillerIdea.leaderboardScore(killer: 3.0, timesSeen: 3) == 3.3)
+        #expect(KillerIdea.leaderboardScore(killer: 3.0, timesSeen: 20) == 3.6)
+        #expect(KillerIdea.key(for: "Shift Meals!") == KillerIdea.key(for: "shift meals"))
+    }
+
+    @Test func parsesPainPointComment() throws {
+        let json = #"{"hits":[{"objectID":"9","title":null,"url":null,"points":null,"created_at_i":1760000000,"comment_text":"I wish there was a tool for rosters","story_title":"Ask HN: Nurses"}]}"#
+        let items = try HackerNewsFetcher.parse(Data(json.utf8), as: .painPoints)
+        #expect(items.first?.title == "I wish there was a tool for rosters")
+        #expect(items.first?.detail == "In thread: Ask HN: Nurses")
+    }
+}
+
+struct UsageTrackerTests {
+    @Test func parsesUsageAndCost() throws {
+        let data = try JSONSerialization.data(withJSONObject: ["usage": ["input_tokens": 1_000_000, "output_tokens": 100_000,
+                                                                         "cache_read_input_tokens": 0]])
+        let usage = try #require(UsageTracker.parseUsage(data))
+        #expect(usage.calls == 1)
+        #expect(abs(usage.cost - 6.0) < 0.0001)   // $4 in + $2 out
+    }
+
+    @Test func summarisesTodayMonthAndFeatures() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-19T12:00:00Z")!
+        let ledger: UsageTracker.Ledger = [
+            UsageTracker.dayKey(now): ["Trends": .init(input: 1_000_000, calls: 1)],
+            "2026-10-01": ["Killer ideas": .init(output: 100_000, calls: 1)],
+            "2026-09-30": ["Trends": .init(input: 1_000_000, calls: 1)],
+        ]
+        let s = UsageTracker.summary(ledger, now: now)
+        #expect(abs(s.today.cost - 4) < 0.0001)
+        #expect(abs(s.thisMonth.cost - 6) < 0.0001)
+        #expect(abs(s.allTime.cost - 10) < 0.0001)
+        #expect(s.byFeatureThisMonth.map(\.feature) == ["Trends", "Killer ideas"])
+    }
+}
+
+struct EnglishOnlyTests {
+    @Test func appliesClaudeTranslations() throws {
+        let inner = #"{"themes":[],"translations":[{"number":2,"title":"Video generator","description":"Makes short videos"}]}"#
+        let data = try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": inner]], "stop_reason": "end_turn"])
+        let translations = try ClaudeSummarizer.parseTranslations(data)
+        let items = Translations.apply(translations, to: [item("a", title: "English tool"), item("b", title: "视频生成器")])
+        #expect(items.map(\.title) == ["English tool", "Video generator"])
+        #expect(items[1].detail == "Makes short videos")
+    }
+
+    @Test func languageFilterDropsClearlyForeignAndKeepsEnglishOrShortNames() {
+        func make(_ title: String, _ detail: String) -> FetchedItem {
+            FetchedItem(key: title, source: .huggingFace, title: title, detail: detail, url: URL(string: "https://x.dev")!,
+                        score: 0, postedAt: .now)
+        }
+        #expect(!LanguageFilter.isEnglishOrUnclear(make("视频生成", "这是一个可以根据文字描述自动生成短视频的人工智能工具")))
+        #expect(LanguageFilter.isEnglishOrUnclear(make("Invoice agent", "Automatically chases unpaid invoices for freelancers")))
+        #expect(LanguageFilter.isEnglishOrUnclear(make("CellZ", "")))
+    }
+
+    @Test func schemaRequiresTranslations() {
+        let required = ClaudeSummarizer.themeSchema["required"] as? [String]
+        #expect(required == ["themes", "translations"])
+    }
+}

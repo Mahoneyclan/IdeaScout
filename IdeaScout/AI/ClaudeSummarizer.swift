@@ -11,19 +11,31 @@ struct ClaudeSummarizer: Summarizer {
     static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
 
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft] {
+        try await themesWithTranslations(for: items).0
+    }
+
+    static let translationInstruction = "\nSome projects are not in English. For every project whose title or description "
+        + "is not in English, add an entry to translations with its number and an English title and description. "
+        + "Leave English projects out of translations."
+
+    func themesWithTranslations(for items: [FetchedItem]) async throws -> ([ThemeDraft], [Int: Translation]) {
         let prompt = "Projects:\n" + Prompts.itemList(items, detailLimit: 200)
-        let data = try await send(Self.requestBody(system: Prompts.themeInstructions, prompt: prompt, schema: Self.themeSchema))
-        return try Self.parseThemes(data)
+        let data = try await send(Self.requestBody(system: Prompts.themeInstructions + Self.translationInstruction,
+                                                   prompt: prompt, schema: Self.themeSchema),
+                                  feature: "Trends")
+        return (try Self.parseThemes(data), try Self.parseTranslations(data))
     }
 
     func extensions(for idea: IdeaBrief) async throws -> [String] {
         let data = try await send(Self.requestBody(system: Prompts.extensionInstructions,
-                                                   prompt: Prompts.ideaText(idea), schema: Self.extensionSchema))
+                                                   prompt: Prompts.ideaText(idea), schema: Self.extensionSchema),
+                                  feature: "Variant suggestions")
         struct Out: Decodable { let suggestions: [String] }
         return try JSONDecoder().decode(Out.self, from: try Self.extractJSON(data)).suggestions
     }
 
-    private func send(_ body: [String: Any]) async throws -> Data {
+    /// Sends a request and records its token cost under `feature` in the usage tracker.
+    func send(_ body: [String: Any], feature: String) async throws -> Data {
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 300
@@ -37,19 +49,20 @@ struct ClaudeSummarizer: Summarizer {
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw SummarizerError.badResponse("HTTP \(http.statusCode) \(String(decoding: data.prefix(300), as: UTF8.self))")
         }
+        UsageTracker.record(response: data, feature: feature)
         return data
     }
 
     // MARK: - Request / response shapes (static so they can be unit tested)
 
-    static func requestBody(system: String, prompt: String, schema: [String: Any]) -> [String: Any] {
+    static func requestBody(system: String, prompt: String, schema: [String: Any], effort: String = "medium") -> [String: Any] {
         [
             "model": model,
             "max_tokens": 16000,
             "system": system,
             "fallbacks": "default",
             "output_config": [
-                "effort": "medium",
+                "effort": effort,
                 "format": ["type": "json_schema", "schema": schema],
             ],
             "messages": [["role": "user", "content": prompt]],
@@ -80,8 +93,19 @@ struct ClaudeSummarizer: Summarizer {
                     "additionalProperties": false,
                 ],
             ],
+            "translations": [
+                "type": "array",
+                "items": [
+                    "type": "object",
+                    "properties": [
+                        "number": ["type": "integer"], "title": ["type": "string"], "description": ["type": "string"],
+                    ],
+                    "required": ["number", "title", "description"],
+                    "additionalProperties": false,
+                ],
+            ],
         ],
-        "required": ["themes"],
+        "required": ["themes", "translations"],
         "additionalProperties": false,
     ]
 
@@ -106,6 +130,16 @@ struct ClaudeSummarizer: Summarizer {
             throw SummarizerError.badResponse("no text in reply")
         }
         return Data(text.utf8)
+    }
+
+    static func parseTranslations(_ data: Data) throws -> [Int: Translation] {
+        struct Out: Decodable {
+            struct T: Decodable { let number: Int; let title: String; let description: String }
+            let translations: [T]?
+        }
+        let out = try JSONDecoder().decode(Out.self, from: try extractJSON(data))
+        return Dictionary((out.translations ?? []).map { ($0.number, Translation(title: $0.title, detail: $0.description)) },
+                          uniquingKeysWith: { first, _ in first })
     }
 
     static func parseThemes(_ data: Data) throws -> [ThemeDraft] {

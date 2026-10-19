@@ -8,7 +8,7 @@ struct IdeaScoutApp: App {
 
     init() {
         do {
-            container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self)
+            container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self)
         } catch {
             fatalError("Could not open the IdeaScout database: \(error)")
         }

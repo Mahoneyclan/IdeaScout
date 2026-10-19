@@ -80,12 +80,24 @@ struct HackerNewsFetcher: ItemFetcher {
             let points: Int?
             let created_at_i: Int
             let story_text: String?
+            let comment_text: String?
+            let story_title: String?
         }
         let hits: [Hit]
     }
 
     static func parse(_ data: Data, as kind: SourceKind) throws -> [FetchedItem] {
         try JSONDecoder().decode(Response.self, from: data).hits.compactMap { hit in
+            // Comments have no title: use the start of the comment, with the thread it was posted in as detail.
+            if hit.title == nil, let comment = hit.comment_text {
+                let text = TextCleaner.clean(comment, max: 160)
+                guard !text.isEmpty else { return nil }
+                return FetchedItem(key: "hn-\(hit.objectID)", source: kind, title: text,
+                                   detail: hit.story_title.map { "In thread: \($0)" } ?? "",
+                                   url: URL(string: "https://news.ycombinator.com/item?id=\(hit.objectID)")!,
+                                   score: hit.points ?? 0,
+                                   postedAt: Date(timeIntervalSince1970: TimeInterval(hit.created_at_i)))
+            }
             guard let rawTitle = hit.title, !rawTitle.isEmpty else { return nil }
             let title = rawTitle.replacingOccurrences(of: "^Show HN:\\s*", with: "", options: .regularExpression)
             let url = hit.url.flatMap(URL.init(string:))
@@ -439,5 +451,31 @@ enum SteamStore {
         let detail = response.values.first?.data?.short_description
         return FetchedItem(key: "steam-\(entry.id)", source: .games, title: entry.name, detail: TextCleaner.clean(detail),
                            url: URL(string: "https://store.steampowered.com/app/\(entry.id)")!, score: 0, postedAt: .now)
+    }
+}
+
+// MARK: - Pain points (people asking for tools that don't exist yet)
+
+struct PainPointsFetcher: ItemFetcher {
+    let kind = SourceKind.painPoints
+
+    static let phrases = ["\"I wish there was\"", "\"is there a tool\"", "\"I would pay for\"", "\"I'd pay for\"",
+                          "\"looking for a tool\"", "\"why is there no\""]
+
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        var results: [FetchedItem] = []
+        var firstError: Error?
+        for phrase in Self.phrases {
+            do {
+                let data = try await HTTP.get(HackerNewsFetcher.searchURL(tags: "comment", query: phrase, since: since, hits: 10))
+                results += try HackerNewsFetcher.parse(data, as: .painPoints)
+            } catch { firstError = firstError ?? error }
+        }
+        do {
+            let data = try await HTTP.get(HackerNewsFetcher.searchURL(tags: "ask_hn", query: nil, since: since, hits: 15))
+            results += try HackerNewsFetcher.parse(data, as: .painPoints)
+        } catch { firstError = firstError ?? error }
+        if results.isEmpty, let firstError { throw firstError }
+        return results
     }
 }

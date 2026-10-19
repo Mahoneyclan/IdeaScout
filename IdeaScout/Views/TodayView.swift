@@ -11,7 +11,7 @@ struct TodayView: View {
         NavigationStack {
             Group {
                 if let today {
-                    DigestContentView(digest: today)
+                    DigestContentView(digest: today, showKillerIdeas: true)
                 } else if service.isRefreshing {
                     ProgressView("Scanning sources and finding themes…")
                 } else {
@@ -39,6 +39,8 @@ struct TodayView: View {
 /// The themes and items of one digest. Used by Today and History.
 struct DigestContentView: View {
     let digest: Digest
+    var showKillerIdeas = false
+    @Query private var killerIdeas: [KillerIdea]
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var service: DigestService
     @Query private var ideas: [Idea]
@@ -60,7 +62,19 @@ struct DigestContentView: View {
     var body: some View {
         let starred = Set(ideas.map(\.key))
         let themes = Theme.ranked(digest.themes, weights: weights).filter { !visibleItems($0).isEmpty }
+        let todaysKillers = killerIdeas.filter(\.isFromToday).sorted { $0.killerScore > $1.killerScore }
         List {
+            if showKillerIdeas && !gamesOnly && !todaysKillers.isEmpty {
+                Section {
+                    ForEach(todaysKillers, id: \.key) { idea in
+                        NavigationLink { KillerIdeaDetailView(idea: idea) } label: { KillerIdeaCard(idea: idea) }
+                    }
+                } header: {
+                    Label("Killer ideas today", systemImage: "flame")
+                } footer: {
+                    Text("Survived a devil's-advocate check. See all in Top Ideas.")
+                }
+            }
             ForEach(themes) { theme in
                 Section {
                     Text(theme.summary).font(.subheadline)

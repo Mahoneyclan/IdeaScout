@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 /// A theme as proposed by a summariser, before it is matched to stored items.
 struct ThemeDraft: Equatable, Sendable {
@@ -25,7 +26,33 @@ protocol Summarizer: Sendable {
     /// How many items this summariser can handle in one go.
     var maxItems: Int { get }
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft]
+    /// Themes plus English translations of non-English items, keyed by 1-based item number.
+    func themesWithTranslations(for items: [FetchedItem]) async throws -> ([ThemeDraft], [Int: Translation])
     func extensions(for idea: IdeaBrief) async throws -> [String]
+}
+
+struct Translation: Equatable, Sendable {
+    var title: String
+    var detail: String
+}
+
+extension Summarizer {
+    /// Summarisers that can't translate return no translations.
+    func themesWithTranslations(for items: [FetchedItem]) async throws -> ([ThemeDraft], [Int: Translation]) {
+        (try await themes(for: items), [:])
+    }
+}
+
+enum Translations {
+    /// Replaces non-English titles and descriptions with their translations.
+    static func apply(_ translations: [Int: Translation], to items: [FetchedItem]) -> [FetchedItem] {
+        var items = items
+        for (number, t) in translations where items.indices.contains(number - 1) && !t.title.isEmpty {
+            items[number - 1].title = t.title
+            if !t.detail.isEmpty { items[number - 1].detail = t.detail }
+        }
+        return items
+    }
 }
 
 enum SummarizerError: LocalizedError {
@@ -52,7 +79,9 @@ enum AIProvider: String, CaseIterable, Identifiable {
 enum Prompts {
     static let themeInstructions = """
     You are an analyst who spots new initiatives in open-source and AI-built ("vibe-coded") projects.
-    The numbered projects were launched or gained traction in the past week; "new" marks the last 24 hours.
+    The numbered projects were launched or gained traction in the past week; "new" marks the last 24 hours. \
+    Items tagged "Pain points" are people asking for tools that don't exist: use them as evidence of demand \
+    inside related themes rather than as themes of their own.
     First ignore projects that could never become a product people pay for (libraries with no product angle, \
     lists, coursework, personal sites, jokes). Then group the rest into 4 to 6 themes. A theme is a trend: \
     several projects attacking the same problem or using the same new capability. Aim for at least 3 projects \
@@ -72,6 +101,7 @@ enum Prompts {
     - a one-sentence reason for each of the three scores
     Be critical and use the full range of scores; most themes should land between 2 and 4.
     Put each project in at most one theme. Leave out projects that are noise or spam.
+    Write everything in English.
     """
 
     static let extensionInstructions = """
@@ -79,7 +109,7 @@ enum Prompts {
     Suggest 4 to 6 monetisable extensions or variants of it. Each suggestion is one or two sentences \
     and says: what the product is, who pays, how it makes money (e.g. subscription, usage-based, \
     one-off purchase, marketplace fee, B2B licence) and what makes it different. Only suggest ideas \
-    someone would realistically pay for. Be concrete and practical.
+    someone would realistically pay for. Be concrete and practical. Write in English.
     """
 
     /// A ready-to-paste prompt for Claude, ChatGPT, Lovable, Bolt etc. to turn a saved idea into a product brief.
@@ -222,5 +252,16 @@ struct KeywordSummarizer: Summarizer {
 
     func extensions(for idea: IdeaBrief) async throws -> [String] {
         throw SummarizerError.unavailable
+    }
+}
+
+/// Used when no AI can translate: drops items that are clearly not in English.
+/// Short or ambiguous text (e.g. a product name) is kept.
+enum LanguageFilter {
+    static func isEnglishOrUnclear(_ item: FetchedItem) -> Bool {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString("\(item.title) \(item.detail)")
+        guard let (language, confidence) = recognizer.languageHypotheses(withMaximum: 1).first else { return true }
+        return language == .english || confidence < 0.8
     }
 }

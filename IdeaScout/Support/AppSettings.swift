@@ -11,6 +11,7 @@ enum AppSettings {
         static let weightMomentum = "weight.momentum"
         static let weightViability = "weight.viability"
         static let weightGap = "weight.gap"
+        static let aboutMe = "aboutMe"
         static func sourceEnabled(_ kind: SourceKind) -> String { "source.\(kind.rawValue)" }
     }
 
@@ -18,7 +19,7 @@ enum AppSettings {
 
     static var topics: [String] {
         let raw = UserDefaults.standard.string(forKey: Keys.topics) ?? defaultTopics
-        return raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return raw.split(whereSeparator: { $0 == "," || $0.isNewline }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     static func isEnabled(_ kind: SourceKind) -> Bool {
@@ -27,6 +28,10 @@ enum AppSettings {
 
     static var provider: AIProvider {
         AIProvider(rawValue: UserDefaults.standard.string(forKey: Keys.aiProvider) ?? "") ?? .claude
+    }
+
+    static var aboutMe: String {
+        UserDefaults.standard.string(forKey: Keys.aboutMe)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     static var notifyHour: Int {

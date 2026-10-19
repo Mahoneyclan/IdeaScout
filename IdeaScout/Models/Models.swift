@@ -3,7 +3,7 @@ import SwiftData
 
 /// Where an item came from.
 enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case github, hackerNews, productHunt, vibeCode, huggingFace, devTo, games
+    case github, hackerNews, productHunt, vibeCode, huggingFace, devTo, games, painPoints
 
     var id: String { rawValue }
 
@@ -16,6 +16,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .huggingFace: "Hugging Face"
         case .devTo: "DEV #showdev"
         case .games: "Games"
+        case .painPoints: "Pain points"
         }
     }
 
@@ -28,6 +29,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .huggingFace: "face.smiling"
         case .devTo: "text.bubble"
         case .games: "gamecontroller"
+        case .painPoints: "exclamationmark.bubble"
         }
     }
 }
@@ -215,4 +217,63 @@ struct RankWeights: Equatable, Sendable {
 
     var source: SourceKind { SourceKind(rawValue: sourceRaw) ?? .github }
     var url: URL? { URL(string: urlString) }
+}
+
+/// A synthesised product idea that survived the devil's-advocate check.
+/// Kept across days: when the same idea comes back, it's updated and climbs the leaderboard.
+@Model final class KillerIdea {
+    @Attribute(.unique) var key: String
+    var title: String
+    var pitch: String
+    var buyer: String
+    var pricing: String
+    var whyNow: String
+    var oneWeekTest: String
+    var objection: String
+    var competitors: String
+    var verdict: String
+    var evidenceTitles: [String] = []
+    var evidenceURLs: [String] = []
+    // Scores 1–5 after the devil's-advocate review
+    var pain = 0
+    var willingToPay = 0
+    var timing = 0
+    var gap = 0
+    var fit = 0
+    var scoreHistory: [Double] = []
+    var firstSeen: Date
+    var lastSeen: Date
+    var timesSeen = 1
+
+    init(key: String, title: String) {
+        self.key = key
+        self.title = title
+        pitch = ""; buyer = ""; pricing = ""; whyNow = ""; oneWeekTest = ""
+        objection = ""; competitors = ""; verdict = ""
+        firstSeen = .now
+        lastSeen = .now
+    }
+
+    /// Average of the five review scores.
+    var killerScore: Double {
+        Double(pain + willingToPay + timing + gap + fit) / 5
+    }
+
+    /// Killer score plus a bonus for coming back on several days (up to +0.6).
+    var leaderboardScore: Double { Self.leaderboardScore(killer: killerScore, timesSeen: timesSeen) }
+
+    static func leaderboardScore(killer: Double, timesSeen: Int) -> Double {
+        killer + Double(min(max(timesSeen - 1, 0), 4)) * 0.15
+    }
+
+    var isFromToday: Bool { Calendar.current.isDateInToday(lastSeen) }
+
+    var evidence: [(title: String, url: URL?)] {
+        zip(evidenceTitles, evidenceURLs).map { ($0, URL(string: $1)) }
+    }
+
+    /// Normalised key so the same idea matches across days.
+    static func key(for title: String) -> String {
+        title.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
 }

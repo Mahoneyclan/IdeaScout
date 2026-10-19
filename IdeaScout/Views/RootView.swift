@@ -5,6 +5,7 @@ struct RootView: View {
     var body: some View {
         TabView {
             Tab("Today", systemImage: "sun.max") { TodayView() }
+            Tab("Top Ideas", systemImage: "trophy") { LeaderboardView() }
             Tab("History", systemImage: "calendar") { HistoryView() }
             Tab("Ideas", systemImage: "star") { IdeasView() }
             Tab("Settings", systemImage: "gearshape") { SettingsView() }
