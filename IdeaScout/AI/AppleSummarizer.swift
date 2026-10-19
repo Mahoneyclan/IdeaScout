@@ -6,7 +6,7 @@ import FoundationModels
 struct AppleSummarizer: Summarizer {
     let name = "Apple on-device"
 
-    let maxItems = 25
+    let maxItems = 20
 
     static var isAvailable: Bool {
         if case .available = SystemLanguageModel.default.availability { return true }
@@ -35,15 +35,27 @@ struct AppleSummarizer: Summarizer {
         var title: String
         @Guide(description: "Two sentences on what people are building and why it matters")
         var summary: String
-        @Guide(description: "2 or 3 one-sentence ways to extend these ideas or build a differentiated version")
+        @Guide(description: "2 or 3 monetisable variants: what it is, who pays, how it makes money, why it's different")
         var opportunities: [String]
         @Guide(description: "Numbers of the projects that belong to this theme")
         var itemNumbers: [Int]
+        @Guide(description: "Novelty: 1 = many products already do this, 5 = genuinely new", .range(1...5))
+        var novelty: Int
+        @Guide(description: "One sentence explaining the novelty score")
+        var noveltyReason: String
+        @Guide(description: "Viability: could a small team build it and get paying users? 1 = unrealistic, 5 = clearly", .range(1...5))
+        var viability: Int
+        @Guide(description: "One sentence explaining the viability score")
+        var viabilityReason: String
+        @Guide(description: "Opportunity gap: room for a differentiated version? 1 = crowded, 5 = obvious unmet need", .range(1...5))
+        var opportunityGap: Int
+        @Guide(description: "One sentence explaining the opportunity gap score")
+        var gapReason: String
     }
 
     @Generable
     struct GeneratedExtensions {
-        @Guide(description: "4 to 6 ways to extend or differentiate the project")
+        @Guide(description: "4 to 6 monetisable variants: what it is, who pays, how it makes money, why it's different")
         var suggestions: [String]
     }
 
@@ -52,7 +64,9 @@ struct AppleSummarizer: Summarizer {
         let prompt = "Projects:\n" + Prompts.itemList(Array(items.prefix(maxItems)), detailLimit: 80)
         let response = try await session.respond(to: prompt, generating: GeneratedThemes.self)
         return response.content.themes.map {
-            ThemeDraft(title: $0.title, summary: $0.summary, opportunities: $0.opportunities, itemNumbers: $0.itemNumbers)
+            ThemeDraft(title: $0.title, summary: $0.summary, opportunities: $0.opportunities, itemNumbers: $0.itemNumbers,
+                       novelty: $0.novelty, viability: $0.viability, gap: $0.opportunityGap,
+                       reasons: ScoreReasons(novelty: $0.noveltyReason, viability: $0.viabilityReason, gap: $0.gapReason))
         }
     }
 

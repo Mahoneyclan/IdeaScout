@@ -7,6 +7,10 @@ enum AppSettings {
         static let topics = "topics"
         static let aiProvider = "aiProvider"
         static let notifyHour = "notifyHour"
+        static let weightNovelty = "weight.novelty"
+        static let weightMomentum = "weight.momentum"
+        static let weightViability = "weight.viability"
+        static let weightGap = "weight.gap"
         static func sourceEnabled(_ kind: SourceKind) -> String { "source.\(kind.rawValue)" }
     }
 
@@ -22,12 +26,15 @@ enum AppSettings {
     }
 
     static var provider: AIProvider {
-        AIProvider(rawValue: UserDefaults.standard.string(forKey: Keys.aiProvider) ?? "") ?? .apple
+        AIProvider(rawValue: UserDefaults.standard.string(forKey: Keys.aiProvider) ?? "") ?? .claude
     }
 
     static var notifyHour: Int {
         UserDefaults.standard.object(forKey: Keys.notifyHour) as? Int ?? 7
     }
+
+    /// True while unit tests run, so the app doesn't fetch live data in the background of a test.
+    static let isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     /// Picks the chosen AI if it can run, otherwise the other one, otherwise keyword grouping.
     static func makeSummarizer() -> any Summarizer {

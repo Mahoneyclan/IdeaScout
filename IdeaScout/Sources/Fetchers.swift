@@ -56,12 +56,13 @@ struct HackerNewsFetcher: ItemFetcher {
     let kind = SourceKind.hackerNews
 
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
-        let data = try await HTTP.get(Self.searchURL(tags: "show_hn", query: nil, since: since, hits: 100))
-        return Array(try Self.parse(data, as: .hackerNews).sorted { $0.score > $1.score }.prefix(30))
+        let data = try await HTTP.get(Self.searchURL(tags: "show_hn", query: nil, since: since, hits: 60))
+        return try Self.parse(data, as: .hackerNews)
     }
 
+    /// Uses Algolia's popularity-ranked search, so a week-long window returns the most upvoted posts.
     static func searchURL(tags: String, query: String?, since: Date, hits: Int) -> URL {
-        var c = URLComponents(string: "https://hn.algolia.com/api/v1/search_by_date")!
+        var c = URLComponents(string: "https://hn.algolia.com/api/v1/search")!
         c.queryItems = [
             URLQueryItem(name: "tags", value: tags),
             URLQueryItem(name: "numericFilters", value: "created_at_i>\(Int(since.timeIntervalSince1970))"),
@@ -100,15 +101,14 @@ struct HackerNewsFetcher: ItemFetcher {
 
 struct GitHubFetcher: ItemFetcher {
     let kind = SourceKind.github
+    static let maxTopics = 7
 
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
-        // New repos rarely gain stars within a day, so look back a week; the
-        // digest service skips repos already shown in recent digests.
-        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: since) ?? since
+        // Unauthenticated GitHub search allows 10 searches a minute; the vibe-code source uses 2.
         var results: [FetchedItem] = []
-        for topic in topics.prefix(4) {
+        for topic in topics.prefix(Self.maxTopics) {
             let term = topic.contains(" ") ? "\"\(topic)\"" : topic
-            results += try await Self.search("\(term) created:>\(Self.day(weekAgo)) stars:>=5", as: .github)
+            results += try await Self.search("\(term) created:>\(Self.day(since)) stars:>=10", as: .github)
         }
         return results
     }
@@ -224,13 +224,100 @@ struct VibeCodeFetcher: ItemFetcher {
                 results += try HackerNewsFetcher.parse(data, as: .vibeCode)
             } catch { firstError = firstError ?? error }
         }
-        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: since) ?? since
         for query in Self.githubQueries {
             do {
-                results += try await GitHubFetcher.search("\(query) created:>\(GitHubFetcher.day(weekAgo))", as: .vibeCode, perPage: 8)
+                results += try await GitHubFetcher.search("\(query) created:>\(GitHubFetcher.day(since))", as: .vibeCode, perPage: 10)
             } catch { firstError = firstError ?? error }
         }
         if results.isEmpty, let firstError { throw firstError }
         return results
+    }
+}
+
+// MARK: - Hugging Face trending Spaces (AI demo apps, no key needed)
+
+struct HuggingFaceFetcher: ItemFetcher {
+    let kind = SourceKind.huggingFace
+
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        var c = URLComponents(string: "https://huggingface.co/api/spaces")!
+        c.queryItems = [
+            URLQueryItem(name: "sort", value: "trendingScore"),
+            URLQueryItem(name: "direction", value: "-1"),
+            URLQueryItem(name: "limit", value: "40"),
+            URLQueryItem(name: "full", value: "true"),
+        ]
+        return try Self.parse(try await HTTP.get(c.url!))
+    }
+
+    private struct Space: Decodable {
+        struct Card: Decodable { let title: String?; let short_description: String? }
+        let id: String
+        let likes: Int?
+        let trendingScore: Int?
+        let createdAt: Date?
+        let cardData: Card?
+    }
+
+    static func parse(_ data: Data) throws -> [FetchedItem] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return f.date(from: text) ?? ISO8601DateFormatter().date(from: text) ?? .distantPast
+        }
+        return try decoder.decode([Space].self, from: data).compactMap { space in
+            guard let url = URL(string: "https://huggingface.co/spaces/\(space.id)") else { return nil }
+            let title = space.cardData?.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.id
+            return FetchedItem(key: "hf-\(space.id)", source: .huggingFace, title: title,
+                               detail: TextCleaner.clean(space.cardData?.short_description), url: url,
+                               score: space.trendingScore ?? space.likes ?? 0, postedAt: space.createdAt ?? .distantPast)
+        }
+    }
+}
+
+// MARK: - DEV.to #showdev (developers showing what they built, no key needed)
+
+struct DevToFetcher: ItemFetcher {
+    let kind = SourceKind.devTo
+
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        let days = max(1, Int(Date.now.timeIntervalSince(since) / 86_400))
+        let url = URL(string: "https://dev.to/api/articles?tag=showdev&top=\(days)&per_page=40")!
+        return try Self.parse(try await HTTP.get(url))
+    }
+
+    private struct Article: Decodable {
+        let id: Int
+        let title: String
+        let description: String?
+        let url: String
+        let positive_reactions_count: Int
+        let published_at: Date
+    }
+
+    static func parse(_ data: Data) throws -> [FetchedItem] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([Article].self, from: data).compactMap { a in
+            guard let url = URL(string: a.url) else { return nil }
+            return FetchedItem(key: "dev-\(a.id)", source: .devTo, title: a.title, detail: TextCleaner.clean(a.description),
+                               url: url, score: a.positive_reactions_count, postedAt: a.published_at)
+        }
+    }
+}
+
+// MARK: - Product-shaped filter
+
+/// Drops items that can't become a product people pay for (lists, dotfiles, coursework, personal sites).
+enum ProductFilter {
+    static let noise = ["awesome-", "awesome list", "dotfiles", "homework", "tutorial", "course notes", "cheatsheet",
+                        "cheat sheet", "interview questions", "leetcode", ".github.io", "my portfolio", "hall of fame",
+                        "weekly digest", "uncensored", "nsfw"]
+
+    static func isProductShaped(_ item: FetchedItem) -> Bool {
+        let text = "\(item.title) \(item.detail)".lowercased()
+        return !noise.contains { text.contains($0) }
     }
 }

@@ -2,8 +2,12 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage(AppSettings.Keys.topics) private var topics = AppSettings.defaultTopics
-    @AppStorage(AppSettings.Keys.aiProvider) private var provider = AIProvider.apple.rawValue
+    @AppStorage(AppSettings.Keys.aiProvider) private var provider = AIProvider.claude.rawValue
     @AppStorage(AppSettings.Keys.notifyHour) private var notifyHour = 7
+    @AppStorage(AppSettings.Keys.weightNovelty) private var wNovelty = 1.0
+    @AppStorage(AppSettings.Keys.weightMomentum) private var wMomentum = 1.0
+    @AppStorage(AppSettings.Keys.weightViability) private var wViability = 1.0
+    @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
 
     @State private var claudeKey = Keychain.get(.claudeAPIKey) ?? ""
     @State private var productHuntToken = Keychain.get(.productHuntToken) ?? ""
@@ -17,13 +21,24 @@ struct SettingsView: View {
                 } header: {
                     Text("Topics")
                 } footer: {
-                    Text("Comma-separated. Used to search GitHub (first 4 topics) and to group items when no AI is available.")
+                    Text("Comma-separated. Used to search GitHub (first \(GitHubFetcher.maxTopics) topics) and to group items when no AI is available.")
                 }
 
                 Section("Sources") {
                     ForEach(SourceKind.allCases) { kind in
                         SourceToggle(kind: kind)
                     }
+                }
+
+                Section {
+                    WeightSlider(name: "Novelty", symbol: "sparkles", value: $wNovelty)
+                    WeightSlider(name: "Momentum", symbol: "chart.line.uptrend.xyaxis", value: $wMomentum)
+                    WeightSlider(name: "Viability", symbol: "checkmark.seal", value: $wViability)
+                    WeightSlider(name: "Opportunity gap", symbol: "arrow.triangle.branch", value: $wGap)
+                } header: {
+                    Text("Ranking weights")
+                } footer: {
+                    Text("How much each score counts towards a theme's overall rank. Set one to 0 to ignore it. Momentum is measured from stars, points and votes; the others are judged by the AI.")
                 }
 
                 Section {
@@ -39,7 +54,7 @@ struct SettingsView: View {
                 } header: {
                     Text("AI")
                 } footer: {
-                    Text("If your choice isn't available, IdeaScout uses the other one, then simple keyword grouping. Keys are stored in the iPhone Keychain.")
+                    Text("Claude is recommended: it reads up to 150 projects and finds stronger trends (about 10 cents a day). Apple's on-device model is free but reads only about 20. If your choice isn't available, IdeaScout uses the other, then keyword grouping. Keys are stored in the iPhone Keychain.")
                 }
 
                 Section {
@@ -72,6 +87,24 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+        }
+    }
+}
+
+private struct WeightSlider: View {
+    let name: String
+    let symbol: String
+    @Binding var value: Double
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            LabeledContent {
+                Text(value == 0 ? "Off" : "×\(value.formatted(.number.precision(.fractionLength(1))))").monospacedDigit()
+            } label: {
+                Label(name, systemImage: symbol)
+            }
+            Slider(value: $value, in: 0...2, step: 0.5)
+                .accessibilityLabel("\(name) weight")
         }
     }
 }

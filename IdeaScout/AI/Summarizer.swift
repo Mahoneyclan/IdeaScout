@@ -6,6 +6,11 @@ struct ThemeDraft: Equatable, Sendable {
     var summary: String
     var opportunities: [String]
     var itemNumbers: [Int]   // 1-based positions in the prompt's item list
+    // AI ranking scores, 1–5 (0 = not scored). Momentum is calculated from real numbers instead.
+    var novelty = 0
+    var viability = 0
+    var gap = 0
+    var reasons = ScoreReasons()
 }
 
 /// What the summariser needs to suggest extensions for a saved idea.
@@ -47,25 +52,75 @@ enum AIProvider: String, CaseIterable, Identifiable {
 enum Prompts {
     static let themeInstructions = """
     You are an analyst who spots new initiatives in open-source and AI-built ("vibe-coded") projects.
-    Group the numbered projects into 3 to 6 themes. For each theme give:
+    The numbered projects were launched or gained traction in the past week; "new" marks the last 24 hours.
+    First ignore projects that could never become a product people pay for (libraries with no product angle, \
+    lists, coursework, personal sites, jokes). Then group the rest into 4 to 6 themes. A theme is a trend: \
+    several projects attacking the same problem or using the same new capability. Aim for at least 3 projects \
+    per theme; don't create a theme for a single project. Avoid generic names like "AI-powered tools".
+    For each theme give:
     - title: a short, specific name (max 6 words)
     - summary: two sentences on what people are building and why it matters
-    - opportunities: 2 or 3 concrete suggestions, each one sentence, for extending these ideas or \
-    building a differentiated version (a different audience, business model, platform, or missing feature)
+    - opportunities: 2 or 3 monetisable extensions or variants of these ideas. Each is one or two sentences \
+    saying what the product is, who pays for it, how it makes money (e.g. subscription, usage-based, \
+    one-off purchase, marketplace fee, B2B licence) and why it is different from what exists
     - item numbers: the numbers of the projects in the theme
+    - novelty (1-5): 1 = many existing products already do this, 5 = a genuinely new approach
+    - viability (1-5): could a small team build it and get paying users? 1 = unrealistic, 5 = clearly buildable and sellable
+    - opportunity gap (1-5): room for a differentiated version? 1 = crowded or solved, 5 = obvious unmet need
+    - a one-sentence reason for each of the three scores
+    Be critical and use the full range of scores; most themes should land between 2 and 4.
     Put each project in at most one theme. Leave out projects that are noise or spam.
     """
 
     static let extensionInstructions = """
     You help a product owner turn a project they spotted into their own idea.
-    Suggest 4 to 6 ways to extend it or make a differentiated version. Each suggestion is one or two \
-    sentences and names who it is for and what makes it different. Be concrete and practical.
+    Suggest 4 to 6 monetisable extensions or variants of it. Each suggestion is one or two sentences \
+    and says: what the product is, who pays, how it makes money (e.g. subscription, usage-based, \
+    one-off purchase, marketplace fee, B2B licence) and what makes it different. Only suggest ideas \
+    someone would realistically pay for. Be concrete and practical.
     """
 
-    static func itemList(_ items: [FetchedItem], detailLimit: Int) -> String {
+    /// A ready-to-paste prompt for Claude, ChatGPT, Lovable, Bolt etc. to turn a saved idea into a product brief.
+    static func fleshOut(_ idea: Idea) -> String {
+        var lines = ["Act as an experienced product strategist. Flesh out this product idea.", ""]
+        lines.append("Idea: \(idea.title)")
+        if !idea.detail.isEmpty { lines.append("Description: \(idea.detail)") }
+        var origin = "Inspired by: \(idea.title) (\(idea.source.label))"
+        if !idea.urlString.isEmpty { origin += " \(idea.urlString)" }
+        lines.append(origin)
+        if !idea.themeTitle.isEmpty { lines.append("Trend it belongs to: \(idea.themeTitle)") }
+        if !idea.note.isEmpty { lines.append("My angle / notes: \(idea.note)") }
+        let s = idea.scores
+        let scored = [("Novelty", s.novelty), ("Momentum", s.momentum), ("Viability", s.viability), ("Opportunity gap", s.gap)]
+            .filter { $0.1 > 0 }.map { "\($0.0) \($0.1)/5" }
+        if !scored.isEmpty { lines.append("Scores: " + scored.joined(separator: ", ")) }
+        if !idea.extensions.isEmpty {
+            lines.append("Possible extensions and differentiators:")
+            lines += idea.extensions.map { "- \($0)" }
+        }
+        lines += [
+            "",
+            "Please produce:",
+            "1. The problem, in one paragraph",
+            "2. Target users, and the single best first audience",
+            "3. Core features for a minimum viable product (MVP), and what to leave out",
+            "4. How it differs from what already exists, including the original project",
+            "5. Business model and pricing",
+            "6. Main risks and how to test them cheaply",
+            "7. The next three concrete steps",
+            "",
+            "Be specific and practical. Ask me up to three questions first if anything important is unclear.",
+        ]
+        return lines.joined(separator: "\n")
+    }
+
+    static func itemList(_ items: [FetchedItem], detailLimit: Int, now: Date = .now) -> String {
         items.enumerated().map { index, item in
             let detail = item.detail.isEmpty ? "" : " — " + String(item.detail.prefix(detailLimit))
-            return "\(index + 1). [\(item.source.label)] \(item.title)\(detail)"
+            var tags = [item.source.label]
+            if item.score > 0 { tags.append("score \(item.score)") }
+            if item.isNew(now: now) { tags.append("new") }
+            return "\(index + 1). [\(tags.joined(separator: ", "))] \(item.title)\(detail)"
         }.joined(separator: "\n")
     }
 
@@ -85,6 +140,9 @@ enum ThemeBuilder {
         var summary: String
         var opportunities: [String]
         var items: [FetchedItem]
+        var scores = ThemeScores()
+        var reasons = ScoreReasons()
+        var isCatchAll = false
     }
 
     static func assemble(_ drafts: [ThemeDraft], items: [FetchedItem]) -> [Built] {
@@ -93,15 +151,49 @@ enum ThemeBuilder {
         for draft in drafts {
             let indices = draft.itemNumbers.map { $0 - 1 }.filter { items.indices.contains($0) && used.insert($0).inserted }
             guard !indices.isEmpty else { continue }
-            built.append(Built(title: draft.title, summary: draft.summary,
-                               opportunities: draft.opportunities, items: indices.map { items[$0] }))
+            let members = indices.map { items[$0] }
+            let momentum = Ranking.momentum(of: members, among: items)
+            var reasons = draft.reasons
+            reasons.momentum = momentum.reason
+            built.append(Built(title: draft.title, summary: draft.summary, opportunities: draft.opportunities,
+                               items: members,
+                               scores: ThemeScores(novelty: Ranking.clamp(draft.novelty), momentum: momentum.score,
+                                                   viability: Ranking.clamp(draft.viability), gap: Ranking.clamp(draft.gap)),
+                               reasons: reasons))
         }
         let leftovers = items.indices.filter { !used.contains($0) }.map { items[$0] }
         if !leftovers.isEmpty {
-            built.append(Built(title: "Other new projects", summary: "Projects that didn't fit a theme today.",
-                               opportunities: [], items: leftovers))
+            built.append(Built(title: "Other projects", summary: "Projects that didn't fit a trend this week.",
+                               opportunities: [], items: leftovers, isCatchAll: true))
         }
         return built
+    }
+}
+
+/// Momentum is measured from real traction numbers, not judged by the AI,
+/// so the ranking isn't driven purely by what sounds exciting.
+enum Ranking {
+    static func clamp(_ score: Int) -> Int { score <= 0 ? 0 : min(score, 5) }
+
+    /// 1–5 from how highly the theme's projects rank within their own source
+    /// (stars, points and votes aren't comparable across sources) and how many projects share the theme.
+    static func momentum(of members: [FetchedItem], among all: [FetchedItem], now: Date = .now) -> (score: Int, reason: String) {
+        guard !members.isEmpty else { return (0, "") }
+        let rank = members.map { percentile(of: $0, among: all) }.reduce(0, +) / Double(members.count)
+        let size = min(1, Double(members.count) / 8)
+        let fresh = Double(members.filter { $0.postedAt > now.addingTimeInterval(-48 * 60 * 60) }.count) / Double(members.count)
+        let score = 1 + Int((4 * (0.5 * rank + 0.3 * size + 0.2 * fresh)).rounded())
+        let top = max(1, Int(((1 - rank) * 100).rounded()))
+        let projects = members.count == 1 ? "1 project" : "\(members.count) projects"
+        let recent = Int((fresh * 100).rounded())
+        return (score, "\(projects) this week, on average in the top \(top)% of their source; \(recent)% appeared in the last 2 days.")
+    }
+
+    /// 0 (lowest score in its source) to 1 (highest).
+    static func percentile(of item: FetchedItem, among all: [FetchedItem]) -> Double {
+        let peers = all.filter { $0.source == item.source }
+        guard peers.count > 1 else { return 0.5 }
+        return Double(peers.filter { $0.score < item.score }.count) / Double(peers.count - 1)
     }
 }
 

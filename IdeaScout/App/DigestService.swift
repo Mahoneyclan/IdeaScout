@@ -7,31 +7,50 @@ import BackgroundTasks
 final class DigestService: ObservableObject {
     static let shared = DigestService()
     static let backgroundTaskID = "com.mahoney.IdeaScout.refresh"
+    static let windowDays = 7.0
 
     @Published private(set) var isRefreshing = false
     @Published var lastError: String?
 
     var container: ModelContainer?
+    private var refreshTask: Task<Void, Never>?
 
     // MARK: - Refresh
 
     /// Builds today's digest. Without `force`, does nothing if one already exists.
+    /// The work runs in its own task, so it isn't cancelled if the screen that
+    /// started it goes away (previously that cut the AI summary off half-way).
     func refresh(force: Bool, notify: Bool = false) async {
-        guard let context = container?.mainContext, !isRefreshing else { return }
+        if let running = refreshTask {
+            await running.value
+            return
+        }
+        let task = Task { await performRefresh(force: force, notify: notify) }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func performRefresh(force: Bool, notify: Bool) async {
+        guard let context = container?.mainContext else { return }
         let today = Calendar.current.startOfDay(for: .now)
         let existing = (try? context.fetch(FetchDescriptor<Digest>(predicate: #Predicate { $0.day == today }))) ?? []
-        if !force && !existing.isEmpty { return }
+        // Rebuild automatically if today's digest fell back to keywords but an AI is now available.
+        let fellBack = existing.contains { $0.summarizer == KeywordSummarizer(topics: []).name }
+            && !(AppSettings.makeSummarizer() is KeywordSummarizer)
+        if !force && !existing.isEmpty && !fellBack { return }
 
         isRefreshing = true
         lastError = nil
         defer { isRefreshing = false }
 
-        let since = Date.now.addingTimeInterval(-24 * 60 * 60)
+        // Trends are built from the past week so a theme reflects several projects over several days;
+        // items posted in the last 24 hours are flagged as new.
+        let since = Date.now.addingTimeInterval(-Self.windowDays * 24 * 60 * 60)
         let topics = AppSettings.topics
         let (fetched, warnings) = await fetchAll(since: since, topics: topics)
 
-        let recentKeys = recentlyShownKeys(context: context, excludingDay: today)
-        let items = Self.select(fetched.filter { !recentKeys.contains($0.key) }, perSource: 15)
+        let items = Self.select(fetched.filter(ProductFilter.isProductShaped), perSource: 25)
         guard !items.isEmpty else {
             lastError = warnings.isEmpty ? "No new projects found. Try again later." : warnings.joined(separator: "\n")
             return
@@ -43,6 +62,8 @@ final class DigestService: ObservableObject {
         let batch = Array(items.prefix(summarizer.maxItems))
         do {
             drafts = try await summarizer.themes(for: batch)
+        } catch is CancellationError {
+            return  // don't save a half-finished digest
         } catch {
             allWarnings.append("\(summarizer.name) summary failed (\(error.localizedDescription)); grouped by keyword instead.")
             summarizer = KeywordSummarizer(topics: topics)
@@ -54,6 +75,8 @@ final class DigestService: ObservableObject {
         context.insert(digest)
         for (order, built) in ThemeBuilder.assemble(drafts, items: batch).enumerated() {
             let theme = Theme(title: built.title, summary: built.summary, order: order, opportunities: built.opportunities)
+            theme.apply(built.scores, built.reasons)
+            theme.isCatchAll = built.isCatchAll
             context.insert(theme)
             theme.digest = digest
             for fetchedItem in built.items {
@@ -75,6 +98,8 @@ final class DigestService: ObservableObject {
         if AppSettings.isEnabled(.vibeCode) { fetchers.append(VibeCodeFetcher()) }
         if AppSettings.isEnabled(.hackerNews) { fetchers.append(HackerNewsFetcher()) }
         if AppSettings.isEnabled(.github) { fetchers.append(GitHubFetcher()) }
+        if AppSettings.isEnabled(.huggingFace) { fetchers.append(HuggingFaceFetcher()) }
+        if AppSettings.isEnabled(.devTo) { fetchers.append(DevToFetcher()) }
         if AppSettings.isEnabled(.productHunt) { fetchers.append(ProductHuntFetcher(token: Keychain.get(.productHuntToken))) }
 
         let results = await withTaskGroup(of: (Int, Result<[FetchedItem], Error>).self) { group in
@@ -116,13 +141,6 @@ final class DigestService: ObservableObject {
             for top in tops where i < top.count { result.append(top[top.startIndex + i]) }
         }
         return result
-    }
-
-    private func recentlyShownKeys(context: ModelContext, excludingDay today: Date) -> Set<String> {
-        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: today) ?? today
-        let descriptor = FetchDescriptor<Digest>(predicate: #Predicate { $0.day >= weekAgo && $0.day != today })
-        let digests = (try? context.fetch(descriptor)) ?? []
-        return Set(digests.flatMap { $0.themes.flatMap { $0.items.map(\.key) } })
     }
 
     // MARK: - Saved ideas

@@ -26,11 +26,12 @@ struct TodayView: View {
                 }
             }
             .navigationTitle("Today")
+            .navigationSubtitle("Trends from the past 7 days")
             .toolbar {
                 if service.isRefreshing && today != nil { ProgressView() }
             }
             .refreshable { await service.refresh(force: true) }
-            .task { await service.refresh(force: false) }
+            .task { if !AppSettings.isRunningTests { await service.refresh(force: false) } }
         }
     }
 }
@@ -41,20 +42,35 @@ struct DigestContentView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var service: DigestService
     @Query private var ideas: [Idea]
+    @AppStorage(AppSettings.Keys.weightNovelty) private var wNovelty = 1.0
+    @AppStorage(AppSettings.Keys.weightMomentum) private var wMomentum = 1.0
+    @AppStorage(AppSettings.Keys.weightViability) private var wViability = 1.0
+    @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
+
+    private var weights: RankWeights {
+        RankWeights(novelty: wNovelty, momentum: wMomentum, viability: wViability, gap: wGap)
+    }
 
     var body: some View {
         let starred = Set(ideas.map(\.key))
         List {
-            ForEach(digest.sortedThemes) { theme in
+            ForEach(Theme.ranked(digest.themes, weights: weights)) { theme in
                 Section {
                     Text(theme.summary).font(.subheadline)
+                    if !theme.isCatchAll && theme.scores != ThemeScores() {
+                        DisclosureGroup {
+                            ScoreReasonsView(scores: theme.scores, reasons: theme.reasons)
+                        } label: {
+                            ScoreBadges(scores: theme.scores)
+                        }
+                    }
                     if !theme.opportunities.isEmpty {
                         DisclosureGroup {
                             ForEach(theme.opportunities, id: \.self) { idea in
                                 Label(idea, systemImage: "lightbulb").font(.subheadline)
                             }
                         } label: {
-                            Label("Build on this", systemImage: "arrow.up.right.circle").font(.subheadline.bold())
+                            Label("Money-making variants", systemImage: "dollarsign.circle").font(.subheadline.bold())
                         }
                     }
                     ForEach(theme.sortedItems) { item in
@@ -63,7 +79,15 @@ struct DigestContentView: View {
                         }
                     }
                 } header: {
-                    Text(theme.title)
+                    HStack {
+                        Text(theme.title)
+                        Spacer()
+                        if !theme.isCatchAll, let overall = theme.scores.overall(weights) {
+                            Text(overall, format: .number.precision(.fractionLength(1)))
+                                .monospacedDigit()
+                                .accessibilityLabel("Overall score \(overall.formatted(.number.precision(.fractionLength(1)))) out of 5")
+                        }
+                    }
                 }
             }
             Section {
@@ -72,6 +96,54 @@ struct DigestContentView: View {
             }
             .font(.footnote)
             .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// The four ranking scores, shown compactly. Each score's full name is in its accessibility label.
+struct ScoreBadges: View {
+    let scores: ThemeScores
+
+    static let metrics: [(name: String, symbol: String, value: KeyPath<ThemeScores, Int>)] = [
+        ("Novelty", "sparkles", \.novelty),
+        ("Momentum", "chart.line.uptrend.xyaxis", \.momentum),
+        ("Viability", "checkmark.seal", \.viability),
+        ("Opportunity gap", "arrow.triangle.branch", \.gap),
+    ]
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ForEach(Self.metrics, id: \.name) { metric in
+                let value = scores[keyPath: metric.value]
+                if value > 0 {
+                    Label("\(value)", systemImage: metric.symbol)
+                        .labelStyle(.titleAndIcon)
+                        .accessibilityLabel("\(metric.name) \(value) out of 5")
+                }
+            }
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+    }
+}
+
+struct ScoreReasonsView: View {
+    let scores: ThemeScores
+    let reasons: ScoreReasons
+
+    var body: some View {
+        let reasonText: [String: String] = ["Novelty": reasons.novelty, "Momentum": reasons.momentum,
+                                            "Viability": reasons.viability, "Opportunity gap": reasons.gap]
+        ForEach(ScoreBadges.metrics, id: \.name) { metric in
+            let value = scores[keyPath: metric.value]
+            if value > 0 {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("\(metric.name): \(value)/5", systemImage: metric.symbol).font(.subheadline.bold())
+                    if let text = reasonText[metric.name], !text.isEmpty {
+                        Text(text).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
     }
 }
@@ -105,6 +177,9 @@ struct ItemRow: View {
                 Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(3)
             }
             HStack(spacing: 8) {
+                if item.isNew {
+                    Text("NEW").font(.caption2.bold()).foregroundStyle(.green)
+                }
                 Label(item.source.label, systemImage: item.source.symbol)
                 if item.score > 0 { Label("\(item.score)", systemImage: "arrow.up") }
             }

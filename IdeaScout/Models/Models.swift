@@ -3,7 +3,7 @@ import SwiftData
 
 /// Where an item came from.
 enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case github, hackerNews, productHunt, vibeCode
+    case github, hackerNews, productHunt, vibeCode, huggingFace, devTo
 
     var id: String { rawValue }
 
@@ -13,6 +13,8 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .hackerNews: "Show HN"
         case .productHunt: "Product Hunt"
         case .vibeCode: "Vibe-coded"
+        case .huggingFace: "Hugging Face"
+        case .devTo: "DEV #showdev"
         }
     }
 
@@ -22,6 +24,8 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .hackerNews: "flame"
         case .productHunt: "cat"
         case .vibeCode: "wand.and.stars"
+        case .huggingFace: "face.smiling"
+        case .devTo: "text.bubble"
         }
     }
 }
@@ -35,6 +39,41 @@ struct FetchedItem: Equatable, Sendable {
     var url: URL
     var score: Int           // stars / points / votes
     var postedAt: Date
+
+    func isNew(now: Date = .now) -> Bool { postedAt > now.addingTimeInterval(-24 * 60 * 60) }
+}
+
+/// Ranking scores for a theme, each 1–5 (0 means not scored, e.g. keyword mode).
+struct ThemeScores: Equatable, Sendable {
+    var novelty = 0
+    var momentum = 0
+    var viability = 0
+    var gap = 0
+
+    /// Weighted average of the scores that exist and have a non-zero weight.
+    func overall(_ w: RankWeights) -> Double? {
+        let pairs = [(novelty, w.novelty), (momentum, w.momentum), (viability, w.viability), (gap, w.gap)]
+            .filter { $0.0 > 0 && $0.1 > 0 }
+        let total = pairs.reduce(0) { $0 + $1.1 }
+        guard total > 0 else { return nil }
+        return pairs.reduce(0) { $0 + Double($1.0) * $1.1 } / total
+    }
+}
+
+/// One-sentence explanations for each score.
+struct ScoreReasons: Equatable, Sendable {
+    var novelty = ""
+    var momentum = ""
+    var viability = ""
+    var gap = ""
+}
+
+/// How much each score counts towards the overall rank (set in Settings).
+struct RankWeights: Equatable, Sendable {
+    var novelty = 1.0
+    var momentum = 1.0
+    var viability = 1.0
+    var gap = 1.0
 }
 
 /// One day's digest.
@@ -63,6 +102,16 @@ struct FetchedItem: Equatable, Sendable {
     var order: Int
     /// Ways to extend the theme's ideas or build a differentiated version.
     var opportunities: [String] = []
+    var novelty = 0
+    var momentum = 0
+    var viability = 0
+    var opportunityGap = 0
+    var noveltyReason = ""
+    var momentumReason = ""
+    var viabilityReason = ""
+    var gapReason = ""
+    /// The "Other new projects" bucket, always listed last.
+    var isCatchAll = false
     var digest: Digest?
     @Relationship(deleteRule: .cascade, inverse: \Item.theme) var items: [Item] = []
 
@@ -74,6 +123,28 @@ struct FetchedItem: Equatable, Sendable {
     }
 
     var sortedItems: [Item] { items.sorted { $0.score > $1.score } }
+
+    var scores: ThemeScores {
+        ThemeScores(novelty: novelty, momentum: momentum, viability: viability, gap: opportunityGap)
+    }
+
+    var reasons: ScoreReasons {
+        ScoreReasons(novelty: noveltyReason, momentum: momentumReason, viability: viabilityReason, gap: gapReason)
+    }
+
+    func apply(_ s: ThemeScores, _ r: ScoreReasons) {
+        novelty = s.novelty; momentum = s.momentum; viability = s.viability; opportunityGap = s.gap
+        noveltyReason = r.novelty; momentumReason = r.momentum; viabilityReason = r.viability; gapReason = r.gap
+    }
+
+    /// Ranked order: best overall score first, catch-all last.
+    static func ranked(_ themes: [Theme], weights: RankWeights) -> [Theme] {
+        themes.sorted { a, b in
+            if a.isCatchAll != b.isCatchAll { return b.isCatchAll }
+            let sa = a.scores.overall(weights) ?? 0, sb = b.scores.overall(weights) ?? 0
+            return sa != sb ? sa > sb : a.order < b.order
+        }
+    }
 }
 
 /// A stored project/launch inside a theme.
@@ -99,6 +170,7 @@ struct FetchedItem: Equatable, Sendable {
 
     var source: SourceKind { SourceKind(rawValue: sourceRaw) ?? .github }
     var url: URL? { URL(string: urlString) }
+    var isNew: Bool { postedAt > Date.now.addingTimeInterval(-24 * 60 * 60) }
 }
 
 /// A starred item, kept independently of digests so it survives refreshes.
@@ -112,6 +184,12 @@ struct FetchedItem: Equatable, Sendable {
     var starredAt: Date
     /// AI-suggested extensions and differentiators.
     var extensions: [String] = []
+    /// Scores of the theme the idea was saved from.
+    var themeTitle = ""
+    var novelty = 0
+    var momentum = 0
+    var viability = 0
+    var opportunityGap = 0
 
     init(from item: Item) {
         key = item.key
@@ -120,6 +198,17 @@ struct FetchedItem: Equatable, Sendable {
         urlString = item.urlString
         sourceRaw = item.sourceRaw
         starredAt = .now
+        if let theme = item.theme, !theme.isCatchAll {
+            themeTitle = theme.title
+            novelty = theme.novelty
+            momentum = theme.momentum
+            viability = theme.viability
+            opportunityGap = theme.opportunityGap
+        }
+    }
+
+    var scores: ThemeScores {
+        ThemeScores(novelty: novelty, momentum: momentum, viability: viability, gap: opportunityGap)
     }
 
     var source: SourceKind { SourceKind(rawValue: sourceRaw) ?? .github }

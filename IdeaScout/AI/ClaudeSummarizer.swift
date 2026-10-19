@@ -4,7 +4,7 @@ import Foundation
 /// The API key comes from the Keychain and is never stored in source.
 struct ClaudeSummarizer: Summarizer {
     let name = "Claude"
-    let maxItems = 60
+    let maxItems = 150
     let apiKey: String
 
     static let model = "claude-opus-5-5"
@@ -68,8 +68,15 @@ struct ClaudeSummarizer: Summarizer {
                         "summary": ["type": "string"],
                         "opportunities": ["type": "array", "items": ["type": "string"]],
                         "item_numbers": ["type": "array", "items": ["type": "integer"]],
+                        "novelty": ["type": "integer"],
+                        "novelty_reason": ["type": "string"],
+                        "viability": ["type": "integer"],
+                        "viability_reason": ["type": "string"],
+                        "opportunity_gap": ["type": "integer"],
+                        "opportunity_gap_reason": ["type": "string"],
                     ],
-                    "required": ["title", "summary", "opportunities", "item_numbers"],
+                    "required": ["title", "summary", "opportunities", "item_numbers", "novelty", "novelty_reason",
+                                 "viability", "viability_reason", "opportunity_gap", "opportunity_gap_reason"],
                     "additionalProperties": false,
                 ],
             ],
@@ -103,11 +110,18 @@ struct ClaudeSummarizer: Summarizer {
 
     static func parseThemes(_ data: Data) throws -> [ThemeDraft] {
         struct Out: Decodable {
-            struct T: Decodable { let title: String; let summary: String; let opportunities: [String]; let item_numbers: [Int] }
+            struct T: Decodable {
+                let title: String; let summary: String; let opportunities: [String]; let item_numbers: [Int]
+                let novelty: Int; let novelty_reason: String
+                let viability: Int; let viability_reason: String
+                let opportunity_gap: Int; let opportunity_gap_reason: String
+            }
             let themes: [T]
         }
         return try JSONDecoder().decode(Out.self, from: try extractJSON(data)).themes.map {
-            ThemeDraft(title: $0.title, summary: $0.summary, opportunities: $0.opportunities, itemNumbers: $0.item_numbers)
+            ThemeDraft(title: $0.title, summary: $0.summary, opportunities: $0.opportunities, itemNumbers: $0.item_numbers,
+                       novelty: $0.novelty, viability: $0.viability, gap: $0.opportunity_gap,
+                       reasons: ScoreReasons(novelty: $0.novelty_reason, viability: $0.viability_reason, gap: $0.opportunity_gap_reason))
         }
     }
 }
