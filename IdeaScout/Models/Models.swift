@@ -3,7 +3,7 @@ import SwiftData
 
 /// Where an item came from.
 enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case github, hackerNews, productHunt, vibeCode, huggingFace, devTo
+    case github, hackerNews, productHunt, vibeCode, huggingFace, devTo, games
 
     var id: String { rawValue }
 
@@ -15,6 +15,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .vibeCode: "Vibe-coded"
         case .huggingFace: "Hugging Face"
         case .devTo: "DEV #showdev"
+        case .games: "Games"
         }
     }
 
@@ -26,6 +27,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .vibeCode: "wand.and.stars"
         case .huggingFace: "face.smiling"
         case .devTo: "text.bubble"
+        case .games: "gamecontroller"
         }
     }
 }

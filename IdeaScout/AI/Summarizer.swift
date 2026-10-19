@@ -57,6 +57,8 @@ enum Prompts {
     lists, coursework, personal sites, jokes). Then group the rest into 4 to 6 themes. A theme is a trend: \
     several projects attacking the same problem or using the same new capability. Aim for at least 3 projects \
     per theme; don't create a theme for a single project. Avoid generic names like "AI-powered tools".
+    Group games by shared genre, mechanic or audience (e.g. "cosy restoration sims"), not just "games"; \
+    their monetisable variants can include premium, free-to-play, ports, sequels, or tools for game makers.
     For each theme give:
     - title: a short, specific name (max 6 words)
     - summary: two sentences on what people are building and why it matters

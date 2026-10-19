@@ -93,9 +93,10 @@ final class DigestService: ObservableObject {
     }
 
     private func fetchAll(since: Date, topics: [String]) async -> ([FetchedItem], [String]) {
-        // Vibe-code first so an item found by both it and Show HN keeps the vibe-code label.
+        // Vibe-code and games first so an item they share with Show HN keeps the more specific label.
         var fetchers: [any ItemFetcher] = []
         if AppSettings.isEnabled(.vibeCode) { fetchers.append(VibeCodeFetcher()) }
+        if AppSettings.isEnabled(.games) { fetchers.append(GamesFetcher()) }
         if AppSettings.isEnabled(.hackerNews) { fetchers.append(HackerNewsFetcher()) }
         if AppSettings.isEnabled(.github) { fetchers.append(GitHubFetcher()) }
         if AppSettings.isEnabled(.huggingFace) { fetchers.append(HuggingFaceFetcher()) }

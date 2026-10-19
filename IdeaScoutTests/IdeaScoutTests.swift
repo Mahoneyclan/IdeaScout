@@ -244,3 +244,29 @@ struct NewSourceTests {
                 >= Ranking.momentum(of: [all[2], all[3]], among: all).score)
     }
 }
+
+struct GamesSourceTests {
+    @Test func parsesItchFeed() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>itch</title>
+        <item><title>CellZ [Free]</title><plainTitle>CellZ</plainTitle><link>https://dev.itch.io/cellz</link>
+        <description><![CDATA[<p>Eat molecules &amp; evolve.</p>]]></description>
+        <createDate>Mon, 19 Oct 2026 11:39:19 GMT</createDate></item>
+        </channel></rss>
+        """
+        let items = try ItchFeed.parse(Data(xml.utf8))
+        #expect(items.count == 1)
+        #expect(items[0].title == "CellZ")
+        #expect(items[0].detail == "Eat molecules & evolve.")
+        #expect(items[0].key == "itch-dev.itch.io/cellz")
+        #expect(items[0].source == .games)
+    }
+
+    @Test func parsesSteamFeaturedAndSkipsDuplicatesAndNonGames() throws {
+        let json = """
+        {"coming_soon":{"items":[{"id":1,"name":"Reshine","type":0},{"id":2,"name":"Soundtrack","type":1}]},
+         "new_releases":{"items":[{"id":1,"name":"Reshine","type":0},{"id":3,"name":"Sky Farm","type":0}]}}
+        """
+        #expect(try SteamStore.parseFeatured(Data(json.utf8)).map(\.name) == ["Reshine", "Sky Farm"])
+    }
+}
