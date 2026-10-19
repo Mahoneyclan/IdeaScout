@@ -46,15 +46,22 @@ struct DigestContentView: View {
     @AppStorage(AppSettings.Keys.weightMomentum) private var wMomentum = 1.0
     @AppStorage(AppSettings.Keys.weightViability) private var wViability = 1.0
     @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
+    @AppStorage("filter.gamesOnly") private var gamesOnly = false
 
     private var weights: RankWeights {
         RankWeights(novelty: wNovelty, momentum: wMomentum, viability: wViability, gap: wGap)
     }
 
+    /// With "Games only", keeps trends that contain games and shows only their game projects.
+    private func visibleItems(_ theme: Theme) -> [Item] {
+        gamesOnly ? theme.sortedItems.filter { $0.source == .games } : theme.sortedItems
+    }
+
     var body: some View {
         let starred = Set(ideas.map(\.key))
+        let themes = Theme.ranked(digest.themes, weights: weights).filter { !visibleItems($0).isEmpty }
         List {
-            ForEach(Theme.ranked(digest.themes, weights: weights)) { theme in
+            ForEach(themes) { theme in
                 Section {
                     Text(theme.summary).font(.subheadline)
                     if !theme.isCatchAll && theme.scores != ThemeScores() {
@@ -73,7 +80,7 @@ struct DigestContentView: View {
                             Label("Money-making variants", systemImage: "dollarsign.circle").font(.subheadline.bold())
                         }
                     }
-                    ForEach(theme.sortedItems) { item in
+                    ForEach(visibleItems(theme)) { item in
                         ItemRow(item: item, isStarred: starred.contains(item.key)) {
                             service.toggleStar(item, ideas: ideas, context: context)
                         }
@@ -96,6 +103,21 @@ struct DigestContentView: View {
             }
             .font(.footnote)
             .foregroundStyle(.secondary)
+        }
+        .overlay {
+            if themes.isEmpty && gamesOnly {
+                ContentUnavailableView("No games in this digest", systemImage: "gamecontroller",
+                                       description: Text("Turn on the Games source in Settings, or switch the filter back to All."))
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Picker("Show", selection: $gamesOnly) {
+                    Label("All", systemImage: "square.grid.2x2").tag(false)
+                    Label("Games only", systemImage: "gamecontroller").tag(true)
+                }
+                .pickerStyle(.menu)
+            }
         }
     }
 }
