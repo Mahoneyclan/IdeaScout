@@ -44,12 +44,15 @@ struct KillerEngine {
         var leaderboard: [String]
     }
 
-    func run(_ context: Context) async throws -> [Result] {
+    func run(_ context: Context, qualityBar: Double) async throws -> [Result] {
         let candidates = try await generate(context)
         guard !candidates.isEmpty else { return [] }
         let reviews = try await critique(candidates, aboutMe: context.aboutMe)
-        return Self.survivors(candidates: candidates, reviews: reviews)
+        return Self.survivors(candidates: candidates, reviews: reviews, qualityBar: qualityBar)
     }
+
+    /// No single measure may be this low, however good the average.
+    static let minimumSingleScore = 2
 
     // MARK: - Pass 1: generate
 
@@ -57,8 +60,10 @@ struct KillerEngine {
     You are a sharp product strategist hunting for a "killer" product idea: one with real pain, a specific \
     buyer who will pay, a reason it is possible now, a clear gap, and a good fit for the person described.
     Using the trends and numbered projects (projects tagged "Pain points" are people asking for tools that \
-    don't exist), propose 3 distinct product ideas. Each must be a concrete product someone could start \
-    building this month, not a trend summary. Prefer ideas supported by several projects and by pain points.
+    don't exist; "Y Combinator" and "App Store top paid" show what people already pay for; "AI research" shows \
+    new capabilities that explain why now), propose 5 distinct product ideas. Each must be a concrete product someone could start \
+    building this month, not a trend summary. Prefer ideas supported by several projects and by pain points. \
+    Only propose ideas you would genuinely back; quality matters more than variety.
     For each idea give: a short memorable title; a one-sentence pitch; the buyer (a specific type of person \
     or company); pricing (model and rough price); why now (what recently became possible); a one-week test \
     (the cheapest way to check demand in 7 days); the numbers of the projects that are evidence for it; and \
@@ -189,11 +194,15 @@ struct KillerEngine {
         }
     }
 
-    /// Pairs each candidate with its review, keeps survivors, best first, at most two.
-    static func survivors(candidates: [Candidate], reviews: [Review]) -> [Result] {
+    /// Pairs each candidate with its review and keeps only ideas that survived, reach the quality bar
+    /// and have no weak spot (any measure below 2). Best first, at most two.
+    static func survivors(candidates: [Candidate], reviews: [Review], qualityBar: Double = 0) -> [Result] {
         let byKey = Dictionary(reviews.map { (KillerIdea.key(for: $0.title), $0) }, uniquingKeysWith: { first, _ in first })
         return candidates.compactMap { candidate in
-            guard let review = byKey[KillerIdea.key(for: candidate.title)], review.survives else { return nil }
+            guard let review = byKey[KillerIdea.key(for: candidate.title)], review.survives,
+                  score(review) >= qualityBar,
+                  [review.pain, review.willingToPay, review.timing, review.gap, review.fit].min() ?? 0 >= minimumSingleScore
+            else { return nil }
             return Result(candidate: candidate, review: review)
         }
         .sorted { score($0.review) > score($1.review) }

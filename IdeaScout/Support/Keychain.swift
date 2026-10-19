@@ -9,8 +9,8 @@ enum Keychain {
         case claudeAPIKey, productHuntToken
     }
 
-    static func get(_ key: Key) -> String? {
-        var query = baseQuery(key)
+    static func get(_ key: Key, service: String = Keychain.service) -> String? {
+        var query = baseQuery(key, service: service)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: AnyObject?
@@ -21,16 +21,16 @@ enum Keychain {
     }
 
     @discardableResult
-    static func set(_ value: String?, for key: Key) -> Bool {
-        SecItemDelete(baseQuery(key) as CFDictionary)
+    static func set(_ value: String?, for key: Key, service: String = Keychain.service) -> Bool {
+        SecItemDelete(baseQuery(key, service: service) as CFDictionary)
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return true }
-        var query = baseQuery(key)
+        var query = baseQuery(key, service: service)
         query[kSecValueData as String] = Data(value.utf8)
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock  // readable during background refresh
         return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
     }
 
-    private static func baseQuery(_ key: Key) -> [String: Any] {
+    private static func baseQuery(_ key: Key, service: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
          kSecAttrAccount as String: key.rawValue]

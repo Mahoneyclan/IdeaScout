@@ -12,6 +12,7 @@ enum AppSettings {
         static let weightViability = "weight.viability"
         static let weightGap = "weight.gap"
         static let aboutMe = "aboutMe"
+        static let qualityBar = "qualityBar"
         static func sourceEnabled(_ kind: SourceKind) -> String { "source.\(kind.rawValue)" }
     }
 
@@ -33,6 +34,12 @@ enum AppSettings {
     static var aboutMe: String {
         UserDefaults.standard.string(forKey: Keys.aboutMe)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
+
+    /// Minimum score (out of 5) for trends and killer ideas to be shown or kept.
+    static var qualityBar: Double {
+        UserDefaults.standard.object(forKey: Keys.qualityBar) as? Double ?? defaultQualityBar
+    }
+    static let defaultQualityBar = 3.5
 
     static var notifyHour: Int {
         UserDefaults.standard.object(forKey: Keys.notifyHour) as? Int ?? 7

@@ -82,9 +82,12 @@ final class DigestService: ObservableObject {
             do {
                 let leaderboard = topKillerIdeas(context: context, limit: 10).map { "\($0.title): \($0.pitch)" }
                 let results = try await KillerEngine(claude: claude).run(
-                    .init(themes: builtThemes, items: batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard))
+                    .init(themes: builtThemes, items: batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard),
+                    qualityBar: AppSettings.qualityBar)
                 mergeKillerIdeas(results, items: batch, context: context)
-                if results.isEmpty { allWarnings.append("No idea survived the devil's-advocate check today.") }
+                if results.isEmpty {
+                    allWarnings.append("No idea cleared the quality bar (\(AppSettings.qualityBar.formatted()) / 5) today.")
+                }
             } catch is CancellationError {
                 return
             } catch {
@@ -122,6 +125,10 @@ final class DigestService: ObservableObject {
         if AppSettings.isEnabled(.vibeCode) { fetchers.append(VibeCodeFetcher()) }
         if AppSettings.isEnabled(.games) { fetchers.append(GamesFetcher()) }
         if AppSettings.isEnabled(.painPoints) { fetchers.append(PainPointsFetcher()) }
+        if AppSettings.isEnabled(.ycombinator) { fetchers.append(YCombinatorFetcher()) }
+        if AppSettings.isEnabled(.appStore) { fetchers.append(AppStoreFetcher()) }
+        if AppSettings.isEnabled(.research) { fetchers.append(ResearchFetcher()) }
+        if AppSettings.isEnabled(.lobsters) { fetchers.append(LobstersFetcher()) }
         if AppSettings.isEnabled(.hackerNews) { fetchers.append(HackerNewsFetcher()) }
         if AppSettings.isEnabled(.github) { fetchers.append(GitHubFetcher()) }
         if AppSettings.isEnabled(.huggingFace) { fetchers.append(HuggingFaceFetcher()) }

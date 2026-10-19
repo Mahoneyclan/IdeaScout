@@ -154,8 +154,11 @@ struct KillerIdeaDetailView: View {
 struct LeaderboardView: View {
     @Environment(\.modelContext) private var context
     @Query private var ideas: [KillerIdea]
+    @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
 
-    private var ranked: [KillerIdea] { ideas.sorted { $0.leaderboardScore > $1.leaderboardScore } }
+    private var ranked: [KillerIdea] {
+        ideas.filter { $0.killerScore >= qualityBar }.sorted { $0.leaderboardScore > $1.leaderboardScore }
+    }
 
     var body: some View {
         NavigationStack {
@@ -175,9 +178,14 @@ struct LeaderboardView: View {
                     offsets.map { current[$0] }.forEach(context.delete)
                     try? context.save()
                 }
+                let hidden = ideas.count - ranked.count
+                if hidden > 0 {
+                    Text("\(hidden) idea\(hidden == 1 ? "" : "s") below the quality bar (\(qualityBar.formatted()) / 5) hidden. Lower the bar in Settings to see \(hidden == 1 ? "it" : "them").")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
             .overlay {
-                if ideas.isEmpty {
+                if ranked.isEmpty && ideas.count == 0 {
                     ContentUnavailableView("No killer ideas yet", systemImage: "trophy",
                                            description: Text("Each refresh with Claude proposes ideas and keeps only the ones that survive a devil's-advocate check."))
                 }

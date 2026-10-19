@@ -3,7 +3,7 @@ import SwiftData
 
 /// Where an item came from.
 enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case github, hackerNews, productHunt, vibeCode, huggingFace, devTo, games, painPoints
+    case github, hackerNews, productHunt, vibeCode, huggingFace, devTo, games, painPoints, ycombinator, appStore, research, lobsters
 
     var id: String { rawValue }
 
@@ -17,6 +17,10 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .devTo: "DEV #showdev"
         case .games: "Games"
         case .painPoints: "Pain points"
+        case .ycombinator: "Y Combinator"
+        case .appStore: "App Store top paid"
+        case .research: "AI research"
+        case .lobsters: "Lobsters"
         }
     }
 
@@ -30,6 +34,10 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .devTo: "text.bubble"
         case .games: "gamecontroller"
         case .painPoints: "exclamationmark.bubble"
+        case .ycombinator: "building.columns"
+        case .appStore: "bag"
+        case .research: "doc.text.magnifyingglass"
+        case .lobsters: "ladybug"
         }
     }
 }
@@ -139,6 +147,14 @@ struct RankWeights: Equatable, Sendable {
     func apply(_ s: ThemeScores, _ r: ScoreReasons) {
         novelty = s.novelty; momentum = s.momentum; viability = s.viability; opportunityGap = s.gap
         noveltyReason = r.novelty; momentumReason = r.momentum; viabilityReason = r.viability; gapReason = r.gap
+    }
+
+    /// Whether the theme clears the quality bar. Unscored themes (keyword mode) always pass;
+    /// the catch-all "Other projects" only shows when the bar is off.
+    func clears(_ bar: Double, weights: RankWeights) -> Bool {
+        if isCatchAll { return bar <= 0 }
+        guard let overall = scores.overall(weights) else { return true }
+        return overall >= bar
     }
 
     /// Ranked order: best overall score first, catch-all last.

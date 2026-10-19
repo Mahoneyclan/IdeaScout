@@ -479,3 +479,194 @@ struct PainPointsFetcher: ItemFetcher {
         return results
     }
 }
+
+// MARK: - Shared date parsing
+
+enum ISODates {
+    /// Parses ISO 8601 dates with or without fractional seconds and with any time-zone offset.
+    static func parse(_ text: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+    }
+
+    static func decoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            guard let date = parse(text) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Bad date \(text)"))
+            }
+            return date
+        }
+        return decoder
+    }
+}
+
+// MARK: - Y Combinator (latest funded startups, plus Launch HN posts)
+
+struct YCombinatorFetcher: ItemFetcher {
+    let kind = SourceKind.ycombinator
+    static let perDay = 25
+
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        var results: [FetchedItem] = []
+        var firstError: Error?
+        do {
+            let companies = try await latestBatch(since: since)
+            results += Self.rotation(companies, day: Calendar.current.ordinality(of: .day, in: .year, for: .now) ?? 0)
+        } catch { firstError = error }
+        do {
+            let data = try await HTTP.get(HackerNewsFetcher.searchURL(tags: "launch_hn", query: nil, since: since, hits: 20))
+            results += try HackerNewsFetcher.parse(data, as: .ycombinator)
+        } catch { firstError = firstError ?? error }
+        if results.isEmpty, let firstError { throw firstError }
+        return results
+    }
+
+    /// Newest batch first: YC runs Winter, Spring, Summer and Fall batches.
+    static func candidateBatches(now: Date = .now) -> [String] {
+        let year = Calendar.current.component(.year, from: now)
+        let seasons = ["fall", "summer", "spring", "winter"]
+        return [year + 1, year, year - 1].flatMap { y in seasons.map { "\($0)-\(y)" } }
+    }
+
+    private func latestBatch(since: Date) async throws -> [FetchedItem] {
+        for batch in Self.candidateBatches() {
+            guard let url = URL(string: "https://yc-oss.github.io/api/batches/\(batch).json"),
+                  let data = try? await HTTP.get(url),
+                  let companies = try? Self.parse(data, postedAt: since), !companies.isEmpty
+            else { continue }
+            return companies
+        }
+        throw FetchError.http(404)
+    }
+
+    /// The same batch is sent every day, so rotate through it ~25 companies at a time.
+    static func rotation(_ items: [FetchedItem], day: Int) -> [FetchedItem] {
+        guard items.count > perDay else { return items }
+        let start = (day * perDay) % items.count
+        return (0..<perDay).map { items[(start + $0) % items.count] }
+    }
+
+    private struct Company: Decodable {
+        let id: Int
+        let name: String
+        let one_liner: String?
+        let url: String
+        let industry: String?
+        let batch: String?
+    }
+
+    /// Batches have no useful date, so items are dated at the start of the window (never "new").
+    static func parse(_ data: Data, postedAt: Date) throws -> [FetchedItem] {
+        try JSONDecoder().decode([Company].self, from: data).compactMap { c in
+            guard let url = URL(string: c.url) else { return nil }
+            let extras = [c.industry, c.batch.map { "YC \($0)" }].compactMap { $0 }.joined(separator: ", ")
+            let detail = [c.one_liner ?? "", extras.isEmpty ? "" : "(\(extras))"].filter { !$0.isEmpty }.joined(separator: " ")
+            return FetchedItem(key: "yc-\(c.id)", source: .ycombinator, title: c.name, detail: TextCleaner.clean(detail),
+                               url: url, score: 0, postedAt: postedAt)
+        }
+    }
+}
+
+// MARK: - App Store top paid iPhone apps (what people pay for right now)
+
+struct AppStoreFetcher: ItemFetcher {
+    let kind = SourceKind.appStore
+
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        let url = URL(string: "https://rss.marketingtools.apple.com/api/v2/us/apps/top-paid/25/apps.json")!
+        return try Self.parse(try await HTTP.get(url), postedAt: since)
+    }
+
+    private struct Response: Decodable {
+        struct Feed: Decodable { let results: [App] }
+        struct App: Decodable {
+            struct Genre: Decodable { let name: String? }
+            let id: String
+            let name: String
+            let artistName: String?
+            let url: String
+            let genres: [Genre]?
+        }
+        let feed: Feed
+    }
+
+    /// Rank becomes the score (number 1 scores highest).
+    static func parse(_ data: Data, postedAt: Date) throws -> [FetchedItem] {
+        let apps = try JSONDecoder().decode(Response.self, from: data).feed.results
+        return apps.enumerated().compactMap { rank, app in
+            guard let url = URL(string: app.url) else { return nil }
+            let genre = app.genres?.compactMap(\.name).first
+            var detail = "#\(rank + 1) top paid iPhone app"
+            if let genre { detail += " in \(genre)" }
+            if let artist = app.artistName { detail += ", by \(artist)" }
+            return FetchedItem(key: "app-\(app.id)", source: .appStore, title: app.name, detail: detail, url: url,
+                               score: apps.count - rank, postedAt: postedAt)
+        }
+    }
+}
+
+// MARK: - Hugging Face daily papers (new AI capabilities: the "why now")
+
+struct ResearchFetcher: ItemFetcher {
+    let kind = SourceKind.research
+
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        let data = try await HTTP.get(URL(string: "https://huggingface.co/api/daily_papers?limit=40")!)
+        return Array(try Self.parse(data).filter { $0.postedAt >= since }.sorted { $0.score > $1.score }.prefix(20))
+    }
+
+    private struct Entry: Decodable {
+        struct Paper: Decodable {
+            let id: String
+            let title: String
+            let summary: String?
+            let ai_summary: String?
+            let upvotes: Int?
+        }
+        let paper: Paper
+        let publishedAt: Date?
+    }
+
+    static func parse(_ data: Data) throws -> [FetchedItem] {
+        try ISODates.decoder().decode([Entry].self, from: data).compactMap { entry in
+            let p = entry.paper
+            guard let url = URL(string: "https://huggingface.co/papers/\(p.id)") else { return nil }
+            return FetchedItem(key: "paper-\(p.id)", source: .research, title: p.title,
+                               detail: TextCleaner.clean(p.ai_summary ?? p.summary), url: url, score: p.upvotes ?? 0,
+                               postedAt: entry.publishedAt ?? .now)
+        }
+    }
+}
+
+// MARK: - Lobsters "show" (developers presenting their projects)
+
+struct LobstersFetcher: ItemFetcher {
+    let kind = SourceKind.lobsters
+
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        let data = try await HTTP.get(URL(string: "https://lobste.rs/t/show.json")!)
+        return try Self.parse(data).filter { $0.postedAt >= since }
+    }
+
+    private struct Story: Decodable {
+        let short_id: String
+        let title: String
+        let url: String?
+        let comments_url: String
+        let score: Int?
+        let created_at: Date
+        let description_plain: String?
+    }
+
+    static func parse(_ data: Data) throws -> [FetchedItem] {
+        try ISODates.decoder().decode([Story].self, from: data).compactMap { s in
+            let link = (s.url?.isEmpty == false ? s.url : nil) ?? s.comments_url
+            guard let url = URL(string: link) else { return nil }
+            return FetchedItem(key: "lob-\(s.short_id)", source: .lobsters, title: s.title,
+                               detail: TextCleaner.clean(s.description_plain), url: url, score: s.score ?? 0, postedAt: s.created_at)
+        }
+    }
+}

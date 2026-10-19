@@ -131,11 +131,14 @@ struct ClaudeTests {
 }
 
 struct KeychainTests {
+    /// Uses a separate test-only Keychain area so running tests never touches the user's real keys.
+    static let testService = "com.mahoney.IdeaScout.tests"
+
     @Test func roundTrip() {
-        Keychain.set("test-value", for: .productHuntToken)
-        #expect(Keychain.get(.productHuntToken) == "test-value")
-        Keychain.set(nil, for: .productHuntToken)
-        #expect(Keychain.get(.productHuntToken) == nil)
+        Keychain.set("test-value", for: .productHuntToken, service: Self.testService)
+        #expect(Keychain.get(.productHuntToken, service: Self.testService) == "test-value")
+        Keychain.set(nil, for: .productHuntToken, service: Self.testService)
+        #expect(Keychain.get(.productHuntToken, service: Self.testService) == nil)
     }
 }
 
@@ -365,5 +368,97 @@ struct EnglishOnlyTests {
     @Test func schemaRequiresTranslations() {
         let required = ClaudeSummarizer.themeSchema["required"] as? [String]
         #expect(required == ["themes", "translations"])
+    }
+}
+
+struct QualityBarTests {
+    private func cand(_ t: String) -> KillerEngine.Candidate {
+        .init(title: t, pitch: "", buyer: "", pricing: "", whyNow: "", oneWeekTest: "", evidenceNumbers: [], sameAs: "")
+    }
+
+    @Test func dropsIdeasBelowBarOrWithAWeakSpot() {
+        let strong = KillerEngine.Review(title: "Strong", survives: true, objection: "", competitors: "", verdict: "",
+                                         pain: 4, willingToPay: 4, timing: 4, gap: 4, fit: 4)
+        let average = KillerEngine.Review(title: "Average", survives: true, objection: "", competitors: "", verdict: "",
+                                          pain: 3, willingToPay: 3, timing: 3, gap: 3, fit: 3)
+        let weakSpot = KillerEngine.Review(title: "Weak spot", survives: true, objection: "", competitors: "", verdict: "",
+                                           pain: 5, willingToPay: 1, timing: 5, gap: 5, fit: 5)
+        let out = KillerEngine.survivors(candidates: [cand("Strong"), cand("Average"), cand("Weak spot")],
+                                         reviews: [strong, average, weakSpot], qualityBar: 3.5)
+        #expect(out.map(\.candidate.title) == ["Strong"])
+    }
+
+    @Test func themeClearsBar() {
+        let good = Theme(title: "Good", summary: "", order: 0, opportunities: [])
+        good.apply(ThemeScores(novelty: 4, momentum: 4, viability: 4, gap: 4), ScoreReasons())
+        let weak = Theme(title: "Weak", summary: "", order: 1, opportunities: [])
+        weak.apply(ThemeScores(novelty: 2, momentum: 3, viability: 3, gap: 2), ScoreReasons())
+        let unscored = Theme(title: "Keyword", summary: "", order: 2, opportunities: [])
+        let other = Theme(title: "Other", summary: "", order: 3, opportunities: [])
+        other.isCatchAll = true
+        #expect(good.clears(3.5, weights: RankWeights()))
+        #expect(!weak.clears(3.5, weights: RankWeights()))
+        #expect(unscored.clears(3.5, weights: RankWeights()))
+        #expect(!other.clears(3.5, weights: RankWeights()))
+        #expect(other.clears(0, weights: RankWeights()))
+    }
+}
+
+struct MoreSourcesTests {
+    @Test func parsesYCBatchAndRotates() throws {
+        let json = """
+        [{"id":1,"name":"Tire Swing","one_liner":"AI Compliance for Affordable Housing",
+          "url":"https://www.ycombinator.com/companies/tire-swing","industry":"B2B","batch":"Fall 2026"}]
+        """
+        let since = Date(timeIntervalSince1970: 0)
+        let items = try YCombinatorFetcher.parse(Data(json.utf8), postedAt: since)
+        #expect(items.first?.title == "Tire Swing")
+        #expect(items.first?.detail == "AI Compliance for Affordable Housing (B2B, YC Fall 2026)")
+        #expect(items.first?.isNew() == false)
+
+        let many = (0..<60).map { item("c\($0)") }
+        let day1 = YCombinatorFetcher.rotation(many, day: 1)
+        let day2 = YCombinatorFetcher.rotation(many, day: 2)
+        #expect(day1.count == 25 && day2.count == 25)
+        #expect(Set(day1.map(\.key)) != Set(day2.map(\.key)))
+    }
+
+    @Test func ycBatchesNewestFirst() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-19T00:00:00Z")!
+        let batches = YCombinatorFetcher.candidateBatches(now: now)
+        #expect(batches.prefix(5) == ["fall-2027", "summer-2027", "spring-2027", "winter-2027", "fall-2026"])
+    }
+
+    @Test func parsesAppStoreTopPaid() throws {
+        let json = """
+        {"feed":{"results":[{"id":"932747118","name":"Shadowrocket","artistName":"Shadow Launch","url":"https://apps.apple.com/us/app/id932747118","genres":[]},
+                            {"id":"2","name":"AnkiMobile","url":"https://apps.apple.com/us/app/id2","genres":[{"name":"Education"}]}]}}
+        """
+        let items = try AppStoreFetcher.parse(Data(json.utf8), postedAt: .now)
+        #expect(items.map(\.score) == [2, 1])
+        #expect(items[0].detail == "#1 top paid iPhone app, by Shadow Launch")
+        #expect(items[1].detail == "#2 top paid iPhone app in Education")
+    }
+
+    @Test func parsesDailyPapers() throws {
+        let json = """
+        [{"paper":{"id":"2610.22697","title":"Securing Agentic Browsing","summary":"Long abstract","ai_summary":"Short summary","upvotes":12},
+          "publishedAt":"2026-10-14T20:00:00.000Z"}]
+        """
+        let items = try ResearchFetcher.parse(Data(json.utf8))
+        #expect(items.first?.detail == "Short summary")
+        #expect(items.first?.url.absoluteString == "https://huggingface.co/papers/2610.22697")
+        #expect(items.first?.score == 12)
+    }
+
+    @Test func parsesLobstersWithOffsetDates() throws {
+        let json = """
+        [{"short_id":"ireiaf","title":"DelightQL","url":"","comments_url":"https://lobste.rs/s/ireiaf","score":7,
+          "created_at":"2026-10-14T13:41:38.972-05:00","description_plain":"A query language"}]
+        """
+        let items = try LobstersFetcher.parse(Data(json.utf8))
+        #expect(items.first?.url.absoluteString == "https://lobste.rs/s/ireiaf")
+        let expected = ISO8601DateFormatter().date(from: "2026-10-14T18:41:38Z")!.addingTimeInterval(0.972)
+        #expect(abs((items.first?.postedAt ?? .distantPast).timeIntervalSince(expected)) < 0.001)
     }
 }

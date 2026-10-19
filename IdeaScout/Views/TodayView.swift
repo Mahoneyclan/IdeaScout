@@ -49,6 +49,8 @@ struct DigestContentView: View {
     @AppStorage(AppSettings.Keys.weightViability) private var wViability = 1.0
     @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
     @AppStorage("filter.gamesOnly") private var gamesOnly = false
+    @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
+    @State private var showBelowBar = false
 
     private var weights: RankWeights {
         RankWeights(novelty: wNovelty, momentum: wMomentum, viability: wViability, gap: wGap)
@@ -61,8 +63,11 @@ struct DigestContentView: View {
 
     var body: some View {
         let starred = Set(ideas.map(\.key))
-        let themes = Theme.ranked(digest.themes, weights: weights).filter { !visibleItems($0).isEmpty }
-        let todaysKillers = killerIdeas.filter(\.isFromToday).sorted { $0.killerScore > $1.killerScore }
+        let withItems = Theme.ranked(digest.themes, weights: weights).filter { !visibleItems($0).isEmpty }
+        let themes = showBelowBar ? withItems : withItems.filter { $0.clears(qualityBar, weights: weights) }
+        let hiddenCount = withItems.count - themes.count
+        let todaysKillers = killerIdeas.filter { $0.isFromToday && $0.killerScore >= qualityBar }
+            .sorted { $0.killerScore > $1.killerScore }
         List {
             if showKillerIdeas && !gamesOnly && !todaysKillers.isEmpty {
                 Section {
@@ -111,6 +116,14 @@ struct DigestContentView: View {
                     }
                 }
             }
+            if hiddenCount > 0 || showBelowBar {
+                Section {
+                    Toggle("Show trends below the quality bar", isOn: $showBelowBar)
+                } footer: {
+                    Text(showBelowBar ? "Showing everything." :
+                            "\(hiddenCount) trend\(hiddenCount == 1 ? "" : "s") scored below \(qualityBar.formatted()) / 5 and \(hiddenCount == 1 ? "is" : "are") hidden. Change the bar in Settings.")
+                }
+            }
             Section {
                 Text("Summarised by \(digest.summarizer) · \(digest.itemCount) projects")
                 ForEach(digest.warnings, id: \.self) { Label($0, systemImage: "exclamationmark.triangle") }
@@ -119,7 +132,7 @@ struct DigestContentView: View {
             .foregroundStyle(.secondary)
         }
         .overlay {
-            if themes.isEmpty && gamesOnly {
+            if themes.isEmpty && gamesOnly && hiddenCount == 0 {
                 ContentUnavailableView("No games in this digest", systemImage: "gamecontroller",
                                        description: Text("Turn on the Games source in Settings, or switch the filter back to All."))
             }

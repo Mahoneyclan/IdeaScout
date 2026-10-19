@@ -9,10 +9,9 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Keys.weightViability) private var wViability = 1.0
     @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
     @AppStorage(AppSettings.Keys.aboutMe) private var aboutMe = ""
+    @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
     @State private var usage = UsageTracker.summary()
 
-    @State private var claudeKey = Keychain.get(.claudeAPIKey) ?? ""
-    @State private var productHuntToken = Keychain.get(.productHuntToken) ?? ""
     @State private var notificationsAllowed: Bool?
     @FocusState private var keyboardOpen: Bool
 
@@ -55,6 +54,22 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    VStack(alignment: .leading) {
+                        LabeledContent {
+                            Text(qualityBar == 0 ? "Off" : "\(qualityBar.formatted()) / 5").monospacedDigit()
+                        } label: {
+                            Label("Quality bar", systemImage: "line.horizontal.star.fill.line.horizontal")
+                        }
+                        Slider(value: $qualityBar, in: 0...4.5, step: 0.5)
+                            .accessibilityLabel("Quality bar")
+                    }
+                } header: {
+                    Text("Quality bar")
+                } footer: {
+                    Text("Trends and killer ideas scoring below this are hidden. Killer ideas must also score at least 2 on every measure. Higher means fewer, stronger ideas. Default \(AppSettings.defaultQualityBar.formatted()).")
+                }
+
+                Section {
                     WeightSlider(name: "Novelty", symbol: "sparkles", value: $wNovelty)
                     WeightSlider(name: "Momentum", symbol: "chart.line.uptrend.xyaxis", value: $wMomentum)
                     WeightSlider(name: "Viability", symbol: "checkmark.seal", value: $wViability)
@@ -70,12 +85,8 @@ struct SettingsView: View {
                         ForEach(AIProvider.allCases) { Text($0.label).tag($0.rawValue) }
                     }
                     LabeledContent("Apple Intelligence", value: AppleSummarizer.statusText)
-                    SecureField("Claude API key", text: $claudeKey)
+                    SecretField(title: "Claude API key", key: .claudeAPIKey)
                         .focused($keyboardOpen)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onSubmit { Keychain.set(claudeKey, for: .claudeAPIKey) }
-                        .onChange(of: claudeKey) { _, value in Keychain.set(value, for: .claudeAPIKey) }
                 } header: {
                     Text("AI")
                 } footer: {
@@ -109,11 +120,8 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    SecureField("Product Hunt developer token", text: $productHuntToken)
+                    SecretField(title: "Product Hunt developer token", key: .productHuntToken)
                         .focused($keyboardOpen)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onChange(of: productHuntToken) { _, value in Keychain.set(value, for: .productHuntToken) }
                 } header: {
                     Text("Product Hunt")
                 } footer: {
@@ -148,6 +156,44 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+}
+
+/// Entry for a secret stored in the Keychain. Shows whether one is saved (last 4 characters only).
+/// Only non-empty input is saved, so the field clearing itself when tapped again (normal for
+/// password fields) can't erase a saved key; removing one is a deliberate tap.
+private struct SecretField: View {
+    let title: String
+    let key: Keychain.Key
+    @State private var input = ""
+    @State private var saved = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SecureField(saved.isEmpty ? title : "Replace \(title.lowercased())", text: $input)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .onChange(of: input) { _, value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty, Keychain.set(trimmed, for: key) else { return }
+                    saved = trimmed
+                }
+            if !saved.isEmpty {
+                HStack {
+                    Label("Saved · ends …\(String(saved.suffix(4)))", systemImage: "checkmark.seal.fill")
+                        .font(.caption).foregroundStyle(.green)
+                    Spacer()
+                    Button("Remove", role: .destructive) {
+                        Keychain.set(nil, for: key)
+                        saved = ""
+                        input = ""
+                    }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                }
+            }
+        }
+        .onAppear { saved = Keychain.get(key) ?? "" }
     }
 }
 

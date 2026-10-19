@@ -81,7 +81,9 @@ enum Prompts {
     You are an analyst who spots new initiatives in open-source and AI-built ("vibe-coded") projects.
     The numbered projects were launched or gained traction in the past week; "new" marks the last 24 hours. \
     Items tagged "Pain points" are people asking for tools that don't exist: use them as evidence of demand \
-    inside related themes rather than as themes of their own.
+    inside related themes rather than as themes of their own. Items tagged "Y Combinator" are startups investors \
+    just funded and "App Store top paid" are apps people pay for: treat both as evidence that a market pays. \
+    Items tagged "AI research" are new capabilities: use them to explain why an idea is possible now.
     First ignore projects that could never become a product people pay for (libraries with no product angle, \
     lists, coursework, personal sites, jokes). Then group the rest into 4 to 6 themes. A theme is a trend: \
     several projects attacking the same problem or using the same new capability. Aim for at least 3 projects \
