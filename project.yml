@@ -1,0 +1,53 @@
+name: IdeaScout
+options:
+  bundleIdPrefix: com.mahoney
+  deploymentTarget:
+    iOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Set your Apple developer team in Xcode (Signing & Capabilities) before installing on a phone.
+    DEVELOPMENT_TEAM: ""
+targets:
+  IdeaScout:
+    type: application
+    platform: iOS
+    sources:
+      - IdeaScout
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mahoney.IdeaScout
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: IdeaScout/Info.plist
+      properties:
+        CFBundleDisplayName: IdeaScout
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [com.mahoney.IdeaScout.refresh]
+  IdeaScoutTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - IdeaScoutTests
+    dependencies:
+      - target: IdeaScout
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mahoney.IdeaScoutTests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  IdeaScout:
+    build:
+      targets:
+        IdeaScout: all
+        IdeaScoutTests: [test]
+    test:
+      targets:
+        - IdeaScoutTests
