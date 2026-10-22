@@ -9,7 +9,6 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Keys.notifyHour) private var notifyHour = 7
     @State private var usage = UsageTracker.summary()
     @State private var notificationsAllowed: Bool?
-    @State private var hasProductHuntToken = false
     @FocusState private var keyboardOpen: Bool
 
     var body: some View {
@@ -70,10 +69,7 @@ struct SettingsView: View {
                     }
                     NavigationLink { ScanRankingSettings() } label: { Text("Scan & ranking") }
                     NavigationLink { AISettings() } label: {
-                        LabeledContent("AI & costs", value: "Today \(usage.today.cost.formatted(.currency(code: "USD")))")
-                    }
-                    NavigationLink { ProductHuntSettings() } label: {
-                        LabeledContent("Product Hunt token", value: hasProductHuntToken ? "Saved" : "Not set")
+                        LabeledContent("AI & costs", value: "\(AppSettings.provider.shortName) · today \(usage.today.cost.formatted(.currency(code: "USD")))")
                     }
                 } header: {
                     Text("Advanced")
@@ -83,7 +79,6 @@ struct SettingsView: View {
             .keyboardDone($keyboardOpen)
             .onAppear {
                 usage = UsageTracker.summary()
-                hasProductHuntToken = Keychain.get(.productHuntToken) != nil
             }
         }
     }
@@ -213,19 +208,30 @@ struct AISettings: View {
     @State private var confirmReset = false
     @FocusState private var keyboardOpen: Bool
 
+    private var chosen: AIProvider { AIProvider(rawValue: provider) ?? .claude }
+
     var body: some View {
         Form {
             Section {
-                Picker("Summaries by", selection: $provider) {
+                Picker("Provider", selection: $provider) {
                     ForEach(AIProvider.allCases) { Text($0.label).tag($0.rawValue) }
                 }
-                LabeledContent("Apple Intelligence", value: AppleSummarizer.statusText)
-                SecretField(title: "Claude API key", key: .claudeAPIKey)
-                    .focused($keyboardOpen)
+                if chosen.isCloud {
+                    ModelChooser(provider: chosen)
+                    SecretField(title: "\(chosen.shortName) API key", key: chosen.keychainKey!)
+                        .id(chosen)   // reload the saved state when the provider changes
+                        .focused($keyboardOpen)
+                } else {
+                    LabeledContent("Status", value: AppleSummarizer.statusText)
+                }
             } header: {
                 Text("AI")
             } footer: {
-                Text("Claude reads up to \(maxItems) items and makes the killer ideas. Apple is free but reads about 20. Keys are kept in the iPhone Keychain.")
+                if chosen.isCloud {
+                    Text("Run by a company in \(chosen.country). \(chosen.dataNote.map { $0 + " " } ?? "")Get a key at \(chosen.keyURL). Reads up to \(maxItems) items and makes the killer ideas. Keys stay in the iPhone Keychain. If this provider isn't set up, IdeaScout uses Apple's free on-device AI, never another paid provider.")
+                } else {
+                    Text("Free and private, but reads only about 20 items and can't make killer ideas.")
+                }
             }
 
             Section {
@@ -259,7 +265,7 @@ struct AISettings: View {
                         }
                 }
             } header: {
-                Text("AI costs (Claude)")
+                Text("AI costs")
             } footer: {
                 Text("Estimated at list prices. Refreshes skip Claude once the daily limit is reached.")
             }
@@ -267,23 +273,6 @@ struct AISettings: View {
         .navigationTitle("AI & costs")
         .keyboardDone($keyboardOpen)
         .onAppear { usage = UsageTracker.summary() }
-    }
-}
-
-struct ProductHuntSettings: View {
-    @FocusState private var keyboardOpen: Bool
-
-    var body: some View {
-        Form {
-            Section {
-                SecretField(title: "Product Hunt developer token", key: .productHuntToken)
-                    .focused($keyboardOpen)
-            } footer: {
-                Text("Create a free token at producthunt.com/v2/oauth/applications (use the Developer Token).")
-            }
-        }
-        .navigationTitle("Product Hunt")
-        .keyboardDone($keyboardOpen)
     }
 }
 
@@ -369,6 +358,57 @@ struct SourceToggle: View {
             } icon: {
                 Image(systemName: kind.symbol)
             }
+        }
+    }
+}
+
+/// Model picker for one provider: the recommended model first, a few alternatives, or any other model name.
+struct ModelChooser: View {
+    let provider: AIProvider
+    @AppStorage private var model: String
+    @AppStorage private var customInput: Double
+    @AppStorage private var customOutput: Double
+    @State private var useOther = false
+    @FocusState private var typing: Bool
+
+    init(provider: AIProvider) {
+        self.provider = provider
+        let fallback = provider.models.first?.price ?? ModelPrice(input: 0, output: 0)
+        _model = AppStorage(wrappedValue: provider.recommendedModel, AppSettings.Keys.model(provider))
+        _customInput = AppStorage(wrappedValue: fallback.input, AppSettings.Keys.customPrice(provider, "input"))
+        _customOutput = AppStorage(wrappedValue: fallback.output, AppSettings.Keys.customPrice(provider, "output"))
+    }
+
+    private var isKnown: Bool { provider.models.contains { $0.id == model } }
+
+    var body: some View {
+        Picker("Model", selection: Binding(
+            get: { useOther || !isKnown ? "other" : model },
+            set: { value in
+                if value == "other" { useOther = true } else { useOther = false; model = value }
+            })) {
+            ForEach(Array(provider.models.enumerated()), id: \.element.id) { index, option in
+                Text(index == 0 ? "\(option.label) (recommended)" : option.label).tag(option.id)
+            }
+            Text("Other…").tag("other")
+        }
+        if let known = provider.models.first(where: { $0.id == model }), !useOther {
+            LabeledContent("Price per 1M tokens",
+                           value: "\(known.price.input.formatted(.currency(code: "USD"))) in · \(known.price.output.formatted(.currency(code: "USD"))) out")
+                .font(.caption)
+        } else {
+            TextField("Model name, e.g. \(provider.recommendedModel)", text: $model)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($typing)
+            LabeledContent("Input $ per 1M tokens") {
+                TextField("Input", value: $customInput, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+            }
+            LabeledContent("Output $ per 1M tokens") {
+                TextField("Output", value: $customOutput, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+            }
+            Button("Use recommended model") { useOther = false; model = provider.recommendedModel }
+                .frame(minHeight: 44)
         }
     }
 }

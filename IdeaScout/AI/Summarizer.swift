@@ -82,12 +82,6 @@ enum SummarizerError: LocalizedError {
     }
 }
 
-enum AIProvider: String, CaseIterable, Identifiable {
-    case apple, claude
-    var id: String { rawValue }
-    var label: String { self == .apple ? "Apple (on-device)" : "Claude" }
-}
-
 /// Shared prompt text so both AI providers behave the same way.
 enum Prompts {
     static let themeInstructions = """

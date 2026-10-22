@@ -9,8 +9,8 @@ Native Swift / SwiftUI / SwiftData. No backend: everything runs on the phone.
 - **Ideas** (opens first): a leaderboard of killer ideas and near-misses, with today's refresh status and step-by-step progress at the top. Ideas that come back on several days rank higher. Each card shows its weakest score; swipe left to dismiss (with confirmation).
 - **Killer ideas:** Claude suggests 5 business product ideas from the trends and pain clusters. Each names a business buyer, a monthly price and the manual task or costly workaround it replaces; at most 1 may be a developer tool and at least 2 target your industry focus. A second, sceptical pass (given each idea's evidence) tries to kill each one. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**. Each idea records every day it was proposed.
 - **History:** one row per day with its best idea and pain clusters; tap a day for that day's ideas, pain clusters and trends.
-- **Saved:** projects you've starred, with notes, AI-suggested monetisable variants, and a copyable "flesh out this idea" prompt.
-- **Settings:** About me, My Business Challenges, industry focus and the daily digest time up front; under **Advanced**: sources and topics, scan windows, items Claude reads, quality bar and ranking weights, AI provider and key, costs and daily limit, and the Product Hunt token.
+- **Saved:** ideas you've bookmarked (bookmark button, or swipe right in Ideas) and projects you've starred, with notes, AI-suggested monetisable variants, and a copyable "flesh out this idea" prompt.
+- **Settings:** About me, My Business Challenges, industry focus and the daily digest time up front; under **Advanced**: sources and topics, scan windows, items the AI reads, quality bar and ranking weights, and AI provider, model, key, costs and daily limit.
 - **Refreshing:** a button at the bottom of Ideas and History shows the estimated cost; a second refresh on the same day asks first.
 
 All output is in English. Non-English items are translated by Claude, or filtered out when Apple's on-device model is used.
@@ -28,7 +28,6 @@ All output is in English. Non-English items are translated by Claude, or filtere
 | App Store | Top paid iPhone apps |
 | GitHub | New repos with traction, searched by your topics |
 | Hacker News | Show HN posts |
-| Product Hunt | Today's launches (needs a free developer token) |
 | Vibe-code showcases | AI-built apps shared on HN and GitHub |
 | AI research | Hugging Face daily papers |
 | Hugging Face *(off by default)* | Trending AI Spaces |
@@ -42,7 +41,7 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 
 ## AI summarisers
 
-- **Claude** (default, recommended): reads up to 300 projects per refresh (configurable: 100–500) and powers the killer ideas and the devil's advocate. A full refresh at 300 items costs about $0.40–0.45. Settings → AI costs tracks spending, and a daily limit (default $1.00) skips Claude once it's reached.
+- **Cloud AI** (choose one in Settings → Advanced → AI & costs, each with its own API key in the Keychain and a recommended model preselected): Claude (Opus 5.5 default, Fable 5.1), ChatGPT (GPT-6.1 Sol, GPT-6 Astra), Gemini (4 Argon, Gemma 4 31B), Grok 4.3, DeepSeek V4.1, Qwen 3.8 Max, GLM-5.3, Kimi K3, MiMo-V2.6-Pro, or any other model name with its own price. Claude talks to Anthropic's API; the others use one OpenAI-compatible client. Reads up to 300 projects per refresh (configurable: 100–500) and powers the killer ideas and the devil's advocate. A full Claude Opus refresh at 300 items costs about $0.40–0.45. Costs are tracked per model, and a daily limit (default $1.00) applies to every provider. If the chosen provider isn't set up, the app uses Apple's on-device AI, never another paid provider.
 - **Apple Intelligence**: on-device and free, but reads only about 20 projects and can't generate killer ideas.
 - **Keyword grouping**: the fallback when no AI is available.
 
@@ -55,7 +54,7 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 
 ## Secrets
 
-API keys are **never** stored in source. The Claude API key and the Product Hunt token are entered in Settings and saved in the iPhone Keychain. `.gitignore` excludes `*.xcconfig` and `.env`.
+API keys are **never** stored in source. Each provider's API key is entered in Settings and saved in the iPhone Keychain. `.gitignore` excludes `*.xcconfig` and `.env`.
 
 ## Building
 
@@ -70,7 +69,7 @@ Set your own signing team in `project.yml` (`DEVELOPMENT_TEAM`) if you aren't th
 
 ## Tests
 
-65 Swift Testing tests in `IdeaScoutTests/`, covering source parsing, theme building, ranking, Claude request, streaming and retry handling, the killer-idea filter and evidence caps, the cost tracker and daily limit, digest replacement rules, the English filter, scan settings, the business-focus rules, the demand sources, signal-based selection and pain clusters. Run them in Xcode with ⌘U, or:
+Swift Testing tests in `IdeaScoutTests/`, covering source parsing, theme building, ranking, Claude request, streaming and retry handling, the killer-idea filter and evidence caps, the cost tracker and daily limit, digest replacement rules, the English filter, scan settings, the business-focus rules, the demand sources, signal-based selection and pain clusters. Run them in Xcode with ⌘U, or:
 
 ```sh
 xcodebuild test -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'platform=iOS,id=<device-id>'

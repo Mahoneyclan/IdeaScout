@@ -1,14 +1,19 @@
 import Foundation
 
-/// Calls the Claude Messages API directly with URLSession (there is no official Swift SDK).
-/// The API key comes from the Keychain and is never stored in source.
-struct ClaudeSummarizer: Summarizer {
-    let name = "Claude"
-    var maxItems: Int { AppSettings.claudeMaxItems }
-    let apiKey: String
+/// A cloud AI that returns structured JSON. Every client returns its reply in the same shape
+/// (a Claude-style message with `content`, `stop_reason` and `usage`), so the parsers and the
+/// cost tracker work the same for every provider. API keys come from the Keychain, never from source.
+protocol LLMClient: Sendable {
+    var provider: AIProvider { get }
+    var model: String { get }
+    func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data
+}
 
-    static let model = "claude-opus-5-5"
-    static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+/// Trends, pain clusters, translations and variant suggestions from whichever cloud AI is chosen.
+struct LLMSummarizer: Summarizer {
+    let client: any LLMClient
+    var name: String { client.provider.shortName }
+    var maxItems: Int { AppSettings.claudeMaxItems }
 
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft] {
         try await analyse(items).drafts
@@ -33,110 +38,20 @@ struct ClaudeSummarizer: Summarizer {
     func analyse(_ items: [FetchedItem]) async throws -> Analysis {
         let prompt = "Window: the last \(AppSettings.trendWindowDays) days (pain points: \(AppSettings.painWindowDays) days).\n\n"
             + "Projects:\n" + Prompts.itemList(items, detailLimit: 200)
-        let data = try await send(Self.requestBody(system: Prompts.themeInstructions + Self.translationInstruction
-                                                       + Self.clusterInstruction,
-                                                   prompt: prompt, schema: Self.themeSchema),
-                                  feature: "Trends")
+        let data = try await client.complete(system: Prompts.themeInstructions + Self.translationInstruction + Self.clusterInstruction,
+                                             prompt: prompt, schema: Self.themeSchema, effort: "medium", feature: "Trends")
         return Analysis(drafts: try Self.parseThemes(data) + (try Self.parseClusters(data)),
                         translations: try Self.parseTranslations(data), noise: try Self.parseNoise(data))
     }
 
     func extensions(for idea: IdeaBrief) async throws -> [String] {
-        let data = try await send(Self.requestBody(system: Prompts.extensionInstructions,
-                                                   prompt: Prompts.ideaText(idea), schema: Self.extensionSchema),
-                                  feature: "Variant suggestions")
+        let data = try await client.complete(system: Prompts.extensionInstructions, prompt: Prompts.ideaText(idea),
+                                             schema: Self.extensionSchema, effort: "medium", feature: "Variant suggestions")
         struct Out: Decodable { let suggestions: [String] }
         return try JSONDecoder().decode(Out.self, from: try Self.extractJSON(data)).suggestions
     }
 
-    /// Sends a request and records its token cost under `feature` in the usage tracker.
-    /// The reply is streamed (long requests are less likely to time out) and a dropped connection,
-    /// timeout or busy server is retried up to twice before giving up.
-    func send(_ body: [String: Any], feature: String) async throws -> Data {
-        var streamed = body
-        streamed["stream"] = true
-        let payload = try JSONSerialization.data(withJSONObject: streamed)
-        var attempt = 0
-        while true {
-            do {
-                return try await sendOnce(payload, feature: feature)
-            } catch {
-                if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
-                guard attempt < Self.retryDelays.count, Self.isRetryable(error) else { throw error }
-                let wait = Self.retryDelay(attempt: attempt, retryAfter: (error as? ClaudeHTTPError)?.retryAfter)
-                attempt += 1
-                try await Task.sleep(for: .seconds(wait))
-            }
-        }
-    }
-
-    private func sendOnce(_ payload: Data, feature: String) async throws -> Data {
-        var request = URLRequest(url: Self.endpoint)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 300
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        // Lets the API retry a declined request on a suitable fallback model.
-        request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
-        request.httpBody = payload
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            var body = Data()
-            for try await byte in bytes { body.append(byte); if body.count > 2000 { break } }
-            throw ClaudeHTTPError(status: http.statusCode,
-                                  retryAfter: http.value(forHTTPHeaderField: "retry-after").flatMap(Double.init),
-                                  detail: String(decoding: body.prefix(300), as: UTF8.self))
-        }
-        var stream = StreamAssembler()
-        do {
-            for try await line in bytes.lines { try stream.consume(line) }
-        } catch {
-            // Input tokens are billed even if the reply is lost part-way, so record what we know.
-            if let partial = stream.usageOnlyResponse() { UsageTracker.record(response: partial, feature: feature) }
-            throw error
-        }
-        let data = try stream.response()
-        UsageTracker.record(response: data, feature: feature)
-        return data
-    }
-
-    // MARK: - Retries (static so they can be unit tested)
-
-    static let retryDelays: [Double] = [3, 15]
-
-    /// Only temporary problems are retried; a bad key or a malformed request fails straight away.
-    static func isRetryable(_ error: Error) -> Bool {
-        if let http = error as? ClaudeHTTPError { return [408, 429, 529].contains(http.status) || (500...599).contains(http.status) }
-        if error is StreamAssembler.StreamError { return true }
-        if let url = error as? URLError {
-            return [.networkConnectionLost, .timedOut, .notConnectedToInternet, .cannotConnectToHost,
-                    .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed].contains(url.code)
-        }
-        return false
-    }
-
-    /// The server's retry-after if it gave one (capped at 30 s), otherwise 3 s then 15 s, with a little jitter.
-    static func retryDelay(attempt: Int, retryAfter: Double?, jitter: Double = Double.random(in: 0...1)) -> Double {
-        if let retryAfter { return min(max(retryAfter, 1), 30) }
-        return retryDelays[min(attempt, retryDelays.count - 1)] + jitter
-    }
-
-    // MARK: - Request / response shapes (static so they can be unit tested)
-
-    static func requestBody(system: String, prompt: String, schema: [String: Any], effort: String = "medium") -> [String: Any] {
-        [
-            "model": model,
-            "max_tokens": 32000,
-            "system": system,
-            "fallbacks": "default",
-            "output_config": [
-                "effort": effort,
-                "format": ["type": "json_schema", "schema": schema],
-            ],
-            "messages": [["role": "user", "content": prompt]],
-        ]
-    }
+    // MARK: - Schemas and parsing (static so they can be unit tested)
 
     static let themeSchema: [String: Any] = [
         "type": "object",
@@ -262,17 +177,125 @@ struct ClaudeSummarizer: Summarizer {
     }
 }
 
-struct ClaudeHTTPError: LocalizedError, Equatable {
+
+// MARK: - Claude
+
+/// Calls the Claude Messages API directly with URLSession (there is no official Swift SDK).
+/// The reply is streamed, so long requests are less likely to time out.
+struct ClaudeClient: LLMClient {
+    let provider = AIProvider.claude
+    let apiKey: String
+    var model = AIProvider.claude.recommendedModel
+    var price = AIProvider.claude.models[0].price
+
+    static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+
+    func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
+        var body = Self.requestBody(system: system, prompt: prompt, schema: schema, effort: effort, model: model)
+        body["stream"] = true
+        let payload = try JSONSerialization.data(withJSONObject: body)
+        return try await LLMRetry.run { try await sendOnce(payload, feature: feature) }
+    }
+
+    private func sendOnce(_ payload: Data, feature: String) async throws -> Data {
+        var request = URLRequest(url: Self.endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 300
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        // Lets the API retry a declined request on a suitable fallback model.
+        request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
+        request.httpBody = payload
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            var body = Data()
+            for try await byte in bytes { body.append(byte); if body.count > 2000 { break } }
+            throw LLMHTTPError(provider: provider.shortName, status: http.statusCode,
+                               retryAfter: http.value(forHTTPHeaderField: "retry-after").flatMap(Double.init),
+                               detail: String(decoding: body.prefix(300), as: UTF8.self))
+        }
+        var stream = StreamAssembler()
+        do {
+            for try await line in bytes.lines { try stream.consume(line) }
+        } catch {
+            // Input tokens are billed even if the reply is lost part-way, so record what we know.
+            if let partial = stream.usageOnlyResponse() { UsageTracker.record(response: partial, feature: feature, price: price) }
+            throw error
+        }
+        let data = try stream.response()
+        UsageTracker.record(response: data, feature: feature, price: price)
+        return data
+    }
+
+    static func requestBody(system: String, prompt: String, schema: [String: Any], effort: String = "medium",
+                            model: String = AIProvider.claude.recommendedModel) -> [String: Any] {
+        [
+            "model": model,
+            "max_tokens": 32000,
+            "system": system,
+            "fallbacks": "default",
+            "output_config": [
+                "effort": effort,
+                "format": ["type": "json_schema", "schema": schema],
+            ],
+            "messages": [["role": "user", "content": prompt]],
+        ]
+    }
+}
+
+// MARK: - Retries (shared by every provider)
+
+enum LLMRetry {
+    static let delays: [Double] = [3, 15]
+
+    /// Runs `operation`, retrying temporary failures up to twice. Cancellation is passed straight through.
+    static func run(_ operation: () async throws -> Data) async throws -> Data {
+        var attempt = 0
+        while true {
+            do {
+                return try await operation()
+            } catch {
+                if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
+                guard attempt < delays.count, isRetryable(error) else { throw error }
+                let wait = retryDelay(attempt: attempt, retryAfter: (error as? LLMHTTPError)?.retryAfter)
+                attempt += 1
+                try await Task.sleep(for: .seconds(wait))
+            }
+        }
+    }
+
+    /// Only temporary problems are retried; a bad key or a malformed request fails straight away.
+    static func isRetryable(_ error: Error) -> Bool {
+        if let http = error as? LLMHTTPError { return [408, 429, 529].contains(http.status) || (500...599).contains(http.status) }
+        if error is StreamAssembler.StreamError { return true }
+        if let url = error as? URLError {
+            return [.networkConnectionLost, .timedOut, .notConnectedToInternet, .cannotConnectToHost,
+                    .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed].contains(url.code)
+        }
+        return false
+    }
+
+    /// The server's retry-after if it gave one (capped at 30 s), otherwise 3 s then 15 s, with a little jitter.
+    static func retryDelay(attempt: Int, retryAfter: Double?, jitter: Double = Double.random(in: 0...1)) -> Double {
+        if let retryAfter { return min(max(retryAfter, 1), 30) }
+        return delays[min(attempt, delays.count - 1)] + jitter
+    }
+}
+
+struct LLMHTTPError: LocalizedError, Equatable {
+    var provider = "Claude"
     let status: Int
     let retryAfter: Double?
     let detail: String
 
     var errorDescription: String? {
         switch status {
-        case 401: "Claude rejected the API key (HTTP 401). Check it in Settings."
-        case 429: "Claude is rate-limiting requests (HTTP 429)."
-        case 529: "Claude is overloaded right now (HTTP 529)."
-        default: "Claude returned HTTP \(status) \(detail)"
+        case 401, 403: "\(provider) rejected the API key (HTTP \(status)). Check it in Settings."
+        case 404: "\(provider) doesn't recognise the model (HTTP 404). Check the model name in Settings."
+        case 429: "\(provider) is rate-limiting requests (HTTP 429)."
+        case 529: "\(provider) is overloaded right now (HTTP 529)."
+        default: "\(provider) returned HTTP \(status) \(detail)"
         }
     }
 }

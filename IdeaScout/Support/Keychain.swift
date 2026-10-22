@@ -6,7 +6,8 @@ enum Keychain {
     static let service = "com.mahoney.IdeaScout"
 
     enum Key: String {
-        case claudeAPIKey, productHuntToken
+        case claudeAPIKey
+        case openaiAPIKey, geminiAPIKey, grokAPIKey, deepseekAPIKey, qwenAPIKey, glmAPIKey, kimiAPIKey, mimoAPIKey
     }
 
     static func get(_ key: Key, service: String = Keychain.service) -> String? {
@@ -28,6 +29,13 @@ enum Keychain {
         query[kSecValueData as String] = Data(value.utf8)
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock  // readable during background refresh
         return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    /// Removes an entry by its raw name (used for keys the app no longer has, e.g. the old Product Hunt token).
+    static func delete(account: String, service: String = Keychain.service) {
+        SecItemDelete([kSecClass as String: kSecClassGenericPassword,
+                       kSecAttrService as String: service,
+                       kSecAttrAccount as String: account] as CFDictionary)
     }
 
     private static func baseQuery(_ key: Key, service: String) -> [String: Any] {

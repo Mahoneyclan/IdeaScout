@@ -184,56 +184,6 @@ struct GitHubFetcher: ItemFetcher {
     }
 }
 
-// MARK: - Product Hunt (GraphQL API, needs a free developer token)
-
-struct ProductHuntFetcher: ItemFetcher {
-    let kind = SourceKind.productHunt
-    let token: String?
-
-    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
-        guard let token, !token.isEmpty else { throw FetchError.missingCredential("Product Hunt token") }
-        var request = URLRequest(url: URL(string: "https://api.producthunt.com/v2/api/graphql")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let query = """
-        query($after: DateTime!) { posts(first: 20, order: VOTES, postedAfter: $after) {
-          edges { node { id name tagline url votesCount createdAt } } } }
-        """
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "query": query,
-            "variables": ["after": ISO8601DateFormatter().string(from: since)],
-        ])
-        return try Self.parse(try await HTTP.data(for: request))
-    }
-
-    private struct Response: Decodable {
-        struct Node: Decodable {
-            let id: String
-            let name: String
-            let tagline: String?
-            let url: String
-            let votesCount: Int
-            let createdAt: Date
-        }
-        struct Edge: Decodable { let node: Node }
-        struct Posts: Decodable { let edges: [Edge] }
-        struct DataField: Decodable { let posts: Posts }
-        let data: DataField
-    }
-
-    static func parse(_ data: Data) throws -> [FetchedItem] {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(Response.self, from: data).data.posts.edges.compactMap { edge in
-            let n = edge.node
-            guard let url = URL(string: n.url) else { return nil }
-            return FetchedItem(key: "ph-\(n.id)", source: .productHunt, title: n.name,
-                               detail: TextCleaner.clean(n.tagline), url: url, score: n.votesCount, postedAt: n.createdAt)
-        }
-    }
-}
-
 // MARK: - Vibe-coded projects (mentions of AI app builders on HN and GitHub)
 
 struct VibeCodeFetcher: ItemFetcher {

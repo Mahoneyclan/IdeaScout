@@ -3,7 +3,8 @@ import Foundation
 /// Records what each Claude call cost, using the token counts Claude returns with every reply.
 /// Stored in UserDefaults as a small ledger of daily totals (Apple's on-device AI is free and not tracked).
 enum UsageTracker {
-    /// Claude Opus 5.5 list prices in US dollars per million tokens. Thinking tokens are billed as output.
+    /// Claude Opus 5.5 list prices, in US dollars per million tokens, used for entries recorded
+    /// before prices were stored per call. Thinking tokens are billed as output.
     static let inputPrice = 4.0
     static let outputPrice = 20.0
     static let cacheWritePrice = 5.0   // 1.25 × input
@@ -15,15 +16,18 @@ enum UsageTracker {
         var cacheWrite = 0
         var cacheRead = 0
         var calls = 0
+        /// Dollars, worked out with the price of the model that was used. Older entries (Claude only)
+        /// don't have it, so their cost comes from the token counts at Claude's prices.
+        var dollars: Double?
 
         var cost: Double {
-            (Double(input) * UsageTracker.inputPrice + Double(output) * UsageTracker.outputPrice
-             + Double(cacheWrite) * UsageTracker.cacheWritePrice + Double(cacheRead) * UsageTracker.cacheReadPrice) / 1_000_000
+            dollars ?? (Double(input) * UsageTracker.inputPrice + Double(output) * UsageTracker.outputPrice
+                        + Double(cacheWrite) * UsageTracker.cacheWritePrice + Double(cacheRead) * UsageTracker.cacheReadPrice) / 1_000_000
         }
 
         static func + (a: Usage, b: Usage) -> Usage {
             Usage(input: a.input + b.input, output: a.output + b.output, cacheWrite: a.cacheWrite + b.cacheWrite,
-                  cacheRead: a.cacheRead + b.cacheRead, calls: a.calls + b.calls)
+                  cacheRead: a.cacheRead + b.cacheRead, calls: a.calls + b.calls, dollars: a.cost + b.cost)
         }
     }
 
@@ -49,8 +53,11 @@ enum UsageTracker {
                      cacheWrite: u.cache_creation_input_tokens ?? 0, cacheRead: u.cache_read_input_tokens ?? 0, calls: 1)
     }
 
-    static func record(response data: Data, feature: String, on date: Date = .now) {
-        guard let usage = parseUsage(data) else { return }
+    static func record(response data: Data, feature: String, price: ModelPrice? = nil, on date: Date = .now) {
+        guard var usage = parseUsage(data) else { return }
+        if let price {
+            usage.dollars = price.cost(input: usage.input, output: usage.output, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead)
+        }
         lock.lock(); defer { lock.unlock() }
         var ledger = load()
         let day = dayKey(date)

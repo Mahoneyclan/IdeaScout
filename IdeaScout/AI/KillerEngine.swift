@@ -1,10 +1,10 @@
 import Foundation
 
 /// Turns the week's trends into one or two "killer" product ideas, then has a second,
-/// sceptical pass try to kill them. Only ideas that survive are kept. Needs Claude:
+/// sceptical pass try to kill them. Only ideas that survive are kept. Needs a cloud AI:
 /// Apple's on-device model is too small for this kind of reasoning.
 struct KillerEngine {
-    let claude: ClaudeSummarizer
+    let llm: LLMSummarizer
     /// Called when the devil's-advocate step starts (for progress on screen).
     var onCritique: @Sendable () async -> Void = {}
 
@@ -95,9 +95,9 @@ struct KillerEngine {
     """
 
     func generate(_ context: Context) async throws -> [Candidate] {
-        let body = ClaudeSummarizer.requestBody(system: Self.generateInstructions, prompt: Self.generatePrompt(context),
-                                                schema: Self.candidateSchema)
-        return try Self.parseCandidates(try await claude.send(body, feature: "Killer ideas"))
+        let data = try await llm.client.complete(system: Self.generateInstructions, prompt: Self.generatePrompt(context),
+                                                 schema: Self.candidateSchema, effort: "medium", feature: "Killer ideas")
+        return try Self.parseCandidates(data)
     }
 
     static func generatePrompt(_ context: Context) -> String {
@@ -147,7 +147,7 @@ struct KillerEngine {
             }
             let ideas: [I]
         }
-        return try JSONDecoder().decode(Out.self, from: try ClaudeSummarizer.extractJSON(data)).ideas.map {
+        return try JSONDecoder().decode(Out.self, from: try LLMSummarizer.extractJSON(data)).ideas.map {
             Candidate(title: $0.title, pitch: $0.pitch, buyer: $0.buyer, pricing: $0.pricing, whyNow: $0.why_now,
                       oneWeekTest: $0.one_week_test, evidenceNumbers: $0.evidence_numbers, sameAs: $0.same_as,
                       replaces: $0.replaces ?? "")
@@ -175,10 +175,10 @@ struct KillerEngine {
     """
 
     func critique(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String) async throws -> [Review] {
-        let body = ClaudeSummarizer.requestBody(system: Self.critiqueInstructions,
-                                                prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe),
-                                                schema: Self.reviewSchema, effort: "high")
-        return try Self.parseReviews(try await claude.send(body, feature: "Devil's advocate"))
+        let data = try await llm.client.complete(system: Self.critiqueInstructions,
+                                                 prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe),
+                                                 schema: Self.reviewSchema, effort: "high", feature: "Devil's advocate")
+        return try Self.parseReviews(data)
     }
 
     static func critiquePrompt(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String) -> String {
@@ -236,7 +236,7 @@ struct KillerEngine {
             }
             let reviews: [R]
         }
-        return try JSONDecoder().decode(Out.self, from: try ClaudeSummarizer.extractJSON(data)).reviews.map {
+        return try JSONDecoder().decode(Out.self, from: try LLMSummarizer.extractJSON(data)).reviews.map {
             Review(title: $0.title, survives: $0.survives, objection: $0.objection, competitors: $0.competitors,
                    verdict: $0.verdict, pain: Ranking.clamp($0.pain), willingToPay: Ranking.clamp($0.willing_to_pay),
                    timing: Ranking.clamp($0.timing), gap: Ranking.clamp($0.gap), fit: Ranking.clamp($0.fit),

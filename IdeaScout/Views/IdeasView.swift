@@ -2,9 +2,12 @@ import SwiftUI
 import SwiftData
 import UIKit
 
+/// The Saved tab: killer ideas the user bookmarked, then projects they starred.
 struct IdeasView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Idea.starredAt, order: .reverse) private var ideas: [Idea]
+    @Query(filter: #Predicate<KillerIdea> { $0.isSaved }, sort: \KillerIdea.savedAt, order: .reverse)
+    private var savedIdeas: [KillerIdea]
     @AppStorage("ideas.sortByScore") private var sortByScore = false
     @AppStorage(AppSettings.Keys.weightNovelty) private var wNovelty = 1.0
     @AppStorage(AppSettings.Keys.weightMomentum) private var wMomentum = 1.0
@@ -23,6 +26,20 @@ struct IdeasView: View {
     var body: some View {
         NavigationStack {
             List {
+                if !savedIdeas.isEmpty {
+                    Section("Saved ideas") {
+                        ForEach(savedIdeas, id: \.key) { idea in
+                            NavigationLink { KillerIdeaDetailView(idea: idea) } label: { KillerIdeaCard(idea: idea) }
+                                .swipeActions(edge: .trailing) {
+                                    Button("Unsave", systemImage: "bookmark.slash", role: .destructive) {
+                                        idea.toggleSaved()
+                                        try? context.save()
+                                    }
+                                }
+                        }
+                    }
+                }
+                Section(ideas.isEmpty ? "" : "Saved projects") {
                 ForEach(sortedIdeas) { idea in
                     NavigationLink {
                         IdeaDetailView(idea: idea)
@@ -43,20 +60,23 @@ struct IdeasView: View {
                     offsets.map { current[$0] }.forEach(context.delete)
                     try? context.save()
                 }
+                }
             }
             .overlay {
-                if ideas.isEmpty {
+                if ideas.isEmpty && savedIdeas.isEmpty {
                     ContentUnavailableView("Nothing saved yet", systemImage: "bookmark",
-                                           description: Text("Tap the star on any project to save it here."))
+                                           description: Text("Tap the bookmark on an idea (or swipe right on it in Ideas), or the star on any project in History."))
                 }
             }
             .navigationTitle("Saved")
             .toolbar {
-                Picker("Sort", selection: $sortByScore) {
+                if !ideas.isEmpty {
+                Picker("Sort projects", selection: $sortByScore) {
                     Text("Newest").tag(false)
                     Text("Top score").tag(true)
                 }
                 .pickerStyle(.menu)
+                }
             }
         }
     }

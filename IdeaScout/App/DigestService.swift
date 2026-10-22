@@ -79,12 +79,12 @@ final class DigestService: ObservableObject {
         }
 
         var summarizer = AppSettings.makeSummarizer()
-        let hasClaudeKey = summarizer is ClaudeSummarizer
+        let hasCloudAI = summarizer is LLMSummarizer
         var allWarnings = warnings
         var killerNote: String?
         let capText = AppSettings.dailyCap.formatted(.currency(code: "USD"))
-        if hasClaudeKey && AppSettings.isOverDailyCap {
-            allWarnings.append("Today's Claude spending limit (\(capText)) is reached, so Claude was skipped. Change it in Settings → AI costs.")
+        if hasCloudAI && AppSettings.isOverDailyCap {
+            allWarnings.append("Today's AI spending limit (\(capText)) is reached, so \(summarizer.name) was skipped. Change it in Settings → AI & costs.")
             killerNote = "Killer ideas skipped: daily spending limit reached."
             summarizer = AppleSummarizer.isAvailable ? AppleSummarizer() : KeywordSummarizer(topics: topics)
         }
@@ -92,7 +92,7 @@ final class DigestService: ObservableObject {
         var drafts: [ThemeDraft]
         var noise = Set<Int>()
         // Claude translates non-English items; without it, leave out items that clearly aren't English.
-        let candidates = summarizer is ClaudeSummarizer ? items : items.filter(LanguageFilter.isEnglishOrUnclear)
+        let candidates = summarizer is LLMSummarizer ? items : items.filter(LanguageFilter.isEnglishOrUnclear)
         var batch = Array(candidates.prefix(summarizer.maxItems))
         stage = .trends
         do {
@@ -104,7 +104,7 @@ final class DigestService: ObservableObject {
         } catch {
             if Self.isCancellation(error) || Task.isCancelled { return }  // don't save a half-finished digest
             allWarnings.append("\(summarizer.name) summary failed (\(error.localizedDescription)); grouped by keyword instead.")
-            if summarizer is ClaudeSummarizer { killerNote = "Killer ideas skipped because the Claude summary failed." }
+            if summarizer is LLMSummarizer { killerNote = "Killer ideas skipped because the \(summarizer.name) summary failed." }
             summarizer = KeywordSummarizer(topics: topics)
             batch = batch.filter(LanguageFilter.isEnglishOrUnclear)
             drafts = (try? await summarizer.themes(for: batch)) ?? []
@@ -143,14 +143,14 @@ final class DigestService: ObservableObject {
         try? context.save()
 
         // Killer ideas: Claude only. A failure here keeps the saved digest.
-        if let claude = summarizer as? ClaudeSummarizer {
+        if let llm = summarizer as? LLMSummarizer {
             if AppSettings.isOverDailyCap {
-                digest.warnings.append("Killer ideas skipped: today's Claude spending limit (\(capText)) was reached during the trend step.")
+                digest.warnings.append("Killer ideas skipped: today's AI spending limit (\(capText)) was reached during the trend step.")
             } else {
                 do {
                     let leaderboard = topKillerIdeas(context: context, limit: 10).map { "\($0.title): \($0.pitch)" }
                     stage = .ideas
-                    let results = try await KillerEngine(claude: claude, onCritique: { [weak self] in
+                    let results = try await KillerEngine(llm: llm, onCritique: { [weak self] in
                         await MainActor.run { self?.stage = .critique }
                     }).run(
                         .init(themes: builtThemes, items: batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard,
@@ -172,8 +172,8 @@ final class DigestService: ObservableObject {
             }
         } else if let killerNote {
             digest.warnings.append(killerNote)
-        } else if !hasClaudeKey {
-            digest.warnings.append("Killer ideas need Claude: add an API key in Settings.")
+        } else if !hasCloudAI {
+            digest.warnings.append("Killer ideas need a cloud AI (e.g. Claude or ChatGPT): choose one and add its API key in Settings → AI & costs.")
         }
         try? context.save()
 
@@ -186,12 +186,12 @@ final class DigestService: ObservableObject {
         error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
-    /// Claude digests beat Apple's, which beat keyword grouping.
+    /// Cloud AI digests beat Apple's, which beat keyword grouping.
     nonisolated static func quality(_ summarizer: String) -> Int {
         switch summarizer {
-        case "Claude": 3
-        case "Apple on-device": 2
-        default: 1
+        case KeywordSummarizer(topics: []).name: 1
+        case AIProvider.apple.shortName: 2
+        default: 3
         }
     }
 
@@ -221,7 +221,6 @@ final class DigestService: ObservableObject {
         if AppSettings.isEnabled(.github) { fetchers.append(GitHubFetcher()) }
         if AppSettings.isEnabled(.huggingFace) { fetchers.append(HuggingFaceFetcher()) }
         if AppSettings.isEnabled(.devTo) { fetchers.append(DevToFetcher()) }
-        if AppSettings.isEnabled(.productHunt) { fetchers.append(ProductHuntFetcher(token: Keychain.get(.productHuntToken))) }
 
         let results = await withTaskGroup(of: (Int, Result<[FetchedItem], Error>).self) { group in
             for (index, fetcher) in fetchers.enumerated() {
@@ -294,6 +293,22 @@ final class DigestService: ObservableObject {
         return result
     }
 
+    // MARK: - Retired sources
+
+    /// Product Hunt was removed (its API terms don't allow this use). Deletes its stored items and the
+    /// saved token, once. Starred projects are the user's own and are kept.
+    func removeRetiredSources() {
+        let doneKey = "retired.productHunt"
+        guard !UserDefaults.standard.bool(forKey: doneKey), let context = container?.mainContext else { return }
+        let retired = "productHunt"
+        let items = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.sourceRaw == retired }))) ?? []
+        items.forEach(context.delete)
+        try? context.save()
+        Keychain.delete(account: "productHuntToken")
+        UserDefaults.standard.removeObject(forKey: "source.productHunt")
+        UserDefaults.standard.set(true, forKey: doneKey)
+    }
+
     // MARK: - Killer ideas
 
     func topKillerIdeas(context: ModelContext, limit: Int) -> [KillerIdea] {
@@ -326,6 +341,7 @@ final class DigestService: ObservableObject {
                 idea.evidenceURLs = evidence.map(\.url.absoluteString)
             }
             idea.recordSeen(on: .now)
+            idea.isDismissed = false   // proposed again, so it returns to the leaderboard
             idea.lastSeen = .now
             idea.scoreHistory.append(idea.killerScore)
         }

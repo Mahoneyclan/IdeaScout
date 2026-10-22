@@ -13,6 +13,7 @@ struct IdeaScoutApp: App {
             fatalError("Could not open the IdeaScout database: \(error)")
         }
         DigestService.shared.container = container
+        DigestService.shared.removeRetiredSources()
     }
 
     var body: some Scene {

@@ -3,7 +3,7 @@ import SwiftData
 
 /// Where an item came from.
 enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case github, hackerNews, productHunt, vibeCode, huggingFace, devTo, games, painPoints, ycombinator, appStore, research, lobsters
+    case github, hackerNews, vibeCode, huggingFace, devTo, games, painPoints, ycombinator, appStore, research, lobsters
     case fieldNotes, appReviews, atlassian, ausTender
 
     var id: String { rawValue }
@@ -12,7 +12,6 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .github: "GitHub"
         case .hackerNews: "Show HN"
-        case .productHunt: "Product Hunt"
         case .vibeCode: "Vibe-coded"
         case .huggingFace: "Hugging Face"
         case .devTo: "DEV #showdev"
@@ -33,7 +32,6 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .github: "chevron.left.forwardslash.chevron.right"
         case .hackerNews: "flame"
-        case .productHunt: "cat"
         case .vibeCode: "wand.and.stars"
         case .huggingFace: "face.smiling"
         case .devTo: "text.bubble"
@@ -311,6 +309,16 @@ struct RankWeights: Equatable, Sendable {
     var timesSeen = 1
     /// Start of each day the idea was proposed.
     var daysSeen: [Date] = []
+    /// Bookmarked by the user: listed in the Saved tab, and kept even if dismissed from the leaderboard.
+    var isSaved = false
+    var savedAt: Date?
+    /// Hidden from the leaderboard by the user. Cleared if the idea is proposed again.
+    var isDismissed = false
+
+    func toggleSaved() {
+        isSaved.toggle()
+        savedAt = isSaved ? .now : nil
+    }
 
     init(key: String, title: String) {
         self.key = key

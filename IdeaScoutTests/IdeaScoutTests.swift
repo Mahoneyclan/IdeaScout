@@ -35,22 +35,6 @@ struct SourceParsingTests {
                                       postedAt: ISO8601DateFormatter().date(from: "2026-10-15T08:00:00Z")!)])
     }
 
-    @Test func parsesProductHunt() throws {
-        let json = """
-        {"data":{"posts":{"edges":[{"node":{"id":"77","name":"Launchy","tagline":"Ship faster",
-          "url":"https://www.producthunt.com/posts/launchy","votesCount":300,"createdAt":"2026-10-18T07:01:00Z"}}]}}}
-        """
-        let items = try ProductHuntFetcher.parse(Data(json.utf8))
-        #expect(items.count == 1)
-        #expect(items[0].key == "ph-77")
-        #expect(items[0].detail == "Ship faster")
-    }
-
-    @Test func missingProductHuntTokenGivesClearError() async {
-        await #expect(throws: FetchError.self) {
-            _ = try await ProductHuntFetcher(token: nil).fetch(since: .now, topics: [])
-        }
-    }
 }
 
 struct ThemeBuilderTests {
@@ -99,7 +83,7 @@ struct DigestSelectionTests {
 
 struct ClaudeTests {
     @Test func requestUsesModelSchemaAndFallback() throws {
-        let body = ClaudeSummarizer.requestBody(system: "sys", prompt: "hi", schema: ClaudeSummarizer.themeSchema)
+        let body = ClaudeClient.requestBody(system: "sys", prompt: "hi", schema: LLMSummarizer.themeSchema)
         #expect(body["model"] as? String == "claude-opus-5-5")
         #expect(body["fallbacks"] as? String == "default")
         let config = try #require(body["output_config"] as? [String: Any])
@@ -114,14 +98,14 @@ struct ClaudeTests {
             "content": [["type": "thinking", "thinking": ""], ["type": "text", "text": inner]],
             "stop_reason": "end_turn",
         ]
-        let drafts = try ClaudeSummarizer.parseThemes(JSONSerialization.data(withJSONObject: response))
+        let drafts = try LLMSummarizer.parseThemes(JSONSerialization.data(withJSONObject: response))
         #expect(drafts == [ThemeDraft(title: "Agents", summary: "S", opportunities: ["Do X"], itemNumbers: [1, 3])])
     }
 
     @Test func refusalThrows() throws {
         let response: [String: Any] = ["content": [], "stop_reason": "refusal"]
         let data = try JSONSerialization.data(withJSONObject: response)
-        #expect(throws: SummarizerError.self) { try ClaudeSummarizer.parseThemes(data) }
+        #expect(throws: SummarizerError.self) { try LLMSummarizer.parseThemes(data) }
     }
 
     @Test func promptIncludesNotes() {
@@ -135,10 +119,10 @@ struct KeychainTests {
     static let testService = "com.mahoney.IdeaScout.tests"
 
     @Test func roundTrip() {
-        Keychain.set("test-value", for: .productHuntToken, service: Self.testService)
-        #expect(Keychain.get(.productHuntToken, service: Self.testService) == "test-value")
-        Keychain.set(nil, for: .productHuntToken, service: Self.testService)
-        #expect(Keychain.get(.productHuntToken, service: Self.testService) == nil)
+        Keychain.set("test-value", for: .openaiAPIKey, service: Self.testService)
+        #expect(Keychain.get(.openaiAPIKey, service: Self.testService) == "test-value")
+        Keychain.set(nil, for: .openaiAPIKey, service: Self.testService)
+        #expect(Keychain.get(.openaiAPIKey, service: Self.testService) == nil)
     }
 }
 
@@ -175,7 +159,7 @@ struct RankingTests {
     @Test func claudeParsesScores() throws {
         let inner = #"{"themes":[{"title":"A","summary":"S","opportunities":[],"item_numbers":[1],"novelty":4,"novelty_reason":"n","viability":2,"viability_reason":"v","opportunity_gap":5,"opportunity_gap_reason":"g"}]}"#
         let response: [String: Any] = ["content": [["type": "text", "text": inner]], "stop_reason": "end_turn"]
-        let draft = try #require(try ClaudeSummarizer.parseThemes(JSONSerialization.data(withJSONObject: response)).first)
+        let draft = try #require(try LLMSummarizer.parseThemes(JSONSerialization.data(withJSONObject: response)).first)
         #expect((draft.novelty, draft.viability, draft.gap) == (4, 2, 5))
         #expect(draft.reasons.gap == "g")
     }
@@ -353,7 +337,7 @@ struct EnglishOnlyTests {
     @Test func appliesClaudeTranslations() throws {
         let inner = #"{"themes":[],"translations":[{"number":2,"title":"Video generator","description":"Makes short videos"}]}"#
         let data = try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": inner]], "stop_reason": "end_turn"])
-        let translations = try ClaudeSummarizer.parseTranslations(data)
+        let translations = try LLMSummarizer.parseTranslations(data)
         let items = Translations.apply(translations, to: [item("a", title: "English tool"), item("b", title: "视频生成器")])
         #expect(items.map(\.title) == ["English tool", "Video generator"])
         #expect(items[1].detail == "Makes short videos")
@@ -370,7 +354,7 @@ struct EnglishOnlyTests {
     }
 
     @Test func schemaRequiresTranslations() {
-        let required = ClaudeSummarizer.themeSchema["required"] as? [String]
+        let required = LLMSummarizer.themeSchema["required"] as? [String]
         #expect(required?.contains("translations") == true)
     }
 }
@@ -495,7 +479,7 @@ struct ReliabilityTests {
         var stream = StreamAssembler()
         for line in lines { try stream.consume(line) }
         let data = try stream.response()
-        #expect(String(decoding: try ClaudeSummarizer.extractJSON(data), as: UTF8.self) == #"{"suggestions":["a"]}"#)
+        #expect(String(decoding: try LLMSummarizer.extractJSON(data), as: UTF8.self) == #"{"suggestions":["a"]}"#)
         let usage = try #require(UsageTracker.parseUsage(data))
         #expect(usage.input == 1000 && usage.output == 500)
     }
@@ -506,20 +490,20 @@ struct ReliabilityTests {
             try stream.consume(#"data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#)
         }
         #expect(throws: StreamAssembler.StreamError.self) { try StreamAssembler().response() }
-        #expect(ClaudeSummarizer.isRetryable(StreamAssembler.StreamError(message: "x")))
+        #expect(LLMRetry.isRetryable(StreamAssembler.StreamError(message: "x")))
     }
 
     @Test func retriesOnlyTemporaryProblems() {
-        #expect(ClaudeSummarizer.isRetryable(URLError(.networkConnectionLost)))
-        #expect(ClaudeSummarizer.isRetryable(URLError(.timedOut)))
-        #expect(ClaudeSummarizer.isRetryable(ClaudeHTTPError(status: 529, retryAfter: nil, detail: "")))
-        #expect(ClaudeSummarizer.isRetryable(ClaudeHTTPError(status: 503, retryAfter: nil, detail: "")))
-        #expect(!ClaudeSummarizer.isRetryable(ClaudeHTTPError(status: 401, retryAfter: nil, detail: "")))
-        #expect(!ClaudeSummarizer.isRetryable(ClaudeHTTPError(status: 400, retryAfter: nil, detail: "")))
-        #expect(!ClaudeSummarizer.isRetryable(SummarizerError.refused))
-        #expect(ClaudeSummarizer.retryDelay(attempt: 0, retryAfter: nil, jitter: 0) == 3)
-        #expect(ClaudeSummarizer.retryDelay(attempt: 1, retryAfter: nil, jitter: 0) == 15)
-        #expect(ClaudeSummarizer.retryDelay(attempt: 0, retryAfter: 120, jitter: 0) == 30)
+        #expect(LLMRetry.isRetryable(URLError(.networkConnectionLost)))
+        #expect(LLMRetry.isRetryable(URLError(.timedOut)))
+        #expect(LLMRetry.isRetryable(LLMHTTPError(status: 529, retryAfter: nil, detail: "")))
+        #expect(LLMRetry.isRetryable(LLMHTTPError(status: 503, retryAfter: nil, detail: "")))
+        #expect(!LLMRetry.isRetryable(LLMHTTPError(status: 401, retryAfter: nil, detail: "")))
+        #expect(!LLMRetry.isRetryable(LLMHTTPError(status: 400, retryAfter: nil, detail: "")))
+        #expect(!LLMRetry.isRetryable(SummarizerError.refused))
+        #expect(LLMRetry.retryDelay(attempt: 0, retryAfter: nil, jitter: 0) == 3)
+        #expect(LLMRetry.retryDelay(attempt: 1, retryAfter: nil, jitter: 0) == 15)
+        #expect(LLMRetry.retryDelay(attempt: 0, retryAfter: 120, jitter: 0) == 30)
     }
 
     @Test func neverReplacesABetterDigest() {
@@ -538,7 +522,7 @@ struct ReliabilityTests {
     }
 
     @Test func requestsAllowLongReplies() {
-        let body = ClaudeSummarizer.requestBody(system: "s", prompt: "p", schema: [:])
+        let body = ClaudeClient.requestBody(system: "s", prompt: "p", schema: [:])
         #expect(body["max_tokens"] as? Int == 32000)
     }
 }
@@ -718,14 +702,14 @@ struct DemandSourceTests {
     @Test func clustersAndNoiseAreAssembled() throws {
         let inner = #"{"themes":[],"translations":[],"pain_clusters":[{"title":"Re-keying timesheets","buyer":"Payroll officer at a contractor firm","workaround":"Excel every Friday","pay_signals":"none seen","summary":"s","item_numbers":[1,2]}],"noise_numbers":[3]}"#
         let data = try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": inner]], "stop_reason": "end_turn"])
-        let clusters = try ClaudeSummarizer.parseClusters(data)
+        let clusters = try LLMSummarizer.parseClusters(data)
         #expect(clusters.first?.isPainCluster == true)
         let built = ThemeBuilder.assemble(clusters, items: [item("a", .painPoints), item("b", .fieldNotes), item("c"), item("d")],
-                                          noise: try ClaudeSummarizer.parseNoise(data))
+                                          noise: try LLMSummarizer.parseNoise(data))
         #expect(built.first?.isPainCluster == true && built.first?.buyer == "Payroll officer at a contractor firm")
         #expect(built.first?.scores == ThemeScores())
         #expect(built.last?.isCatchAll == true && built.last?.items.map(\.key) == ["d"])
-        let required = ClaudeSummarizer.themeSchema["required"] as? [String]
+        let required = LLMSummarizer.themeSchema["required"] as? [String]
         #expect(required == ["themes", "translations", "pain_clusters", "noise_numbers"])
     }
 
@@ -746,5 +730,116 @@ struct DemandSourceTests {
         #expect(lines[0].hasPrefix("1. [Demand · App Store complaints] T"))
         #expect(lines[0].filter { $0 == "x" }.count == 300)
         #expect(lines[1].filter { $0 == "x" }.count == 140)
+    }
+}
+
+struct ProviderChoiceTests {
+    private let schema: [String: Any] = ["type": "object", "properties": ["a": ["type": "string"]], "required": ["a"],
+                                         "additionalProperties": false]
+
+    @Test func everyCloudProviderHasARecommendedModelKeyAndAddress() {
+        for provider in AIProvider.allCases where provider.isCloud {
+            #expect(!provider.recommendedModel.isEmpty)
+            #expect(provider.keychainKey != nil)
+            if provider != .claude { #expect(provider.chatURL != nil) }
+        }
+        #expect(AIProvider.claude.recommendedModel == "claude-opus-5-5")
+        #expect(AIProvider.openai.recommendedModel == "gpt-6.1-sol")
+        #expect(Set(AIProvider.allCases.compactMap(\.keychainKey)).count == 9)
+        #expect(AIProvider.grok.recommendedModel == "grok-4.3")
+        #expect(AIProvider.deepseek.recommendedModel == "deepseek-flash")
+        #expect(AIProvider.gemini.models.map(\.id).contains("gemma-4-31b-it"))
+        #expect(AIProvider.kimi.country == "China" && AIProvider.claude.country == "USA")
+    }
+
+    @Test func strictSchemaRequestForOpenAIStyleProviders() throws {
+        let body = OpenAICompatibleClient.requestBody(provider: .openai, model: "gpt-6.1-sol", system: "sys", prompt: "hi",
+                                                      schema: schema, effort: "high")
+        let format = try #require(body["response_format"] as? [String: Any])
+        #expect(format["type"] as? String == "json_schema")
+        #expect((format["json_schema"] as? [String: Any])?["strict"] as? Bool == true)
+        #expect(body["max_completion_tokens"] as? Int == 32000)
+        #expect(body["reasoning_effort"] as? String == "high")
+        let messages = try #require(body["messages"] as? [[String: String]])
+        #expect(messages.map { $0["role"] } == ["system", "user"])
+
+        let grok = OpenAICompatibleClient.requestBody(provider: .grok, model: "grok-4.3", system: "s", prompt: "p", schema: schema, effort: "high")
+        #expect(grok["max_tokens"] as? Int == 32000)
+        #expect(grok["reasoning_effort"] == nil)
+        let minimal = OpenAICompatibleClient.requestBody(provider: .openai, model: "m", system: "s", prompt: "p", schema: schema,
+                                                         effort: "high", optionalSettings: false)
+        #expect(minimal["reasoning_effort"] == nil && minimal["max_completion_tokens"] == nil)
+    }
+
+    @Test func deepSeekGetsJSONModeWithSchemaInInstructions() throws {
+        let body = OpenAICompatibleClient.requestBody(provider: .deepseek, model: "deepseek-flash", system: "sys", prompt: "hi",
+                                                      schema: schema, effort: "medium")
+        #expect((body["response_format"] as? [String: Any])?["type"] as? String == "json_object")
+        let system = try #require((body["messages"] as? [[String: String]])?.first?["content"])
+        #expect(system.contains("JSON schema"))
+        #expect(system.contains("\"additionalProperties\":false"))
+    }
+
+    @Test func gemmaGetsInstructionsInTheUserMessageAndNoJSONSetting() throws {
+        let body = OpenAICompatibleClient.requestBody(provider: .gemini, model: "gemma-4-31b-it", system: "sys", prompt: "hi",
+                                                      schema: schema, effort: "high")
+        #expect(body["response_format"] == nil && body["reasoning_effort"] == nil)
+        let messages = try #require(body["messages"] as? [[String: String]])
+        #expect(messages.count == 1 && messages[0]["role"] == "user")
+        #expect(messages[0]["content"]?.hasPrefix("sys") == true && messages[0]["content"]?.hasSuffix("hi") == true)
+        let argon = OpenAICompatibleClient.requestBody(provider: .gemini, model: "gemini-4-argon", system: "s", prompt: "p",
+                                                       schema: schema, effort: "high")
+        #expect((argon["response_format"] as? [String: Any])?["type"] as? String == "json_schema")
+        let kimi = OpenAICompatibleClient.requestBody(provider: .kimi, model: "kimi-k3", system: "s", prompt: "p", schema: schema, effort: "high")
+        #expect((kimi["response_format"] as? [String: Any])?["type"] as? String == "json_object")
+        #expect(kimi["reasoning_effort"] == nil)
+    }
+
+    @Test func convertsOpenAIStyleRepliesForTheParsers() throws {
+        let reply = #"{"choices":[{"message":{"content":"```json\n{\"suggestions\":[\"a\"]}\n```"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":200,"prompt_tokens_details":{"cached_tokens":400}}}"#
+        let data = try OpenAICompatibleClient.convert(Data(reply.utf8))
+        #expect(String(decoding: try LLMSummarizer.extractJSON(data), as: UTF8.self) == #"{"suggestions":["a"]}"#)
+        let usage = try #require(UsageTracker.parseUsage(data))
+        #expect(usage.input == 600 && usage.cacheRead == 400 && usage.output == 200)
+
+        let cut = #"{"choices":[{"message":{"content":"{"},"finish_reason":"length"}]}"#
+        #expect(throws: SummarizerError.self) { try LLMSummarizer.extractJSON(try OpenAICompatibleClient.convert(Data(cut.utf8))) }
+        let refused = #"{"choices":[{"message":{"content":null,"refusal":"no"},"finish_reason":"stop"}]}"#
+        #expect(throws: SummarizerError.self) { try LLMSummarizer.extractJSON(try OpenAICompatibleClient.convert(Data(refused.utf8))) }
+    }
+
+    @Test func costsUseTheChosenModelsPriceAndOldEntriesStillWork() throws {
+        let price = ModelPrice(input: 2, output: 10)
+        #expect(abs(price.cost(input: 1_000_000, output: 100_000) - 3.0) < 0.0001)
+        let old = #"{"input":1000000,"output":0,"cacheWrite":0,"cacheRead":0,"calls":1}"#
+        let decoded = try JSONDecoder().decode(UsageTracker.Usage.self, from: Data(old.utf8))
+        #expect(abs(decoded.cost - 4.0) < 0.0001)   // Claude price for entries without stored dollars
+        let mixed = decoded + UsageTracker.Usage(input: 1_000_000, calls: 1, dollars: 2.0)
+        #expect(abs(mixed.cost - 6.0) < 0.0001)
+    }
+
+    @Test func geminiIntroductoryPriceEnds() {
+        let nov = ISO8601DateFormatter().date(from: "2026-11-15T00:00:00Z")!
+        let dec = ISO8601DateFormatter().date(from: "2026-12-02T00:00:00Z")!
+        #expect(AIProvider.geminiArgonPrice(on: nov).input == 2)
+        #expect(AIProvider.geminiArgonPrice(on: dec).input == 4)
+    }
+
+    @Test func digestQualityTreatsEveryCloudAIAlike() {
+        #expect(DigestService.quality("Grok") == DigestService.quality("Claude"))
+        #expect(!DigestService.shouldReplace(existing: "ChatGPT", with: "Keywords"))
+        #expect(DigestService.shouldReplace(existing: "Apple on-device", with: "Gemini"))
+    }
+}
+
+struct SavedIdeaTests {
+    @Test func savingAndDismissing() {
+        let idea = KillerIdea(key: "a", title: "A")
+        idea.toggleSaved()
+        #expect(idea.isSaved && idea.savedAt != nil)
+        idea.isDismissed = true
+        #expect(idea.isSaved)   // dismissing keeps it in Saved
+        idea.toggleSaved()
+        #expect(!idea.isSaved && idea.savedAt == nil)
     }
 }

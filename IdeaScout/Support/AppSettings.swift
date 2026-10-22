@@ -19,6 +19,8 @@ enum AppSettings {
         static let painWindowDays = "painWindowDays"
         static let claudeMaxItems = "claudeMaxItems"
         static let fieldNotes = "fieldNotes"
+        static func model(_ provider: AIProvider) -> String { "model.\(provider.rawValue)" }
+        static func customPrice(_ provider: AIProvider, _ side: String) -> String { "price.\(provider.rawValue).\(side)" }
         static func sourceEnabled(_ kind: SourceKind) -> String { "source.\(kind.rawValue)" }
     }
 
@@ -93,13 +95,37 @@ enum AppSettings {
     /// True while unit tests run, so the app doesn't fetch live data in the background of a test.
     static let isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
-    /// Picks the chosen AI if it can run, otherwise the other one, otherwise keyword grouping.
+    /// The chosen AI if it can run, otherwise Apple's on-device model, otherwise keyword grouping.
+    /// Never falls back to a different paid provider, so spending only happens where the user chose.
     static func makeSummarizer() -> any Summarizer {
-        let claudeKey = Keychain.get(.claudeAPIKey)
-        let claude = claudeKey.map { ClaudeSummarizer(apiKey: $0) }
-        let apple = AppleSummarizer.isAvailable ? AppleSummarizer() : nil
-        let ordered: [(any Summarizer)?] = provider == .claude ? [claude, apple] : [apple, claude]
-        return ordered.compactMap { $0 }.first ?? KeywordSummarizer(topics: topics)
+        if let client = makeClient(for: provider) { return LLMSummarizer(client: client) }
+        if AppleSummarizer.isAvailable { return AppleSummarizer() }
+        return KeywordSummarizer(topics: topics)
+    }
+
+    /// A client for a cloud provider, or nil if it's Apple or has no API key.
+    static func makeClient(for provider: AIProvider) -> (any LLMClient)? {
+        guard let keyName = provider.keychainKey, let key = Keychain.get(keyName) else { return nil }
+        let model = model(for: provider)
+        let price = price(for: provider, model: model)
+        if provider == .claude { return ClaudeClient(apiKey: key, model: model, price: price) }
+        return OpenAICompatibleClient(provider: provider, apiKey: key, model: model, price: price)
+    }
+
+    /// The model chosen for a provider (the recommended one unless the user picked another).
+    static func model(for provider: AIProvider) -> String {
+        let value = UserDefaults.standard.string(forKey: Keys.model(provider))?.trimmingCharacters(in: .whitespaces) ?? ""
+        return value.isEmpty ? provider.recommendedModel : value
+    }
+
+    /// Known models use their list price; any other model uses the price typed in Settings
+    /// (defaulting to the recommended model's price).
+    static func price(for provider: AIProvider, model: String) -> ModelPrice {
+        if let known = provider.models.first(where: { $0.id == model }) { return known.price }
+        let fallback = provider.models.first?.price ?? ModelPrice(input: 0, output: 0)
+        let input = UserDefaults.standard.object(forKey: Keys.customPrice(provider, "input")) as? Double ?? fallback.input
+        let output = UserDefaults.standard.object(forKey: Keys.customPrice(provider, "output")) as? Double ?? fallback.output
+        return ModelPrice(input: input, output: output)
     }
 }
 

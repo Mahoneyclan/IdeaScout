@@ -72,6 +72,10 @@ struct KillerIdeaCard: View {
             }
             HStack {
                 KillerStatusLabel(score: idea.killerScore)
+                if idea.isSaved {
+                    Image(systemName: "bookmark.fill").font(.caption2).foregroundStyle(.indigo)
+                        .accessibilityLabel("Saved")
+                }
                 Text("Last seen \(idea.lastSeen.formatted(date: .abbreviated, time: .omitted))")
                     .font(.caption2).foregroundStyle(.secondary)
             }
@@ -93,7 +97,8 @@ struct KillerIdeaCard: View {
 }
 
 struct KillerIdeaDetailView: View {
-    let idea: KillerIdea
+    @Bindable var idea: KillerIdea
+    @Environment(\.modelContext) private var context
     @State private var copied = false
 
     private var seenDays: String {
@@ -195,6 +200,17 @@ struct KillerIdeaDetailView: View {
             .padding(.vertical, 8)
             .background(.bar)
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    idea.toggleSaved()
+                    try? context.save()
+                } label: {
+                    Image(systemName: idea.isSaved ? "bookmark.fill" : "bookmark")
+                }
+                .accessibilityLabel(idea.isSaved ? "Remove from Saved" : "Save idea")
+            }
+        }
         .navigationTitle("Killer idea")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -210,7 +226,7 @@ struct LeaderboardView: View {
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
     @State private var pendingDismiss: KillerIdea?
 
-    private var ranked: [KillerIdea] { ideas.sorted { $0.leaderboardScore > $1.leaderboardScore } }
+    private var ranked: [KillerIdea] { ideas.filter { !$0.isDismissed }.sorted { $0.leaderboardScore > $1.leaderboardScore } }
 
     var body: some View {
         let killers = ranked.filter { $0.killerScore >= qualityBar }
@@ -237,11 +253,14 @@ struct LeaderboardView: View {
                                 isPresented: Binding(get: { pendingDismiss != nil }, set: { if !$0 { pendingDismiss = nil } }),
                                 titleVisibility: .visible) {
                 Button("Dismiss", role: .destructive) {
-                    if let idea = pendingDismiss { context.delete(idea); try? context.save() }
+                    // Hidden rather than deleted, so its history and a saved copy are kept.
+                    if let idea = pendingDismiss { idea.isDismissed = true; try? context.save() }
                     pendingDismiss = nil
                 }
             } message: {
-                Text("It's removed from the list. If it's proposed again on a later day, it comes back as new.")
+                Text(pendingDismiss?.isSaved == true
+                     ? "It's hidden from this list but stays in Saved. It comes back if it's proposed again."
+                     : "It's hidden from this list. It comes back if it's proposed again on a later day.")
             }
         }
     }
@@ -259,6 +278,13 @@ struct LeaderboardView: View {
             }
             .swipeActions(edge: .trailing) {
                 Button("Dismiss", role: .destructive) { pendingDismiss = idea }
+            }
+            .swipeActions(edge: .leading) {
+                Button(idea.isSaved ? "Unsave" : "Save", systemImage: idea.isSaved ? "bookmark.slash" : "bookmark") {
+                    idea.toggleSaved()
+                    try? context.save()
+                }
+                .tint(.indigo)
             }
         }
     }
