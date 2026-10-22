@@ -1,46 +1,9 @@
 import SwiftUI
 import SwiftData
 
-struct TodayView: View {
-    @EnvironmentObject private var service: DigestService
-    @Query(sort: \Digest.day, order: .reverse) private var digests: [Digest]
-    @AppStorage(AppSettings.Keys.trendWindowDays) private var windowDays = AppSettings.defaultTrendWindowDays
-
-    private var today: Digest? { digests.first { Calendar.current.isDateInToday($0.day) } }
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if let today {
-                    DigestContentView(digest: today, showKillerIdeas: true)
-                } else if service.isRefreshing {
-                    ProgressView("Scanning sources and finding themes…")
-                } else {
-                    ContentUnavailableView {
-                        Label("No digest yet today", systemImage: "sparkles")
-                    } description: {
-                        Text(service.lastError ?? "Fetch today's new projects and themes.")
-                    } actions: {
-                        Button("Fetch today's ideas") { Task { await service.refresh(force: true) } }
-                            .buttonStyle(.borderedProminent)
-                    }
-                }
-            }
-            .navigationTitle("Today")
-            .navigationSubtitle("Trends from the past \(windowDays) days")
-            .toolbar {
-                if service.isRefreshing && today != nil { ProgressView() }
-            }
-            .refreshable { await service.refresh(force: true) }
-            .task { if !AppSettings.isRunningTests { await service.refresh(force: false) } }
-        }
-    }
-}
-
-/// The themes and items of one digest. Used by Today and History.
+/// One day's digest: the ideas proposed that day, pain clusters and trends. Opened from History.
 struct DigestContentView: View {
     let digest: Digest
-    var showKillerIdeas = false
     @Query private var killerIdeas: [KillerIdea]
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var service: DigestService
@@ -50,8 +13,11 @@ struct DigestContentView: View {
     @AppStorage(AppSettings.Keys.weightViability) private var wViability = 1.0
     @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
     @AppStorage("filter.gamesOnly") private var gamesOnly = false
+    /// The filter only applies while the Games source is on (otherwise its picker is hidden).
+    private var gamesFilter: Bool { gamesOnly && AppSettings.isEnabled(.games) }
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
     @State private var showBelowBar = false
+    @State private var expandedScores: Set<PersistentIdentifier> = []
 
     private var weights: RankWeights {
         RankWeights(novelty: wNovelty, momentum: wMomentum, viability: wViability, gap: wGap)
@@ -59,26 +25,26 @@ struct DigestContentView: View {
 
     /// With "Games only", keeps trends that contain games and shows only their game projects.
     private func visibleItems(_ theme: Theme) -> [Item] {
-        gamesOnly ? theme.sortedItems.filter { $0.source == .games } : theme.sortedItems
+        gamesFilter ? theme.sortedItems.filter { $0.source == .games } : theme.sortedItems
     }
 
     var body: some View {
         let starred = Set(ideas.map(\.key))
-        let clusters = gamesOnly ? [] : digest.sortedThemes.filter(\.isPainCluster)
+        let clusters = gamesFilter ? [] : digest.sortedThemes.filter(\.isPainCluster)
         let withItems = Theme.ranked(digest.themes.filter { !$0.isPainCluster }, weights: weights).filter { !visibleItems($0).isEmpty }
         let themes = showBelowBar ? withItems : withItems.filter { $0.clears(qualityBar, weights: weights) }
         let hiddenCount = withItems.count - themes.count
-        let best = KillerIdea.bestToShow(killerIdeas)
+        let dayIdeas = KillerIdea.seen(on: digest.day, in: killerIdeas)
         List {
-            if showKillerIdeas && !gamesOnly && !best.isEmpty {
+            if !gamesFilter && !dayIdeas.isEmpty {
                 Section {
-                    ForEach(best, id: \.key) { idea in
-                        NavigationLink { KillerIdeaDetailView(idea: idea) } label: { KillerIdeaCard(idea: idea, showDate: !idea.isFromToday) }
+                    ForEach(dayIdeas, id: \.key) { idea in
+                        NavigationLink { KillerIdeaDetailView(idea: idea) } label: { KillerIdeaCard(idea: idea) }
                     }
                 } header: {
-                    Label(best.contains(where: \.isFromToday) ? "Best ideas today" : "Best idea this week", systemImage: "flame")
+                    Label("Ideas from this day", systemImage: "flame")
                 } footer: {
-                    Text("Survived a devil's-advocate check. \"Killer\" ideas score at least \(qualityBar.formatted()) / 5; near-misses are just below. See all in Top Ideas.")
+                    Text("Killer: at least \(qualityBar.formatted()) / 5. Near-miss: just below. Scores are the latest.")
                 }
             }
             if !clusters.isEmpty {
@@ -113,12 +79,8 @@ struct DigestContentView: View {
             ForEach(themes) { theme in
                 Section {
                     Text(theme.summary).font(.subheadline)
-                    if !theme.isCatchAll && theme.scores != ThemeScores() {
-                        DisclosureGroup {
-                            ScoreReasonsView(scores: theme.scores, reasons: theme.reasons)
-                        } label: {
-                            ScoreBadges(scores: theme.scores)
-                        }
+                    if expandedScores.contains(theme.persistentModelID) {
+                        ScoreReasonsView(scores: theme.scores, reasons: theme.reasons)
                     }
                     if !theme.opportunities.isEmpty {
                         DisclosureGroup {
@@ -139,9 +101,21 @@ struct DigestContentView: View {
                         Text(theme.title)
                         Spacer()
                         if !theme.isCatchAll, let overall = theme.scores.overall(weights) {
-                            Text(overall, format: .number.precision(.fractionLength(1)))
-                                .monospacedDigit()
-                                .accessibilityLabel("Overall score \(overall.formatted(.number.precision(.fractionLength(1)))) out of 5")
+                            // Tap the score to see how it was reached.
+                            let open = expandedScores.contains(theme.persistentModelID)
+                            Button {
+                                if open { expandedScores.remove(theme.persistentModelID) } else { expandedScores.insert(theme.persistentModelID) }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(overall, format: .number.precision(.fractionLength(1))).monospacedDigit()
+                                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.caption2)
+                                }
+                                .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Overall score \(overall.formatted(.number.precision(.fractionLength(1)))) out of 5")
+                            .accessibilityHint(open ? "Hides the score breakdown" : "Shows the score breakdown")
                         }
                     }
                 }
@@ -162,18 +136,21 @@ struct DigestContentView: View {
             .foregroundStyle(.secondary)
         }
         .overlay {
-            if themes.isEmpty && gamesOnly && hiddenCount == 0 {
+            if themes.isEmpty && gamesFilter && hiddenCount == 0 {
                 ContentUnavailableView("No games in this digest", systemImage: "gamecontroller",
                                        description: Text("Turn on the Games source in Settings, or switch the filter back to All."))
             }
         }
         .toolbar {
+            // Only offered when the Games source is switched on.
+            if AppSettings.isEnabled(.games) {
             ToolbarItem(placement: .topBarLeading) {
                 Picker("Show", selection: $gamesOnly) {
                     Label("All", systemImage: "square.grid.2x2").tag(false)
                     Label("Games only", systemImage: "gamecontroller").tag(true)
                 }
                 .pickerStyle(.menu)
+            }
             }
         }
     }
@@ -240,11 +217,15 @@ struct ItemRow: View {
                 content
             }
             Spacer(minLength: 0)
+            Spacer(minLength: 12)   // dead zone between the link and the star
             Button(action: toggleStar) {
                 Image(systemName: isStarred ? "star.fill" : "star")
                     .foregroundStyle(isStarred ? .yellow : .secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
+            .padding(.trailing, -8)
             .accessibilityLabel(isStarred ? "Remove from ideas" : "Save to ideas")
         }
     }

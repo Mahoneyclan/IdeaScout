@@ -9,6 +9,20 @@ final class DigestService: ObservableObject {
     static let backgroundTaskID = "com.mahoney.IdeaScout.refresh"
 
     @Published private(set) var isRefreshing = false
+    /// Which step a running refresh is on, for the progress shown on screen.
+    @Published private(set) var stage: Stage?
+
+    enum Stage: Int, CaseIterable {
+        case fetching = 1, trends, ideas, critique
+        var label: String {
+            switch self {
+            case .fetching: "Fetching sources"
+            case .trends: "Reading items and finding trends"
+            case .ideas: "Generating ideas"
+            case .critique: "Devil's advocate"
+            }
+        }
+    }
     @Published var lastError: String?
 
     var container: ModelContainer?
@@ -45,8 +59,9 @@ final class DigestService: ObservableObject {
         if !force && !existing.isEmpty && !fellBack { return }
 
         isRefreshing = true
+        stage = .fetching
         lastError = nil
-        defer { isRefreshing = false }
+        defer { isRefreshing = false; stage = nil }
 
         // Trends are built from the chosen window (default a week) so a theme reflects several projects over
         // several days; pain points, which are rarer, use their own longer window. Items from the last 24 hours are "new".
@@ -79,6 +94,7 @@ final class DigestService: ObservableObject {
         // Claude translates non-English items; without it, leave out items that clearly aren't English.
         let candidates = summarizer is ClaudeSummarizer ? items : items.filter(LanguageFilter.isEnglishOrUnclear)
         var batch = Array(candidates.prefix(summarizer.maxItems))
+        stage = .trends
         do {
             let analysis = try await summarizer.analyse(batch)
             drafts = analysis.drafts
@@ -133,7 +149,10 @@ final class DigestService: ObservableObject {
             } else {
                 do {
                     let leaderboard = topKillerIdeas(context: context, limit: 10).map { "\($0.title): \($0.pitch)" }
-                    let results = try await KillerEngine(claude: claude).run(
+                    stage = .ideas
+                    let results = try await KillerEngine(claude: claude, onCritique: { [weak self] in
+                        await MainActor.run { self?.stage = .critique }
+                    }).run(
                         .init(themes: builtThemes, items: batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard,
                               focusIndustry: AppSettings.focusIndustry,
                               painClusters: builtThemes.filter(\.isPainCluster).map {
@@ -306,6 +325,7 @@ final class DigestService: ObservableObject {
                 idea.evidenceTitles = evidence.map(\.title)
                 idea.evidenceURLs = evidence.map(\.url.absoluteString)
             }
+            idea.recordSeen(on: .now)
             idea.lastSeen = .now
             idea.scoreHistory.append(idea.killerScore)
         }

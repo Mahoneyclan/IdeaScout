@@ -46,11 +46,11 @@ struct IdeasView: View {
             }
             .overlay {
                 if ideas.isEmpty {
-                    ContentUnavailableView("No saved ideas", systemImage: "star",
+                    ContentUnavailableView("Nothing saved yet", systemImage: "bookmark",
                                            description: Text("Tap the star on any project to save it here."))
                 }
             }
-            .navigationTitle("Ideas")
+            .navigationTitle("Saved")
             .toolbar {
                 Picker("Sort", selection: $sortByScore) {
                     Text("Newest").tag(false)

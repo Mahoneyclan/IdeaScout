@@ -5,6 +5,8 @@ import Foundation
 /// Apple's on-device model is too small for this kind of reasoning.
 struct KillerEngine {
     let claude: ClaudeSummarizer
+    /// Called when the devil's-advocate step starts (for progress on screen).
+    var onCritique: @Sendable () async -> Void = {}
 
     struct Candidate: Equatable, Sendable {
         var title: String
@@ -54,6 +56,7 @@ struct KillerEngine {
     func run(_ context: Context) async throws -> [Result] {
         let candidates = try await generate(context)
         guard !candidates.isEmpty else { return [] }
+        await onCritique()
         let reviews = try await critique(candidates, items: context.items, aboutMe: context.aboutMe)
         return Self.survivors(candidates: candidates, reviews: reviews, items: context.items)
     }

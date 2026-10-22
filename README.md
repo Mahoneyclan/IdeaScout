@@ -6,12 +6,12 @@ Native Swift / SwiftUI / SwiftData. No backend: everything runs on the phone.
 
 ## What it does
 
-- **Today:** the best ideas (today's, or the best of the past week), then recent activity grouped into 4–6 themes. Each theme is scored for novelty, momentum, viability and opportunity gap, and comes with money-making variants.
-- **Killer ideas:** Claude suggests 5 business product ideas from the trends. Each names a business buyer, a monthly price and the manual task or costly workaround it replaces; at most 1 may be a developer tool and at least 2 target your industry focus. A second, sceptical pass (given each idea's evidence) tries to kill each one. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**.
-- **Top Ideas:** a leaderboard of killer ideas and near-misses. Ideas that come back on several days rank higher.
-- **History:** past daily digests.
-- **Ideas:** projects you've starred, with notes, AI-suggested monetisable variants, and a copyable "flesh out this idea" prompt.
-- **Settings:** topics (steer GitHub search), "About me" (used to score fit), industry focus, scan windows and number of items Claude reads, sources on/off, quality bar, ranking weights, AI provider, an AI cost tracker with a daily spending limit, and the daily notification time.
+- **Ideas** (opens first): a leaderboard of killer ideas and near-misses, with today's refresh status and step-by-step progress at the top. Ideas that come back on several days rank higher. Each card shows its weakest score; swipe left to dismiss (with confirmation).
+- **Killer ideas:** Claude suggests 5 business product ideas from the trends and pain clusters. Each names a business buyer, a monthly price and the manual task or costly workaround it replaces; at most 1 may be a developer tool and at least 2 target your industry focus. A second, sceptical pass (given each idea's evidence) tries to kill each one. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**. Each idea records every day it was proposed.
+- **History:** one row per day with its best idea and pain clusters; tap a day for that day's ideas, pain clusters and trends.
+- **Saved:** projects you've starred, with notes, AI-suggested monetisable variants, and a copyable "flesh out this idea" prompt.
+- **Settings:** About me, My Business Challenges, industry focus and the daily digest time up front; under **Advanced**: sources and topics, scan windows, items Claude reads, quality bar and ranking weights, AI provider and key, costs and daily limit, and the Product Hunt token.
+- **Refreshing:** a button at the bottom of Ideas and History shows the estimated cost; a second refresh on the same day asks first.
 
 All output is in English. Non-English items are translated by Claude, or filtered out when Apple's on-device model is used.
 

@@ -309,6 +309,8 @@ struct RankWeights: Equatable, Sendable {
     var firstSeen: Date
     var lastSeen: Date
     var timesSeen = 1
+    /// Start of each day the idea was proposed.
+    var daysSeen: [Date] = []
 
     init(key: String, title: String) {
         self.key = key
@@ -333,13 +335,27 @@ struct RankWeights: Equatable, Sendable {
 
     var isFromToday: Bool { Calendar.current.isDateInToday(lastSeen) }
 
-    /// Today's ideas, best first; if there are none today, the single best idea from the last 7 days.
-    static func bestToShow(_ ideas: [KillerIdea], now: Date = .now) -> [KillerIdea] {
-        let byScore = ideas.sorted { $0.killerScore > $1.killerScore }
-        let today = byScore.filter { Calendar.current.isDate($0.lastSeen, inSameDayAs: now) }
-        if !today.isEmpty { return Array(today.prefix(KillerEngine.maxPerDay)) }
-        let weekAgo = now.addingTimeInterval(-7 * 24 * 60 * 60)
-        return Array(byScore.filter { $0.lastSeen >= weekAgo }.prefix(1))
+    /// Whether the idea was proposed on the given day. Ideas saved before days were recorded
+    /// fall back to their first and last day.
+    func wasSeen(on day: Date) -> Bool {
+        let calendar = Calendar.current
+        if !daysSeen.isEmpty { return daysSeen.contains { calendar.isDate($0, inSameDayAs: day) } }
+        return calendar.isDate(firstSeen, inSameDayAs: day) || calendar.isDate(lastSeen, inSameDayAs: day)
+    }
+
+    /// Adds the day (once) to the days this idea was seen.
+    func recordSeen(on date: Date = .now) {
+        let day = Calendar.current.startOfDay(for: date)
+        if daysSeen.isEmpty {
+            // Carry over what's known from before days were recorded (call before updating lastSeen).
+            daysSeen = Array(Set([firstSeen, lastSeen].map { Calendar.current.startOfDay(for: $0) })).sorted()
+        }
+        if !daysSeen.contains(day) { daysSeen.append(day) }
+    }
+
+    /// Ideas proposed on a given day, best first.
+    static func seen(on day: Date, in ideas: [KillerIdea]) -> [KillerIdea] {
+        ideas.filter { $0.wasSeen(on: day) }.sorted { $0.killerScore > $1.killerScore }
     }
 
     var evidence: [(title: String, url: URL?)] {

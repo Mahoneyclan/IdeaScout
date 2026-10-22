@@ -572,13 +572,24 @@ struct BestIdeaTests {
         #expect(KillerEngine.critiqueInstructions.contains("price unknown"))
     }
 
-    @Test func showsTodaysIdeasOrBestOfWeek() {
-        let now = Date.now
-        let old = KillerIdea(key: "old", title: "Old"); old.lastSeen = now.addingTimeInterval(-3 * 86400); old.pain = 3
-        let older = KillerIdea(key: "older", title: "Older"); older.lastSeen = now.addingTimeInterval(-10 * 86400); older.pain = 5
-        #expect(KillerIdea.bestToShow([old, older], now: now).map(\.key) == ["old"])
-        let fresh = KillerIdea(key: "new", title: "New"); fresh.lastSeen = now; fresh.pain = 1
-        #expect(KillerIdea.bestToShow([old, older, fresh], now: now).map(\.key) == ["new"])
+    @Test func ideasAreListedOnEveryDayTheyWereSeen() {
+        let cal = Calendar.current
+        let monday = cal.date(from: DateComponents(year: 2026, month: 10, day: 19, hour: 9))!
+        let wednesday = cal.date(byAdding: .day, value: 2, to: monday)!
+        let tuesday = cal.date(byAdding: .day, value: 1, to: monday)!
+        let idea = KillerIdea(key: "a", title: "A")
+        idea.firstSeen = monday; idea.lastSeen = monday
+        // Before days were recorded: first and last day only.
+        #expect(idea.wasSeen(on: monday) && !idea.wasSeen(on: wednesday))
+        idea.recordSeen(on: wednesday)
+        idea.lastSeen = wednesday
+        idea.recordSeen(on: wednesday)   // same day twice is stored once
+        #expect(idea.daysSeen.count == 2)
+        #expect(idea.wasSeen(on: monday) && idea.wasSeen(on: wednesday) && !idea.wasSeen(on: tuesday))
+
+        let strong = KillerIdea(key: "b", title: "B"); strong.firstSeen = wednesday; strong.lastSeen = wednesday; strong.pain = 5
+        #expect(KillerIdea.seen(on: wednesday, in: [idea, strong]).map(\.key) == ["b", "a"])
+        #expect(KillerIdea.seen(on: tuesday, in: [idea, strong]).isEmpty)
     }
 
     @Test func painCommentTitleKeepsTheComplaint() throws {

@@ -14,6 +14,11 @@ struct KillerScoreRow: View {
         ("Fit for me", "person.crop.circle.badge.checkmark", \.fit),
     ]
 
+    /// The lowest of the five scores: an idea is only as strong as its weakest point.
+    static func weakest(_ idea: KillerIdea) -> (name: String, value: Int) {
+        metrics.map { ($0.name, idea[keyPath: $0.value]) }.min { $0.1 < $1.1 } ?? ("", 0)
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             ForEach(Self.metrics, id: \.name) { metric in
@@ -57,7 +62,6 @@ struct KillerStatusLabel: View {
 
 struct KillerIdeaCard: View {
     let idea: KillerIdea
-    var showDate = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -68,14 +72,14 @@ struct KillerIdeaCard: View {
             }
             HStack {
                 KillerStatusLabel(score: idea.killerScore)
-                if showDate {
-                    Text(idea.lastSeen.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.secondary)
-                }
+                Text("Last seen \(idea.lastSeen.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             Text(idea.pitch).font(.subheadline)
             Text("\(idea.buyer) · \(idea.pricing)").font(.caption).foregroundStyle(.secondary)
             HStack {
-                KillerScoreRow(idea: idea)
+                let weakest = KillerScoreRow.weakest(idea)
+                Text("Weakest: \(weakest.name) \(weakest.value)/5").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if idea.timesSeen > 1 {
                     Label("\(idea.timesSeen) days", systemImage: "arrow.clockwise")
@@ -92,6 +96,11 @@ struct KillerIdeaDetailView: View {
     let idea: KillerIdea
     @State private var copied = false
 
+    private var seenDays: String {
+        let days = idea.daysSeen.isEmpty ? Array(Set([idea.firstSeen, idea.lastSeen].map { Calendar.current.startOfDay(for: $0) })).sorted() : idea.daysSeen.sorted()
+        return days.map { $0.formatted(date: .abbreviated, time: .omitted) }.joined(separator: ", ")
+    }
+
     var body: some View {
         Form {
             Section {
@@ -104,8 +113,14 @@ struct KillerIdeaDetailView: View {
                 Text(idea.pitch)
             }
             Section("The opportunity") {
-                LabeledContent("Who pays") { Text(idea.buyer).multilineTextAlignment(.trailing) }
-                LabeledContent("Pricing") { Text(idea.pricing).multilineTextAlignment(.trailing) }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Who pays").font(.subheadline.bold())
+                    Text(idea.buyer)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Pricing").font(.subheadline.bold())
+                    Text(idea.pricing)
+                }
                 if !idea.replaces.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Replaces").font(.subheadline.bold())
@@ -145,7 +160,7 @@ struct KillerIdeaDetailView: View {
             } header: {
                 Text("Scores")
             } footer: {
-                Text("Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"), first \(idea.firstSeen.formatted(date: .abbreviated, time: .omitted)). Fit for me uses your About me in Settings.")
+                Text("Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"): \(seenDays). Fit for me uses your About me in Settings.")
             }
             if !idea.evidence.isEmpty {
                 Section("Evidence") {
@@ -158,20 +173,27 @@ struct KillerIdeaDetailView: View {
                     }
                 }
             }
-            Section {
-                let prompt = Prompts.fleshOut(idea)
+        }
+        .safeAreaInset(edge: .bottom) {
+            let prompt = Prompts.fleshOut(idea)
+            HStack(spacing: 12) {
                 Button {
                     UIPasteboard.general.string = prompt
                     copied = true
                 } label: {
                     Label(copied ? "Copied" : "Copy plan prompt", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
+                .buttonStyle(.borderedProminent)
                 ShareLink(item: prompt, subject: Text(idea.title)) {
-                    Label("Share prompt…", systemImage: "square.and.arrow.up")
+                    Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
                 }
-            } footer: {
-                Text("Paste into Claude or ChatGPT to turn this into an MVP plan, landing page and interview questions.")
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Share plan prompt")
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.bar)
         }
         .navigationTitle("Killer idea")
         .navigationBarTitleDisplayMode(.inline)
@@ -182,8 +204,11 @@ struct KillerIdeaDetailView: View {
 /// Ideas that come back on several days get a bonus.
 struct LeaderboardView: View {
     @Environment(\.modelContext) private var context
+    @EnvironmentObject private var service: DigestService
     @Query private var ideas: [KillerIdea]
+    @Query(sort: \Digest.createdAt, order: .reverse) private var digests: [Digest]
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
+    @State private var pendingDismiss: KillerIdea?
 
     private var ranked: [KillerIdea] { ideas.sorted { $0.leaderboardScore > $1.leaderboardScore } }
 
@@ -192,12 +217,13 @@ struct LeaderboardView: View {
         let nearMisses = ranked.filter { $0.killerScore < qualityBar }
         NavigationStack {
             List {
+                Section { TodayStatus(today: digests.first { Calendar.current.isDateInToday($0.day) }, ideas: ideas) }
                 if !killers.isEmpty {
                     Section("Killer ideas") { rows(killers) }
                 }
                 if !nearMisses.isEmpty {
                     Section {
-                        rows(nearMisses)
+                        rows(nearMisses, offset: killers.count)
                     } header: {
                         Text("Near-misses")
                     } footer: {
@@ -205,30 +231,113 @@ struct LeaderboardView: View {
                     }
                 }
             }
-            .overlay {
-                if ideas.isEmpty {
-                    ContentUnavailableView("No killer ideas yet", systemImage: "trophy",
-                                           description: Text("Each refresh with Claude proposes ideas and keeps only the ones that survive a devil's-advocate check."))
+            .navigationTitle("Ideas")
+            .safeAreaInset(edge: .bottom) { RefreshBar() }
+            .confirmationDialog("Dismiss \(pendingDismiss?.title ?? "this idea")?",
+                                isPresented: Binding(get: { pendingDismiss != nil }, set: { if !$0 { pendingDismiss = nil } }),
+                                titleVisibility: .visible) {
+                Button("Dismiss", role: .destructive) {
+                    if let idea = pendingDismiss { context.delete(idea); try? context.save() }
+                    pendingDismiss = nil
                 }
+            } message: {
+                Text("It's removed from the list. If it's proposed again on a later day, it comes back as new.")
             }
-            .navigationTitle("Top Ideas")
         }
     }
 
-    private func rows(_ list: [KillerIdea]) -> some View {
+    /// `offset` keeps the rank numbering continuous across sections.
+    private func rows(_ list: [KillerIdea], offset: Int = 0) -> some View {
         ForEach(Array(list.enumerated()), id: \.element.key) { index, idea in
             NavigationLink {
                 KillerIdeaDetailView(idea: idea)
             } label: {
                 HStack(alignment: .top, spacing: 12) {
-                    Text("\(index + 1)").font(.title3.bold().monospacedDigit()).foregroundStyle(.secondary)
+                    Text("\(offset + index + 1)").font(.title3.bold().monospacedDigit()).foregroundStyle(.secondary)
                     KillerIdeaCard(idea: idea)
                 }
             }
+            .swipeActions(edge: .trailing) {
+                Button("Dismiss", role: .destructive) { pendingDismiss = idea }
+            }
         }
-        .onDelete { offsets in
-            offsets.map { list[$0] }.forEach(context.delete)
-            try? context.save()
+    }
+}
+
+/// One line at the top of the Ideas tab: whether today's refresh has run and what it found.
+struct TodayStatus: View {
+    let today: Digest?
+    let ideas: [KillerIdea]
+    @EnvironmentObject private var service: DigestService
+
+    var body: some View {
+        if service.isRefreshing {
+            let step = service.stage?.rawValue ?? 1
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Step \(step) of \(DigestService.Stage.allCases.count) · \(service.stage?.label ?? "Starting")…")
+                    .font(.subheadline)
+                ProgressView(value: Double(step), total: Double(DigestService.Stage.allCases.count))
+                Text("Takes a few minutes. Keep the app open.").font(.caption).foregroundStyle(.secondary)
+            }
+        } else if let today {
+            let found = KillerIdea.seen(on: today.day, in: ideas).count
+            NavigationLink {
+                DigestContentView(digest: today)
+                    .navigationTitle(today.day.formatted(date: .abbreviated, time: .omitted))
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Updated \(today.createdAt.formatted(date: .omitted, time: .shortened)) · \(found) idea\(found == 1 ? "" : "s") today",
+                          systemImage: "checkmark.circle")
+                        .font(.subheadline)
+                    // Show the reason inline (e.g. limit reached, every idea rejected) rather than a count.
+                    if let note = service.lastError ?? today.warnings.last {
+                        Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                    }
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("No refresh yet today", systemImage: "sun.max").font(.subheadline)
+                if let error = service.lastError { Text(error).font(.caption).foregroundStyle(.secondary) }
+                Text("Use the button below to find today's ideas.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// The main action, at the bottom of the screen where the thumb rests. The first refresh of the day
+/// runs straight away; another one the same day asks first, because it costs money.
+struct RefreshBar: View {
+    @EnvironmentObject private var service: DigestService
+    @Query(sort: \Digest.createdAt, order: .reverse) private var digests: [Digest]
+    @AppStorage(AppSettings.Keys.claudeMaxItems) private var maxItems = AppSettings.defaultClaudeMaxItems
+    @AppStorage(AppSettings.Keys.dailyCap) private var dailyCap = AppSettings.defaultDailyCap
+    @State private var confirm = false
+
+    private var costText: String {
+        AppSettings.estimatedRefreshCost(items: maxItems).upperBound.formatted(.currency(code: "USD"))
+    }
+
+    var body: some View {
+        let hasToday = digests.contains { Calendar.current.isDateInToday($0.day) }
+        Button {
+            if hasToday { confirm = true } else { Task { await service.refresh(force: true) } }
+        } label: {
+            Label(service.isRefreshing ? "Refreshing…" : (hasToday ? "Refresh again · ~\(costText)" : "Find today's ideas · ~\(costText)"),
+                  systemImage: "arrow.clockwise")
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(service.isRefreshing)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .confirmationDialog("Run another refresh today?", isPresented: $confirm, titleVisibility: .visible) {
+            Button("Refresh (~\(costText))") { Task { await service.refresh(force: true) } }
+        } message: {
+            let spent = UsageTracker.summary().today.cost.formatted(.currency(code: "USD"))
+            Text(dailyCap > 0 ? "Today's refresh already ran. Spent today: \(spent) of \(dailyCap.formatted(.currency(code: "USD")))."
+                              : "Today's refresh already ran. Spent today: \(spent).")
         }
     }
 }
