@@ -19,11 +19,11 @@ There is **no server**. Everything runs on the iPhone; AI calls go directly from
 | **History** | `Views/RootView.swift` (`HistoryView`) | One row per day with its best idea and pain clusters |
 | Day view | `Views/DayView.swift` (`DigestContentView`) | That day's ideas, pain clusters, ranked trends with projects, notes |
 | **Saved** | `Views/IdeasView.swift` | Bookmarked ideas, then starred projects (notes, AI variants, prompt) |
-| **Settings** | `Views/SettingsView.swift` | About me, My Business Challenges, industry focus, digest time; Advanced: sources, scan and ranking, AI and costs |
+| **Settings** | `Views/SettingsView.swift`, `AdvancedSettingsViews.swift`, `SettingsControls.swift` | About me, My Business Challenges, industry focus, digest time; Advanced: sources, scan and ranking, AI and costs |
 | Welcome / consent | `Views/WelcomeView.swift` | First launch: intro, trial, AI choice; consent before data goes to a cloud AI |
 | Paywall / About | `Views/StoreViews.swift`, `Views/AboutView.swift` | Trial and unlock; version, privacy, source credits |
 
-## Data model (`Models/Models.swift`, SwiftData)
+## Data model (`Models/StoredModels.swift`, SwiftData; value types in `Models/Values.swift`)
 ```
 Digest (one per day) ──owns──▶ Theme (trend, pain cluster or "Other projects") ──owns──▶ Item (post, review, contract…)
 Idea        – a starred Item, copied so it outlives the digest (Saved projects)

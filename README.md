@@ -106,7 +106,7 @@ IdeaScout/
               AppleSummarizer (on-device), KillerEngine (ideas and devil's advocate)
   Sources/    SourceSupport (shared helpers), CommunityFetchers, CodeAndAIFetchers, MarketFetchers,
               GamesFetchers, DemandFetchers (one file per source family)
-  Models/     Value types and SwiftData models (Digest, Theme, Item, Idea, KillerIdea)
+  Models/     Values (sources, signals, items, scores) and StoredModels (SwiftData: Digest, Theme, Item, Idea, KillerIdea)
   Store/      StoreManager (free trial and one-off unlock)
   Support/    AppSettings, Keychain, UsageTracker (costs), notifications
   Views/      SwiftUI screens: tabs, Ideas, day view, Saved, Settings, welcome/consent, paywall, About

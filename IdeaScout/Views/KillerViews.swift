@@ -208,7 +208,7 @@ struct KillerIdeaDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     idea.toggleSaved()
-                    try? context.save()
+                    context.saveOrReport("your change")
                 } label: {
                     Image(systemName: idea.isSaved ? "bookmark.fill" : "bookmark")
                 }
@@ -262,7 +262,7 @@ struct LeaderboardView: View {
                                 titleVisibility: .visible) {
                 Button("Dismiss", role: .destructive) {
                     // Hidden rather than deleted, so its history and a saved copy are kept.
-                    if let idea = pendingDismiss { idea.isDismissed = true; try? context.save() }
+                    if let idea = pendingDismiss { idea.isDismissed = true; context.saveOrReport("the dismissal") }
                     pendingDismiss = nil
                 }
             } message: {
@@ -290,7 +290,7 @@ struct LeaderboardView: View {
             .swipeActions(edge: .leading) {
                 Button(idea.isSaved ? "Unsave" : "Save", systemImage: idea.isSaved ? "bookmark.slash" : "bookmark") {
                     idea.toggleSaved()
-                    try? context.save()
+                    context.saveOrReport("your change")
                 }
                 .tint(.indigo)
             }

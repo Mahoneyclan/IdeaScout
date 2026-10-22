@@ -1208,3 +1208,20 @@ struct RefreshRoutineTests {
         #expect(!DigestService.needsRebuild(existing: ["Claude"], aiAvailable: true))
     }
 }
+
+/// Robustness: database saves report failures instead of ignoring them.
+struct PersistenceTests {
+    @Test @MainActor func successfulSaveReportsNothing() throws {
+        let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container.mainContext.insert(KillerIdea(key: "k", title: "K"))
+        #expect(container.mainContext.saveOrReport("a test") == nil)
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<KillerIdea>()) == 1)
+    }
+
+    @Test func failureMessageIsPlainAndNamesTheAction() {
+        let message = ModelContext.failureMessage(for: "today's ideas")
+        #expect(message.contains("couldn't save today's ideas"))
+        #expect(!message.contains("Error Domain"))
+    }
+}

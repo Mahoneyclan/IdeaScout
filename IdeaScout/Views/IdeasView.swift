@@ -42,7 +42,7 @@ struct IdeasView: View {
                                 .swipeActions(edge: .trailing) {
                                     Button("Unsave", systemImage: "bookmark.slash", role: .destructive) {
                                         idea.toggleSaved()
-                                        try? context.save()
+                                        context.saveOrReport("your change")
                                     }
                                 }
                         }
@@ -67,7 +67,7 @@ struct IdeasView: View {
                 .onDelete { offsets in
                     let current = sortedIdeas
                     offsets.map { current[$0] }.forEach(context.delete)
-                    try? context.save()
+                    context.saveOrReport("your change")
                 }
                 }
             }

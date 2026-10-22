@@ -42,7 +42,7 @@ extension DigestService {
         try? context.delete(model: Item.self)
         try? context.delete(model: Idea.self)
         try? context.delete(model: KillerIdea.self)
-        try? context.save()
+        context.saveOrReport("the deletion")
         Keychain.removeAll(service: keychainService)
         // Remove keys one by one first so screens using @AppStorage update immediately, then the whole domain.
         for key in (defaults.persistentDomain(forName: defaultsDomain) ?? [:]).keys { defaults.removeObject(forKey: key) }
@@ -63,7 +63,7 @@ extension DigestService {
         let retired = "productHunt"
         let items = (try? context.fetch(FetchDescriptor<Item>(predicate: #Predicate { $0.sourceRaw == retired }))) ?? []
         items.forEach(context.delete)
-        try? context.save()
+        context.saveOrReport("the removal of retired sources")
         Keychain.delete(account: "productHuntToken")
         AppSettings.defaults.removeObject(forKey: "source.productHunt")
         AppSettings.defaults.set(true, forKey: doneKey)
@@ -78,7 +78,7 @@ extension DigestService {
         } else {
             context.insert(Idea(from: item))
         }
-        try? context.save()
+        if let message = context.saveOrReport("your saved projects") { lastError = message }
     }
 
     /// Asks the current AI for money-making variants of a saved project and stores them on it.
@@ -88,7 +88,7 @@ extension DigestService {
         // Paid AI calls respect the daily spending limit, like refreshes do.
         if summarizer is LLMSummarizer && AppSettings.isOverDailyCap { throw SummarizerError.overDailyLimit }
         idea.extensions = try await summarizer.extensions(for: IdeaBrief(title: idea.title, detail: idea.detail, note: idea.note))
-        try? container?.mainContext.save()
+        if let message = container?.mainContext.saveOrReport("the suggestions") { lastError = message }
     }
 
     // MARK: - Background refresh

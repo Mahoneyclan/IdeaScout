@@ -161,7 +161,7 @@ final class DigestService {
             let reason = trends.warnings.last.map { DigestWarning.parts($0).message } ?? "unknown error"
             let note = "Refresh at \(time) didn't work (\(reason)). Kept the earlier \(kept.summarizer) digest."
             kept.warnings.append(note)
-            try? context.save()
+            context.saveOrReport("the refresh note")
             lastError = note
             return
         }
@@ -172,7 +172,7 @@ final class DigestService {
         let digest = saveDigest(builtThemes, day: today, summarizer: trends.summarizer.name, warnings: trends.warnings, in: context)
 
         await addIdeas(to: digest, trends: trends, themes: builtThemes, context: context)
-        try? context.save()
+        if let message = context.saveOrReport("today's ideas") { lastError = message }
 
         if notify && !Task.isCancelled {
             await dependencies.notify(digest.themes.count, digest.itemCount)
@@ -278,7 +278,7 @@ final class DigestService {
                 item.theme = theme
             }
         }
-        try? context.save()
+        if let message = context.saveOrReport("today's digest") { lastError = message }
         return digest
     }
 

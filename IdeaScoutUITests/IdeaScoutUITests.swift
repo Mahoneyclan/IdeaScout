@@ -69,8 +69,9 @@ final class IdeaScoutUITests: XCTestCase {
         let about = element(app, containing: "About & privacy")
         for _ in 0..<6 where !about.isHittable { app.swipeUp() }
         about.tap()
+        XCTAssertTrue(app.navigationBars["About"].waitForExistence(timeout: 5), "About screen should open")
         let delete = app.buttons["Delete all my data"]
-        for _ in 0..<5 where !delete.isHittable { app.swipeUp() }
+        for _ in 0..<8 where !(delete.exists && delete.isHittable) { app.swipeUp() }
         delete.tap()
         let confirm = app.buttons["Delete everything"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "should ask before deleting")
