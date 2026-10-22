@@ -10,10 +10,12 @@ import Foundation
 
 /// "My Business Challenges" from Settings, one item per line. Makes no network calls.
 struct FieldNotesFetcher: ItemFetcher {
+    /// Which source this is.
     let kind = SourceKind.fieldNotes
     /// The text from Settings.
     let notes: String
 
+    /// Turns the saved text into items (no network).
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         Self.items(from: notes, postedAt: since)
     }
@@ -39,6 +41,7 @@ struct FieldNotesFetcher: ItemFetcher {
 /// US stores: what paying customers are unhappy about. Uses Apple's public RSS feeds (6 charts plus
 /// 12 review requests a day).
 struct AppReviewsFetcher: ItemFetcher {
+    /// Which source this is.
     let kind = SourceKind.appReviews
     /// App Store countries checked: the owner's market and the largest one.
     static let countries = ["au", "us"]
@@ -86,7 +89,9 @@ struct AppReviewsFetcher: ItemFetcher {
     }
 
     private struct Chart: Decodable {
+        /// The feed wrapper.
         struct Feed: Decodable { let entry: [Entry]? }
+        /// One entry in the feed.
         struct Entry: Decodable {
             struct Label: Decodable { let label: String }
             struct ID: Decodable {
@@ -121,7 +126,9 @@ struct AppReviewsFetcher: ItemFetcher {
     }
 
     private struct Reviews: Decodable {
+        /// The feed wrapper.
         struct Feed: Decodable { let entry: [Entry]? }
+        /// One entry in the feed.
         struct Entry: Decodable {
             struct Label: Decodable { let label: String }
             let id: Label
@@ -157,8 +164,10 @@ struct AppReviewsFetcher: ItemFetcher {
 
 /// Trending (12) and new (15) Jira and Confluence cloud apps: gaps enterprise teams pay to fill.
 struct AtlassianFetcher: ItemFetcher {
+    /// Which source this is.
     let kind = SourceKind.atlassian
 
+    /// Reads both lists; throws only if both fail.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         var results: [FetchedItem] = []
         var firstError: Error?
@@ -172,7 +181,9 @@ struct AtlassianFetcher: ItemFetcher {
     }
 
     private struct Response: Decodable {
+        /// The list wrapper.
         struct Embedded: Decodable { let addons: [Addon] }
+        /// One Marketplace app.
         struct Addon: Decodable {
             struct Links: Decodable { struct Href: Decodable { let href: String }; let alternate: Href? }
             struct Inner: Decodable {
@@ -214,6 +225,7 @@ struct AtlassianFetcher: ItemFetcher {
 
 /// Australian Government IT contracts published in the window, largest first: who is paying for what.
 struct AusTenderFetcher: ItemFetcher {
+    /// Which source this is.
     let kind = SourceKind.ausTender
     /// Each page holds 100 contracts of all kinds; 5 pages is enough to find the window's main IT contracts.
     static let maxPages = 5
@@ -238,7 +250,9 @@ struct AusTenderFetcher: ItemFetcher {
     }
 
     private struct Response: Decodable {
+        /// Paging links.
         struct Links: Decodable { let next: String? }
+        /// One OCDS release (a published contract notice).
         struct Release: Decodable {
             struct Party: Decodable { let name: String?; let roles: [String]? }
             struct Contract: Decodable {

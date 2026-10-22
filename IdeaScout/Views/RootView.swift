@@ -8,7 +8,7 @@ import SwiftData
 /// The tab bar. Shows the welcome screens until they're finished, then starts the day's automatic refresh
 /// (which does nothing if today's digest already exists).
 struct RootView: View {
-    @EnvironmentObject private var service: DigestService
+    @Environment(DigestService.self) private var service
     /// Whether the welcome screens are done.
     @AppStorage(AppSettings.Keys.onboarded) private var onboarded = false
 
@@ -30,7 +30,7 @@ struct RootView: View {
 /// Every daily digest, newest first. Each row shows the day's best idea and pain clusters;
 /// tapping a day shows its ideas, pain clusters and trends.
 struct HistoryView: View {
-    @EnvironmentObject private var service: DigestService
+    @Environment(DigestService.self) private var service
     @Query(sort: \Digest.day, order: .reverse) private var digests: [Digest]
     /// All killer ideas, to find each day's best.
     @Query private var ideas: [KillerIdea]
@@ -62,6 +62,7 @@ struct HistoryView: View {
 /// One day in History: the date ("Today" for today), its best idea with Killer/Near-miss, and its
 /// pain clusters (or its top trends when there are none).
 struct HistoryRow: View {
+    /// The day to summarise.
     let digest: Digest
     /// The best idea proposed that day, if any.
     let best: KillerIdea?

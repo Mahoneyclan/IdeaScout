@@ -373,8 +373,11 @@ struct SecretField: View {
 
 /// A 0–2 slider (steps of 0.5) for one trend ranking weight; 0 shows "Off".
 struct WeightSlider: View {
+    /// Score name.
     let name: String
+    /// SF Symbol.
     let symbol: String
+    /// The weight being edited.
     @Binding var value: Double
 
     var body: some View {
@@ -393,10 +396,13 @@ struct WeightSlider: View {
 /// One source's on/off switch, with its signal and last-digest count. Defaults to the source's own default
 /// until the user changes it.
 struct SourceToggle: View {
+    /// The source.
     let kind: SourceKind
+    /// Items it gave in the last digest, if known.
     var count: Int?
     @AppStorage private var isOn: Bool
 
+    /// Creates the toggle, defaulting to the source's own default until the user changes it.
     init(kind: SourceKind, count: Int? = nil) {
         self.kind = kind
         self.count = count
@@ -431,6 +437,7 @@ struct ModelChooser: View {
     @State private var useOther = false
     @FocusState private var typing: Bool
 
+    /// Binds the model and custom prices to this provider's settings keys.
     init(provider: AIProvider) {
         self.provider = provider
         let fallback = provider.models.first?.price ?? ModelPrice(input: 0, output: 0)

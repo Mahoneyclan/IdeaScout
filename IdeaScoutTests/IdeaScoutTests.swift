@@ -1069,3 +1069,142 @@ struct RobustnessFixTests {
         #expect(!KillerEngine.generatePrompt(.init(themes: [], items: [], aboutMe: "", leaderboard: [])).contains("this week"))
     }
 }
+
+// MARK: - Refresh routine (end to end, offline)
+
+/// A source that returns fixed items.
+private struct StubFetcher: ItemFetcher {
+    let kind: SourceKind
+    let items: [FetchedItem]
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] { items }
+}
+
+/// An AI that replies from a script, keyed by cost-tracker feature ("Trends", "Killer ideas", "Devil's advocate").
+private struct ScriptedLLM: LLMClient {
+    let provider = AIProvider.claude
+    let model = "test-model"
+    var replies: [String: Result<String, LLMHTTPError>]
+
+    func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
+        switch replies[feature] {
+        case .success(let json)?:
+            return try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": json]], "stop_reason": "end_turn"])
+        case .failure(let error)?: throw error
+        case nil: throw SummarizerError.unavailable
+        }
+    }
+}
+
+/// Tests the refresh rules with fake sources, a scripted AI and an in-memory database.
+@MainActor
+struct RefreshRoutineTests {
+    // Items reach the AI as: 1 = pain point (demand comes first), 2 and 3 = GitHub.
+    static let trends = #"{"themes":[{"title":"Invoice automation","summary":"s","opportunities":["o"],"item_numbers":[2,3],"novelty":4,"novelty_reason":"r","viability":4,"viability_reason":"r","opportunity_gap":4,"opportunity_gap_reason":"r"}],"translations":[],"pain_clusters":[{"title":"Chasing invoices","buyer":"Bookkeeper","workaround":"Email","pay_signals":"none seen","summary":"s","item_numbers":[1]}],"noise_numbers":[]}"#
+    static let ideas = #"{"ideas":[{"title":"InvoiceChaser","pitch":"p","buyer":"b","pricing":"$49/mo","why_now":"w","one_week_test":"t","replaces":"r","evidence_numbers":[1],"same_as":""}]}"#
+    static let reviews = #"{"reviews":[{"title":"InvoiceChaser","survives":true,"objection":"o","competitors":"none found","verdict":"v","pain":4,"willing_to_pay":4,"timing":4,"gap":4,"fit":4,"evidence_needed":"e"}]}"#
+
+    struct Harness {
+        let service: DigestService
+        let context: ModelContext
+        let notified: Box
+    }
+    final class Box { var count = 0 }
+
+    private func harness(llm: ScriptedLLM?, access: StoreManager.Access = .unlocked, overCap: Bool = false,
+                         needsConsent: Bool = false) throws -> Harness {
+        let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let box = Box()
+        let fetchers: [any ItemFetcher] = [
+            StubFetcher(kind: .painPoints, items: [item("p1", .painPoints, title: "I wish there was an invoice chaser")]),
+            StubFetcher(kind: .github, items: [item("g1", .github, score: 50, title: "invoice bot"),
+                                               item("g2", .github, score: 20, title: "billing agent")]),
+        ]
+        let deps = DigestService.Dependencies(
+            makeFetchers: { fetchers },
+            makeSummarizer: { llm.map { LLMSummarizer(client: $0) as any Summarizer } ?? KeywordSummarizer(topics: ["invoice"]) },
+            freeSummarizer: { KeywordSummarizer(topics: ["invoice"]) },
+            access: { access },
+            isOverDailyCap: { overCap },
+            needsConsent: { needsConsent },
+            notify: { _, _ in box.count += 1 })
+        let service = DigestService(dependencies: deps)
+        service.container = container
+        return Harness(service: service, context: container.mainContext, notified: box)
+    }
+
+    private func digests(_ h: Harness) throws -> [Digest] { try h.context.fetch(FetchDescriptor<Digest>()) }
+
+    @Test func fullRefreshSavesTrendsClustersAndIdeas() async throws {
+        let h = try harness(llm: ScriptedLLM(replies: ["Trends": .success(Self.trends), "Killer ideas": .success(Self.ideas),
+                                                       "Devil's advocate": .success(Self.reviews)]))
+        await h.service.refresh(force: true, notify: true)
+        let digest = try #require(try digests(h).first)
+        #expect(digest.summarizer == "Claude")
+        #expect(digest.themes.contains { $0.isPainCluster && $0.title == "Chasing invoices" })
+        #expect(digest.themes.contains { $0.title == "Invoice automation" && $0.items.count == 2 })
+        let ideas = try h.context.fetch(FetchDescriptor<KillerIdea>())
+        #expect(ideas.map(\.title) == ["InvoiceChaser"])
+        #expect(ideas.first?.pain == 4)   // pain-point evidence allows a pain score above 3
+        #expect(h.notified.count == 1)
+        #expect(h.service.lastError == nil && !h.service.isRefreshing)
+    }
+
+    @Test func aiFailureFallsBackToKeywordsWithAPlainWarning() async throws {
+        let h = try harness(llm: ScriptedLLM(replies: ["Trends": .failure(LLMHTTPError(provider: "Claude", status: 503,
+                                                                                         retryAfter: nil, detail: "req_123"))]))
+        await h.service.refresh(force: true)
+        let digest = try #require(try digests(h).first)
+        #expect(digest.summarizer == "Keywords")
+        let parts = digest.warnings.map(DigestWarning.parts)
+        #expect(parts.contains { $0.message.contains("busy") && $0.details?.contains("req_123") == true })
+        #expect(digest.warnings.contains { $0.contains("Killer ideas skipped") })
+    }
+
+    @Test func aWeakerResultNeverReplacesTodaysBetterDigest() async throws {
+        let h = try harness(llm: ScriptedLLM(replies: ["Trends": .failure(LLMHTTPError(status: 500, retryAfter: nil, detail: ""))]))
+        h.context.insert(Digest(day: Calendar.current.startOfDay(for: .now), summarizer: "Claude"))
+        try h.context.save()
+        await h.service.refresh(force: true)
+        let all = try digests(h)
+        #expect(all.count == 1 && all.first?.summarizer == "Claude")
+        #expect(all.first?.warnings.contains { $0.contains("Kept the earlier Claude digest") } == true)
+        #expect(h.service.lastError?.contains("Kept the earlier") == true)
+    }
+
+    @Test func expiredTrialSavesNothingAndExplainsWhy() async throws {
+        let h = try harness(llm: ScriptedLLM(replies: ["Trends": .success(Self.trends)]), access: .expired)
+        await h.service.refresh(force: true)
+        #expect(try digests(h).isEmpty)
+        #expect(h.service.lastError?.contains("trial has ended") == true)
+    }
+
+    @Test func spendingLimitSwitchesToTheFreeOptionAndSkipsIdeas() async throws {
+        let h = try harness(llm: ScriptedLLM(replies: ["Trends": .success(Self.trends)]), overCap: true)
+        await h.service.refresh(force: true)
+        let digest = try #require(try digests(h).first)
+        #expect(digest.summarizer == "Keywords")
+        #expect(digest.warnings.contains { $0.contains("spending limit") })
+        #expect(try h.context.fetch(FetchDescriptor<KillerIdea>()).isEmpty)
+    }
+
+    @Test func missingConsentIsReported() async throws {
+        let h = try harness(llm: nil, needsConsent: true)
+        await h.service.refresh(force: true)
+        let digest = try #require(try digests(h).first)
+        #expect(digest.warnings.contains { $0.contains("haven't agreed to share data") })
+        #expect(digest.warnings.contains { $0.contains("Killer ideas need a cloud AI") })
+    }
+
+    @Test func withoutForceAnExistingDigestIsLeftAlone() async throws {
+        let h = try harness(llm: ScriptedLLM(replies: ["Trends": .success(Self.trends)]))
+        h.context.insert(Digest(day: Calendar.current.startOfDay(for: .now), summarizer: "Claude"))
+        try h.context.save()
+        await h.service.refresh(force: false)
+        #expect(try digests(h).count == 1 && (try digests(h).first?.themes.isEmpty ?? false))
+        #expect(DigestService.needsRebuild(existing: [], aiAvailable: false))
+        #expect(DigestService.needsRebuild(existing: ["Keywords"], aiAvailable: true))
+        #expect(!DigestService.needsRebuild(existing: ["Keywords"], aiAvailable: false))
+        #expect(!DigestService.needsRebuild(existing: ["Claude"], aiAvailable: true))
+    }
+}

@@ -76,6 +76,7 @@ struct LLMSummarizer: Summarizer {
     func extensions(for idea: IdeaBrief) async throws -> [String] {
         let data = try await client.complete(system: Prompts.extensionInstructions, prompt: Prompts.ideaText(idea),
                                              schema: Self.extensionSchema, effort: "medium", feature: "Variant suggestions")
+        /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable { let suggestions: [String] }
         return try JSONDecoder().decode(Out.self, from: try Self.extractJSON(data)).suggestions
     }
@@ -149,6 +150,7 @@ struct LLMSummarizer: Summarizer {
     /// Returns the JSON text the AI produced, after checking it wasn't refused or cut off.
     /// - Throws: `SummarizerError.refused`, or `.badResponse` if cut off at the length limit or empty.
     static func extractJSON(_ data: Data) throws -> Data {
+        /// The parts of a Claude-format reply needed here.
         struct Response: Decodable {
             struct Block: Decodable { let type: String; let text: String? }
             let content: [Block]
@@ -165,6 +167,7 @@ struct LLMSummarizer: Summarizer {
 
     /// - Returns: English title and description by 1-based item number (first entry wins on duplicates).
     static func parseTranslations(_ data: Data) throws -> [Int: Translation] {
+        /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable {
             struct T: Decodable { let number: Int; let title: String; let description: String }
             let translations: [T]?
@@ -176,6 +179,7 @@ struct LLMSummarizer: Summarizer {
 
     /// - Returns: Pain clusters as drafts with `isPainCluster` set (empty if the reply has none).
     static func parseClusters(_ data: Data) throws -> [ThemeDraft] {
+        /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable {
             struct C: Decodable {
                 let title, buyer, workaround, pay_signals, summary: String
@@ -191,12 +195,14 @@ struct LLMSummarizer: Summarizer {
 
     /// - Returns: 1-based numbers of items the AI marked as noise.
     static func parseNoise(_ data: Data) throws -> Set<Int> {
+        /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable { let noise_numbers: [Int]? }
         return Set(try JSONDecoder().decode(Out.self, from: try extractJSON(data)).noise_numbers ?? [])
     }
 
     /// - Returns: Trend drafts with the AI's scores (clamped later by ThemeBuilder).
     static func parseThemes(_ data: Data) throws -> [ThemeDraft] {
+        /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable {
             struct T: Decodable {
                 let title: String; let summary: String; let opportunities: [String]; let item_numbers: [Int]
@@ -293,6 +299,7 @@ struct ClaudeClient: LLMClient {
 
 // MARK: - Retries (shared by every provider)
 
+/// Retry rules shared by every provider.
 enum LLMRetry {
     /// Waits before the first and second retry.
     static let delays: [Double] = [3, 15]

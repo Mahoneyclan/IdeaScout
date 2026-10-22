@@ -99,6 +99,7 @@ struct OpenAICompatibleClient: LLMClient {
     /// out of the input count so they're priced at the cache rate.
     /// - Throws: Decoding errors, or `.badResponse` if there's no reply.
     static func convert(_ data: Data) throws -> Data {
+        /// The parts of an OpenAI-style chat reply needed here.
         struct Response: Decodable {
             struct Choice: Decodable {
                 struct Message: Decodable { let content: String?; let refusal: String? }

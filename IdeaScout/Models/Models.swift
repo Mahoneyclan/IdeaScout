@@ -154,7 +154,8 @@ extension URL {
 /// One post, listing, review or contract returned by a source fetcher, before it is stored.
 /// Item numbers in AI prompts are 1-based positions in an array of these.
 struct FetchedItem: Equatable, Sendable {
-    var key: String          // stable id, e.g. "hn-123", "gh-456"; used to remove duplicates and match starred projects
+    /// Stable id, e.g. "hn-123", "gh-456"; used to remove duplicates and match starred projects.
+    var key: String
     /// The source it came from.
     var source: SourceKind
     /// Headline. For comments and reviews, the most relevant snippet of the text.
@@ -163,7 +164,8 @@ struct FetchedItem: Equatable, Sendable {
     var detail: String
     /// Link to the original.
     var url: URL
-    var score: Int           // stars / points / votes (or rank, value in $k): higher = more traction; compared only within a source
+    /// Stars / points / votes (or rank, value in $k): higher = more traction; compared only within a source.
+    var score: Int
     /// When it was posted. Sources without dates use the start of the window, so they never look "new".
     var postedAt: Date
 
@@ -196,17 +198,25 @@ struct ThemeScores: Equatable, Sendable {
 
 /// One-sentence explanations for each score.
 struct ScoreReasons: Equatable, Sendable {
+    /// Reason for the novelty score.
     var novelty = ""
+    /// How momentum was measured.
     var momentum = ""
+    /// Reason for the viability score.
     var viability = ""
+    /// Reason for the opportunity gap score.
     var gap = ""
 }
 
 /// How much each score counts towards the overall rank (set in Settings).
 struct RankWeights: Equatable, Sendable {
+    /// Weight for novelty (0–2; 0 ignores it).
     var novelty = 1.0
+    /// Weight for momentum.
     var momentum = 1.0
+    /// Weight for viability.
     var viability = 1.0
+    /// Weight for opportunity gap.
     var gap = 1.0
 }
 
@@ -255,13 +265,19 @@ struct RankWeights: Equatable, Sendable {
     /// Scores 1–5 (0 = not scored): see ThemeScores. Stored as separate fields because SwiftData stores
     /// plain values.
     var novelty = 0
+    /// Measured momentum (1–5).
     var momentum = 0
+    /// AI-judged viability (1–5).
     var viability = 0
+    /// AI-judged opportunity gap (1–5).
     var opportunityGap = 0
     /// One-sentence reasons for each score, shown when the user taps a trend's score.
     var noveltyReason = ""
+    /// How momentum was measured.
     var momentumReason = ""
+    /// Reason for the viability score.
     var viabilityReason = ""
+    /// Reason for the opportunity gap score.
     var gapReason = ""
     /// The "Other projects" bucket for items not in any trend or cluster, always listed last.
     var isCatchAll = false
@@ -328,13 +344,17 @@ struct RankWeights: Equatable, Sendable {
 @Model final class Item {
     /// Stable ID from the source (see FetchedItem.key).
     var key: String
+    /// Headline (see FetchedItem.title).
     var title: String
+    /// Supporting text.
     var detail: String
     /// The original link, stored as text.
     var urlString: String
     /// SourceKind raw value; read through `source`.
     var sourceRaw: String
+    /// Traction within its source (see FetchedItem.score).
     var score: Int
+    /// When it was posted.
     var postedAt: Date
     /// The theme this item belongs to.
     var theme: Theme?
@@ -363,9 +383,13 @@ struct RankWeights: Equatable, Sendable {
 @Model final class Idea {
     /// The starred item's key; unique, so starring twice can't create duplicates.
     @Attribute(.unique) var key: String
+    /// The project's title.
     var title: String
+    /// Its description.
     var detail: String
+    /// Link to the original.
     var urlString: String
+    /// SourceKind raw value; read through `source`.
     var sourceRaw: String
     /// The user's own notes, included in variant suggestions and the "flesh out" prompt.
     var note: String = ""
@@ -375,9 +399,13 @@ struct RankWeights: Equatable, Sendable {
     var extensions: [String] = []
     /// Title and scores of the trend it was starred from (empty for "Other projects"), copied at that time.
     var themeTitle = ""
+    /// Copied trend scores (see Theme).
     var novelty = 0
+    /// Copied momentum.
     var momentum = 0
+    /// Copied viability.
     var viability = 0
+    /// Copied opportunity gap.
     var opportunityGap = 0
 
     /// Copies an item and, if it was in a real trend, that trend's title and scores.
@@ -414,6 +442,7 @@ struct RankWeights: Equatable, Sendable {
 @Model final class KillerIdea {
     /// Normalised title (see `key(for:)`), so the same idea on another day updates this record.
     @Attribute(.unique) var key: String
+    /// Short, memorable name, as the AI wrote it.
     var title: String
     /// One-sentence pitch.
     var pitch: String
@@ -425,7 +454,8 @@ struct RankWeights: Equatable, Sendable {
     var whyNow: String
     /// The cheapest way to test demand in a week, with a pass mark.
     var oneWeekTest: String
-    var replaces: String = ""   // the manual task or costly workaround the product replaces
+    /// The manual task or costly workaround the product replaces.
+    var replaces: String = ""
     /// The devil's advocate's strongest objection.
     var objection: String
     /// Competitors named by the devil's advocate, or "none found".
@@ -434,12 +464,18 @@ struct RankWeights: Equatable, Sendable {
     var verdict: String
     /// Titles and links of the items cited as evidence (parallel arrays; SwiftData stores arrays of plain values).
     var evidenceTitles: [String] = []
+    /// Links matching `evidenceTitles`, by position.
     var evidenceURLs: [String] = []
     // Scores 1–5 after the devil's-advocate review
+    /// How badly the buyer needs it.
     var pain = 0
+    /// How likely the buyer is to pay the stated price.
     var willingToPay = 0
+    /// How strongly "why now" holds.
     var timing = 0
+    /// How open the market is after competitors.
     var gap = 0
+    /// How well it suits the user (from About me).
     var fit = 0
     /// The killer score each time the idea was proposed.
     var scoreHistory: [Double] = []
@@ -487,9 +523,6 @@ struct RankWeights: Equatable, Sendable {
     static func leaderboardScore(killer: Double, timesSeen: Int) -> Double {
         killer + Double(min(max(timesSeen - 1, 0), 4)) * 0.15
     }
-
-    /// Whether it was last proposed today.
-    var isFromToday: Bool { Calendar.current.isDateInToday(lastSeen) }
 
     /// Whether the idea was proposed on the given day. Ideas saved before days were recorded
     /// fall back to their first and last day.

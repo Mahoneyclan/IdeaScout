@@ -48,15 +48,29 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mahoney.IdeaScoutTests
         GENERATE_INFOPLIST_FILE: YES
+  IdeaScoutUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - IdeaScoutUITests
+    dependencies:
+      - target: IdeaScout
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mahoney.IdeaScoutUITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: IdeaScout
 schemes:
   IdeaScout:
     build:
       targets:
         IdeaScout: all
         IdeaScoutTests: [test]
+        IdeaScoutUITests: [test]
     run:
       # Lets purchases be tested from Xcode without real money (local StoreKit test file).
       storeKitConfiguration: IdeaScout/IdeaScout.storekit
     test:
       targets:
         - IdeaScoutTests
+        - IdeaScoutUITests

@@ -59,6 +59,7 @@ enum UsageTracker {
     /// Reads the `usage` block of a reply in Claude's format (other providers' replies are converted to it).
     /// - Returns: The token counts with `calls` = 1, or `nil` if the reply has no usage block.
     static func parseUsage(_ data: Data) -> Usage? {
+        /// The `usage` block of a Claude-format reply.
         struct Response: Decodable {
             struct U: Decodable {
                 let input_tokens: Int?
@@ -93,20 +94,20 @@ enum UsageTracker {
 
     /// Reads the whole ledger. Returns an empty ledger if none is saved or it can't be decoded.
     static func load() -> Ledger {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return [:] }
+        guard let data = AppSettings.defaults.data(forKey: storageKey) else { return [:] }
         return (try? JSONDecoder().decode(Ledger.self, from: data)) ?? [:]
     }
 
     /// Writes the whole ledger. Callers must hold `lock`.
     private static func save(_ ledger: Ledger) {
-        if let data = try? JSONEncoder().encode(ledger) { UserDefaults.standard.set(data, forKey: storageKey) }
+        if let data = try? JSONEncoder().encode(ledger) { AppSettings.defaults.set(data, forKey: storageKey) }
     }
 
     /// Deletes all recorded spending (Settings → Reset cost tracker). Today's total, which the daily
     /// spending limit uses, also goes back to zero.
     static func reset() {
         lock.lock(); defer { lock.unlock() }
-        UserDefaults.standard.removeObject(forKey: storageKey)
+        AppSettings.defaults.removeObject(forKey: storageKey)
     }
 
     /// The ledger key for a date, in the phone's time zone with a fixed Gregorian "yyyy-MM-dd" format,

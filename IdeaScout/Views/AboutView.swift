@@ -6,8 +6,10 @@ import SwiftUI
 
 /// Contact details and links shown in the app and on the App Store. Fill in before release.
 enum AppInfo {
-    static let privacyPolicyURL = URL(string: "")      // Empty until the privacy policy is hosted publicly; while nil, the link row is hidden.
-    static let supportEmail = ""                       // Empty until a support address is chosen; while empty, the contact row is hidden.
+    /// Empty until the privacy policy is hosted publicly; while nil, the link row is hidden.
+    static let privacyPolicyURL = URL(string: "")
+    /// Empty until a support address is chosen; while empty, the contact row is hidden.
+    static let supportEmail = ""
 
     /// "1.0 (1)": marketing version and build number from Info.plist.
     static var version: String {
@@ -18,7 +20,7 @@ enum AppInfo {
 
 /// Version, privacy, support and credits for the data sources IdeaScout reads.
 struct AboutView: View {
-    @EnvironmentObject private var service: DigestService
+    @Environment(DigestService.self) private var service
     /// Shows the "Delete all my data?" confirmation.
     @State private var confirmDelete = false
     /// Set if deletion couldn't run (a refresh was in progress).

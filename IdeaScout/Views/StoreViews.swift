@@ -6,7 +6,7 @@ import SwiftUI
 
 /// Start the free trial, or unlock after it ends. History and saved ideas stay readable either way.
 struct PaywallView: View {
-    @EnvironmentObject private var store: StoreManager
+    @Environment(StoreManager.self) private var store
     @Environment(\.dismiss) private var dismiss
     /// True while a purchase or restore is in progress (buttons are disabled).
     @State private var working = false
@@ -81,7 +81,7 @@ struct PaywallView: View {
 
 /// One row describing the trial or unlock, used in Settings.
 struct AccessStatusRow: View {
-    @EnvironmentObject private var store: StoreManager
+    @Environment(StoreManager.self) private var store
     @State private var showPaywall = false
 
     var body: some View {

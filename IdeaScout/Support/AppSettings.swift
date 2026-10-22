@@ -50,34 +50,37 @@ enum AppSettings {
         static func sourceEnabled(_ kind: SourceKind) -> String { "source.\(kind.rawValue)" }
     }
 
+    /// The settings store: the app's normal one, or the separate store used by UI tests.
+    static var defaults: UserDefaults { TestMode.isUITesting ? TestMode.defaults : .standard }
+
     /// Starting topics for a new install (users usually replace them with business topics).
     static let defaultTopics = "ai agent, llm, mcp, vibe coding, local-first"
 
     /// The topics as a list, split on commas or new lines, blanks removed.
     static var topics: [String] {
-        let raw = UserDefaults.standard.string(forKey: Keys.topics) ?? defaultTopics
+        let raw = defaults.string(forKey: Keys.topics) ?? defaultTopics
         return raw.split(whereSeparator: { $0 == "," || $0.isNewline }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     /// Whether a source should be fetched: the user's toggle if set, otherwise the source's default.
     static func isEnabled(_ kind: SourceKind) -> Bool {
-        UserDefaults.standard.object(forKey: Keys.sourceEnabled(kind)) as? Bool ?? kind.enabledByDefault
+        defaults.object(forKey: Keys.sourceEnabled(kind)) as? Bool ?? kind.enabledByDefault
     }
 
     /// The chosen AI provider. Unknown values (e.g. a removed provider) fall back to Claude.
     static var provider: AIProvider {
-        AIProvider(rawValue: UserDefaults.standard.string(forKey: Keys.aiProvider) ?? "") ?? .claude
+        AIProvider(rawValue: defaults.string(forKey: Keys.aiProvider) ?? "") ?? .claude
     }
 
     /// "About me", trimmed.
     static var aboutMe: String {
-        UserDefaults.standard.string(forKey: Keys.aboutMe)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        defaults.string(forKey: Keys.aboutMe)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     /// Score (out of 5) at or above which an idea counts as "Killer" (below it, "Near-miss"); trends
     /// scoring below it are hidden unless the user chooses to show them. Ideas are kept either way.
     static var qualityBar: Double {
-        UserDefaults.standard.object(forKey: Keys.qualityBar) as? Double ?? defaultQualityBar
+        defaults.object(forKey: Keys.qualityBar) as? Double ?? defaultQualityBar
     }
     /// Default quality bar.
     static let defaultQualityBar = 3.5
@@ -85,7 +88,7 @@ enum AppSettings {
     /// Most AI spending allowed per day, in US dollars (0 = no limit), for whichever provider is chosen.
     /// Checked before the trend step and again before the idea step, so one refresh can go slightly over.
     static var dailyCap: Double {
-        UserDefaults.standard.object(forKey: Keys.dailyCap) as? Double ?? defaultDailyCap
+        defaults.object(forKey: Keys.dailyCap) as? Double ?? defaultDailyCap
     }
     /// About two refreshes a day with Claude Sonnet at 300 items.
     static let defaultDailyCap = 1.00
@@ -98,28 +101,28 @@ enum AppSettings {
 
     /// The industry where at least two killer ideas a day should be aimed (the owner's domain).
     static var focusIndustry: String {
-        let value = UserDefaults.standard.string(forKey: Keys.focusIndustry)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = defaults.string(forKey: Keys.focusIndustry)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return value ?? defaultFocusIndustry
     }
     /// The owner's own domain, where their experience is an edge.
     static let defaultFocusIndustry = "energy, utilities and enterprise IT"
 
     /// Work problems the owner has seen, one per line. Each becomes a demand item.
-    static var fieldNotes: String { UserDefaults.standard.string(forKey: Keys.fieldNotes) ?? "" }
+    static var fieldNotes: String { defaults.string(forKey: Keys.fieldNotes) ?? "" }
 
     /// How far back sources are searched for trends, and (separately) for pain points, which are rarer.
-    static var trendWindowDays: Int { UserDefaults.standard.object(forKey: Keys.trendWindowDays) as? Int ?? defaultTrendWindowDays }
+    static var trendWindowDays: Int { defaults.object(forKey: Keys.trendWindowDays) as? Int ?? defaultTrendWindowDays }
     /// A week: long enough for several projects to share a theme, short enough to stay fresh.
     static let defaultTrendWindowDays = 7
     /// Window for Pain points and App Store complaints.
-    static var painWindowDays: Int { UserDefaults.standard.object(forKey: Keys.painWindowDays) as? Int ?? defaultPainWindowDays }
+    static var painWindowDays: Int { defaults.object(forKey: Keys.painWindowDays) as? Int ?? defaultPainWindowDays }
     /// Two weeks, because business complaints are rare.
     static let defaultPainWindowDays = 14
     /// Window lengths offered in Settings.
     static let windowChoices = [7, 14, 28]
 
     /// How many items the cloud AI reads per refresh (every provider). More items cost more and take longer.
-    static var claudeMaxItems: Int { UserDefaults.standard.object(forKey: Keys.claudeMaxItems) as? Int ?? defaultClaudeMaxItems }
+    static var claudeMaxItems: Int { defaults.object(forKey: Keys.claudeMaxItems) as? Int ?? defaultClaudeMaxItems }
     /// Chosen by the owner on 22 Oct 2026, with business sources added.
     static let defaultClaudeMaxItems = 300
     /// Item limits offered in Settings.
@@ -135,7 +138,7 @@ enum AppSettings {
 
     /// Hour for the daily refresh request (default 7 am).
     static var notifyHour: Int {
-        UserDefaults.standard.object(forKey: Keys.notifyHour) as? Int ?? 7
+        defaults.object(forKey: Keys.notifyHour) as? Int ?? 7
     }
 
     /// True while unit tests run, so the app doesn't fetch live data in the background of a test.
@@ -144,12 +147,12 @@ enum AppSettings {
     /// Whether the user agreed to send their data to this cloud provider (Apple's rules require consent
     /// before personal data goes to a third-party AI). Asked again for each provider.
     static func hasConsent(_ provider: AIProvider) -> Bool {
-        !provider.isCloud || UserDefaults.standard.bool(forKey: Keys.consent(provider))
+        !provider.isCloud || defaults.bool(forKey: Keys.consent(provider))
     }
 
     /// Records the user's answer on the consent screen (or a withdrawal in Settings).
     static func setConsent(_ provider: AIProvider, _ value: Bool) {
-        UserDefaults.standard.set(value, forKey: Keys.consent(provider))
+        defaults.set(value, forKey: Keys.consent(provider))
     }
 
     /// True when a cloud provider is chosen and has a key, but the user hasn't agreed to share data with it.
@@ -178,7 +181,7 @@ enum AppSettings {
 
     /// The model chosen for a provider (the recommended one unless the user picked another).
     static func model(for provider: AIProvider) -> String {
-        let value = UserDefaults.standard.string(forKey: Keys.model(provider))?.trimmingCharacters(in: .whitespaces) ?? ""
+        let value = defaults.string(forKey: Keys.model(provider))?.trimmingCharacters(in: .whitespaces) ?? ""
         return value.isEmpty ? provider.recommendedModel : value
     }
 
@@ -187,8 +190,8 @@ enum AppSettings {
     static func price(for provider: AIProvider, model: String) -> ModelPrice {
         if let known = provider.models.first(where: { $0.id == model }) { return known.price }
         let fallback = provider.models.first?.price ?? ModelPrice(input: 0, output: 0)
-        let input = UserDefaults.standard.object(forKey: Keys.customPrice(provider, "input")) as? Double ?? fallback.input
-        let output = UserDefaults.standard.object(forKey: Keys.customPrice(provider, "output")) as? Double ?? fallback.output
+        let input = defaults.object(forKey: Keys.customPrice(provider, "input")) as? Double ?? fallback.input
+        let output = defaults.object(forKey: Keys.customPrice(provider, "output")) as? Double ?? fallback.output
         return ModelPrice(input: input, output: output)
     }
 }

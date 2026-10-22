@@ -13,7 +13,7 @@ struct DigestContentView: View {
     /// All killer ideas, filtered to the ones proposed on this day.
     @Query private var killerIdeas: [KillerIdea]
     @Environment(\.modelContext) private var context
-    @EnvironmentObject private var service: DigestService
+    @Environment(DigestService.self) private var service
     /// Starred projects, to show which rows are starred.
     @Query private var ideas: [Idea]
     /// The user's ranking weights, so trends re-rank as soon as they change.
@@ -191,6 +191,7 @@ struct WarningRow: View {
 
 /// The four ranking scores, shown compactly. Each score's full name is in its accessibility label.
 struct ScoreBadges: View {
+    /// The scores to show.
     let scores: ThemeScores
 
     /// Name, symbol and field of each trend score, in display order.
@@ -219,7 +220,9 @@ struct ScoreBadges: View {
 
 /// Each trend score with its one-sentence reason (scores of 0 are hidden).
 struct ScoreReasonsView: View {
+    /// The scores.
     let scores: ThemeScores
+    /// Their reasons.
     let reasons: ScoreReasons
 
     var body: some View {
@@ -243,6 +246,7 @@ struct ScoreReasonsView: View {
 /// star saves it to Saved projects. The star has its own 44-point target with a gap, so it isn't
 /// confused with the link.
 struct ItemRow: View {
+    /// The item to show.
     let item: Item
     /// Whether it's already in Saved projects.
     let isStarred: Bool

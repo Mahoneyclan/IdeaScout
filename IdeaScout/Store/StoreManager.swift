@@ -11,9 +11,10 @@ import StoreKit
 /// in-app purchase named "7-Day Trial". Its purchase date is the trial start, kept by Apple,
 /// so reinstalling the app doesn't restart the trial.
 @MainActor
-final class StoreManager: ObservableObject {
+@Observable
+final class StoreManager {
     /// The single shared instance, injected into SwiftUI by IdeaScoutApp. Runs on the main thread
-    /// (`@MainActor`) because views observe its published state.
+    /// (`@MainActor`) because views observe its state (Observation).
     static let shared = StoreManager()
 
     /// Product ID of the $0 "7-Day Trial" non-consumable.
@@ -47,21 +48,24 @@ final class StoreManager: ObservableObject {
 
     /// Store products by ID, once loaded. Empty if the App Store couldn't be reached or the products
     /// aren't set up yet.
-    @Published private(set) var products: [String: Product] = [:]
+    private(set) var products: [String: Product] = [:]
     /// Whether a verified, unrefunded unlock exists.
-    @Published private(set) var isUnlocked = false
+    private(set) var isUnlocked = false
     /// When the trial was started (Apple's original purchase date), or `nil`.
-    @Published private(set) var trialStart: Date?
+    private(set) var trialStart: Date?
     /// Set after the first load, so `access` doesn't report "developer" before products had a chance to load.
-    @Published private(set) var loaded = false
+    private(set) var loaded = false
     /// A plain message for the last failed or pending purchase, shown on the paywall and welcome screens.
-    @Published var purchaseError: String?
+    var purchaseError: String?
 
     /// Listens for transactions that arrive outside a purchase call. Lives as long as the app.
-    private var updates: Task<Void, Never>?
+    @ObservationIgnored private var updates: Task<Void, Never>?
 
     /// The user's current access, combining the purchases with the developer-build rule below.
     var access: Access {
+        if TestMode.isUITesting {   // UI tests: fixed state, changed by the fake purchases below
+            return Self.access(unlocked: isUnlocked, trialStart: trialStart ?? Self.testTrialStart, now: .now)
+        }
         let state = Self.access(unlocked: isUnlocked, trialStart: trialStart, now: .now)
         #if DEBUG
         // Side-loaded developer builds can't reach the store products until they exist in App Store Connect.
@@ -85,9 +89,15 @@ final class StoreManager: ObservableObject {
         return .trial(daysLeft: max(days, 1))
     }
 
-    /// Loads products and current purchases once, and listens for purchases made elsewhere
-    /// (another device, Ask to Buy, refunds).
+    /// UI tests: a trial started yesterday, or 8 days ago with `-ui-trial-expired`.
+    private static var testTrialStart: Date {
+        Date.now.addingTimeInterval((TestMode.has(TestMode.Argument.trialExpired) ? -8 : -1) * 86_400)
+    }
+
+    /// Loads products and current purchases once, and starts listening for purchases made elsewhere
+    /// (another device, Ask to Buy, refunds). In UI-test mode there is no App Store: it just marks itself loaded.
     func load() async {
+        guard !TestMode.isUITesting else { loaded = true; return }
         if updates == nil {
             updates = Task { [weak self] in
                 for await update in Transaction.updates {
@@ -138,6 +148,10 @@ final class StoreManager: ObservableObject {
     /// Buy or another approval is waiting.
     private func buy(_ id: String) async {
         purchaseError = nil
+        if TestMode.isUITesting {   // UI tests: no App Store; purchases succeed instantly
+            if id == Self.unlockID { isUnlocked = true } else { trialStart = .now }
+            return
+        }
         if products.isEmpty { await load() }
         guard let product = products[id] else {
             purchaseError = "The App Store isn't available right now. Try again later."

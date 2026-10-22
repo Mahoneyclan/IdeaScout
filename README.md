@@ -85,6 +85,8 @@ Set your own signing team in `project.yml` (`DEVELOPMENT_TEAM`) if you aren't th
 
 Swift Testing tests in `IdeaScoutTests/IdeaScoutTests.swift` (no network calls; samples of each source and AI reply format). They cover source parsing, theme building and ranking, the Claude and OpenAI-style request and reply handling, streaming and retries, the killer-idea rules and evidence caps, costs and the daily limit, digest replacement rules, the English filter, scan settings, business-focus rules, demand sources, signal-based selection, pain clusters, saving ideas, and the trial and consent rules.
 
+**Screen (UI) tests** in `IdeaScoutUITests/` cover first launch with consent, a refresh (and the "ask before a second refresh" rule), the paywall after the trial, and "Delete all my data". They run the app in a sealed test mode (`IdeaScout/Support/TestMode.swift`, Debug builds only) with an in-memory database, a separate settings store and Keychain area, fake sources and a scripted AI, so they never touch real data, the network or AI costs. Keep the iPhone unlocked while they run.
+
 Run them in Xcode with ⌘U, or on a connected iPhone:
 
 ```sh
@@ -102,7 +104,8 @@ IdeaScout/
   AI/         Summarizer protocol and prompts, LLMSummarizer (cloud AI, Claude client, retries),
               OpenAICompatibleClient (all other providers), AIProviders (provider and model catalogue),
               AppleSummarizer (on-device), KillerEngine (ideas and devil's advocate)
-  Sources/    Fetchers (supply, timing, pain points, shared helpers), DemandFetchers (demand sources)
+  Sources/    SourceSupport (shared helpers), CommunityFetchers, CodeAndAIFetchers, MarketFetchers,
+              GamesFetchers, DemandFetchers (one file per source family)
   Models/     Value types and SwiftData models (Digest, Theme, Item, Idea, KillerIdea)
   Store/      StoreManager (free trial and one-off unlock)
   Support/    AppSettings, Keychain, UsageTracker (costs), notifications

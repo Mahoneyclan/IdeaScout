@@ -6,7 +6,7 @@ import SwiftUI
 
 /// Shown once on first launch: what IdeaScout does, the free trial, and choosing an AI.
 struct WelcomeView: View {
-    @EnvironmentObject private var store: StoreManager
+    @Environment(StoreManager.self) private var store
     @AppStorage(AppSettings.Keys.onboarded) private var onboarded = false
     @AppStorage(AppSettings.Keys.aiProvider) private var provider = AIProvider.claude.rawValue
     /// 0 = intro, 1 = trial, 2 = choose your AI.

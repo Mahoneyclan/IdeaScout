@@ -9,7 +9,7 @@ import Security
 enum Keychain {
     /// The Keychain "service" that groups all of IdeaScout's entries. Tests pass a different service
     /// so they never touch the user's real keys.
-    static let service = "com.mahoney.IdeaScout"
+    static var service: String { TestMode.isUITesting ? TestMode.keychainService : "com.mahoney.IdeaScout" }
 
     /// One entry per secret. The raw value is the Keychain account name, so renaming a case would
     /// lose the saved key for existing users.
@@ -61,7 +61,9 @@ enum Keychain {
     ///   keys from a previous install (possibly a previous owner of the phone) would reappear. They're removed.
     /// - Keys saved by older versions used a class that could travel in backups; they're re-saved with
     ///   `accessibility`, so existing users keep their keys without re-entering them.
-    /// - Parameter defaults: The app's settings store (tests pass their own).
+    /// - Parameters:
+    ///   - defaults: The app's settings store (tests pass their own).
+    ///   - service: The Keychain service to clean and migrate (tests pass their own).
     static func prepareOnLaunch(defaults: UserDefaults = .standard, service: String = Keychain.service) {
         let installKey = "keychain.installMarker"
         if defaults.object(forKey: installKey) == nil {

@@ -16,17 +16,25 @@ struct ThemeDraft: Equatable, Sendable {
     var summary: String
     /// Two or three money-making variants (trends only).
     var opportunities: [String]
-    var itemNumbers: [Int]   // 1-based positions in the prompt's item list
+    /// 1-based positions in the prompt's item list.
+    var itemNumbers: [Int]
     // AI ranking scores, 1–5 (0 = not scored). Momentum is calculated from real numbers instead.
+    /// AI-judged novelty (1–5; 0 = not scored).
     var novelty = 0
+    /// AI-judged viability (1–5; 0 = not scored).
     var viability = 0
+    /// AI-judged opportunity gap (1–5; 0 = not scored).
     var gap = 0
     /// One-sentence reason per score (momentum's is filled in later).
     var reasons = ScoreReasons()
     // Pain clusters (cloud AI only): one problem, one buyer, built from demand items.
+    /// True for a pain cluster rather than a trend.
     var isPainCluster = false
+    /// Pain clusters: who has the problem.
     var buyer = ""
+    /// Pain clusters: what they do today instead.
     var workaround = ""
+    /// Pain clusters: signs they pay or would pay, or "none seen".
     var paySignals = ""
 }
 
@@ -71,7 +79,9 @@ protocol Summarizer: Sendable {
 
 /// An English title and description for one non-English item.
 struct Translation: Equatable, Sendable {
+    /// English title.
     var title: String
+    /// English description (may be empty).
     var detail: String
 }
 
@@ -110,6 +120,7 @@ enum SummarizerError: LocalizedError {
     /// The reply couldn't be used: cut off, empty, or not valid JSON. The text says which.
     case badResponse(String)
 
+    /// Plain-English message shown to the user.
     var errorDescription: String? {
         switch self {
         case .unavailable: "Suggestions need a cloud AI with its API key, or Apple Intelligence. See Settings → Advanced → AI & costs."
@@ -342,12 +353,14 @@ enum Ranking {
 /// Fallback when no AI is available, or when the AI fails: groups items by matching topic keyword.
 /// No scores, clusters or suggestions.
 struct KeywordSummarizer: Summarizer {
+    /// Stored on digests built this way; DigestService ranks them lowest.
     let name = "Keywords"
     /// Enough for a quick keyword pass; there's no context limit.
     let maxItems = 60
     /// The user's topics, in order: each item goes to the first topic it mentions.
     let topics: [String]
 
+    /// Groups items under the first topic each one mentions; items mentioning none are left for "Other projects".
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft] {
         var drafts: [ThemeDraft] = []
         var used = Set<Int>()
@@ -363,6 +376,8 @@ struct KeywordSummarizer: Summarizer {
         return drafts
     }
 
+    /// Keyword mode can't suggest variants.
+    /// - Throws: Always `SummarizerError.unavailable`.
     func extensions(for idea: IdeaBrief) async throws -> [String] {
         throw SummarizerError.unavailable
     }

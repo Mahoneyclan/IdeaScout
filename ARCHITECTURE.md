@@ -37,7 +37,7 @@ KillerIdea  – an AI business idea that survived the devil's advocate; updated 
 | Service | File | Role |
 |---|---|---|
 | `DigestService` | `App/DigestService.swift` | Runs a refresh end to end, saves results, schedules background refreshes |
-| Fetchers | `Sources/Fetchers.swift`, `Sources/DemandFetchers.swift` | One per source; keyless public APIs; return `FetchedItem`s |
+| Fetchers | `Sources/` (one file per source family; shared helpers in `SourceSupport.swift`) | One per source; keyless public APIs; return `FetchedItem`s |
 | `Summarizer` implementations | `AI/LLMSummarizer.swift`, `AI/AppleSummarizer.swift`, `AI/Summarizer.swift` | Cloud AI, Apple on-device, keyword fallback |
 | AI clients | `AI/LLMSummarizer.swift` (`ClaudeClient`), `AI/OpenAICompatibleClient.swift` | Claude (streamed) and every other provider; shared retries |
 | Provider catalogue | `AI/AIProviders.swift` | Providers, models, prices, countries, API details |
@@ -83,5 +83,9 @@ Merge into KillerIdeas (new, or update returning ones) ─▶ screens update aut
 - **Save early:** trends are saved before the idea step, so a failure or iOS ending the app can't lose them.
 - **Daily spending limit:** checked before the trend and idea steps (default $1.00).
 
+## Testing seams
+- `DigestService.Dependencies` holds everything a refresh needs from outside (sources, AI, trial state, spending limit, consent, notifications). The app uses `.live`; unit tests pass stand-ins, so the whole refresh runs offline in `RefreshRoutineTests`.
+- `TestMode` (Debug builds only) seals the app for UI tests: in-memory database, separate UserDefaults suite (`AppSettings.defaults`, also applied to `@AppStorage` via `.defaultAppStorage`), separate Keychain service, fake sources and a scripted AI.
+
 ## Threading
-`DigestService` and `StoreManager` are `@MainActor` (they drive the UI and use the main SwiftData context). Network and AI work is `async` and awaited, so the UI stays responsive. Pure helpers that tests call are marked `nonisolated`.
+`DigestService` and `StoreManager` are `@MainActor` and `@Observable` (they drive the UI and use the main SwiftData context; views read them with `@Environment`). Network and AI work is `async` and awaited, so the UI stays responsive. Pure helpers that tests call are marked `nonisolated`.

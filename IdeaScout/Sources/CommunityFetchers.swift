@@ -1,0 +1,223 @@
+// CommunityFetchers.swift
+// Sources from developer communities: Hacker News (Show HN), Hacker News pain points (complaints and
+// requests in comments), vibe-coded projects, DEV #showdev and Lobsters. All keyless public APIs.
+
+import Foundation
+
+// MARK: - Hacker News (Algolia API, no key needed)
+
+/// Show HN posts from the window, most upvoted first.
+struct HackerNewsFetcher: ItemFetcher {
+    /// Which source this is.
+    let kind = SourceKind.hackerNews
+
+    /// 60 Show HN posts.
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        let data = try await HTTP.get(Self.searchURL(tags: "show_hn", query: nil, since: since, hits: 60))
+        return try Self.parse(data, as: .hackerNews)
+    }
+
+    /// Uses Algolia's popularity-ranked search, so a multi-day window returns the most upvoted posts.
+    /// - Parameters:
+    ///   - tags: Algolia tags, e.g. "show_hn", "story", "comment", "ask_hn", "launch_hn".
+    ///   - query: Optional search text.
+    ///   - since: Only items created after this.
+    ///   - hits: How many results.
+    static func searchURL(tags: String, query: String?, since: Date, hits: Int) -> URL {
+        var c = URLComponents(string: "https://hn.algolia.com/api/v1/search")!
+        c.queryItems = [
+            URLQueryItem(name: "tags", value: tags),
+            URLQueryItem(name: "numericFilters", value: "created_at_i>\(Int(since.timeIntervalSince1970))"),
+            URLQueryItem(name: "hitsPerPage", value: String(hits)),
+        ]
+        if let query { c.queryItems?.append(URLQueryItem(name: "query", value: query)) }
+        return c.url!
+    }
+
+    private struct Response: Decodable {
+        /// One search result (story or comment).
+        struct Hit: Decodable {
+            let objectID: String
+            let title: String?
+            let url: String?
+            let points: Int?
+            let created_at_i: Int
+            let story_text: String?
+            let comment_text: String?
+            let story_title: String?
+        }
+        let hits: [Hit]
+    }
+
+    /// The Hacker News discussion page for an item ID, or `nil` if the ID can't form a valid link.
+    static func discussionURL(_ objectID: String) -> URL? {
+        var c = URLComponents(string: "https://news.ycombinator.com/item")
+        c?.queryItems = [URLQueryItem(name: "id", value: objectID)]
+        return c?.url
+    }
+
+    /// Turns Algolia hits into items. Stories use their title (minus "Show HN:"); comments have no title, so
+    /// the comment text becomes the title and "In thread: …" the detail.
+    /// - Parameters:
+    ///   - data: The Algolia reply.
+    ///   - kind: Source label for the items (Hacker News search is shared by several sources).
+    ///   - phrases: For comments, phrases to centre the title on (so a long comment keeps the complaint).
+    static func parse(_ data: Data, as kind: SourceKind, around phrases: [String] = []) throws -> [FetchedItem] {
+        try JSONDecoder().decode(Response.self, from: data).hits.compactMap { hit in
+            // Robustness: the discussion link is built from data the API supplies; skip the hit if it's malformed.
+            guard let discussion = Self.discussionURL(hit.objectID) else { return nil }
+            // Comments have no title: use the part of the comment around the phrase, with the thread as detail.
+            if hit.title == nil, let comment = hit.comment_text {
+                let text = TextCleaner.snippet(TextCleaner.clean(comment, max: 5000), around: phrases, max: 220)
+                guard !text.isEmpty else { return nil }
+                return FetchedItem(key: "hn-\(hit.objectID)", source: kind, title: text,
+                                   detail: hit.story_title.map { "In thread: \($0)" } ?? "",
+                                   url: discussion,
+                                   score: hit.points ?? 0,
+                                   postedAt: Date(timeIntervalSince1970: TimeInterval(hit.created_at_i)))
+            }
+            guard let rawTitle = hit.title, !rawTitle.isEmpty else { return nil }
+            let title = rawTitle.replacingOccurrences(of: "^Show HN:\\s*", with: "", options: .regularExpression)
+            let url = hit.url.flatMap(URL.init(string:)) ?? discussion
+            return FetchedItem(key: "hn-\(hit.objectID)", source: kind, title: title,
+                               detail: TextCleaner.clean(hit.story_text), url: url, score: hit.points ?? 0,
+                               postedAt: Date(timeIntervalSince1970: TimeInterval(hit.created_at_i)))
+        }
+    }
+}
+
+// MARK: - Pain points (people asking for tools that don't exist yet)
+
+/// Hacker News comments where people complain or ask for a tool (10 per phrase), plus Ask HN posts.
+struct PainPointsFetcher: ItemFetcher {
+    /// Which source this is.
+    let kind = SourceKind.painPoints
+
+    /// Exact phrases searched in comments. "is there a tool" was dropped (almost no hits); "too expensive",
+    /// "switched from" and "alternative to" find far more real complaints, though noisier (the AI filters them).
+    static let phrases = ["\"I wish there was\"", "\"I would pay for\"", "\"I'd pay for\"", "\"looking for a tool\"",
+                          "\"why is there no\"", "\"too expensive\"", "\"switched from\"", "\"alternative to\""]
+
+    /// The phrases without quotes, used to cut each comment to the part around the complaint.
+    static var plainPhrases: [String] { phrases.map { $0.replacingOccurrences(of: "\"", with: "") } }
+
+    /// One search per phrase, plus Ask HN; throws only if every search failed.
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        var results: [FetchedItem] = []
+        var firstError: Error?
+        for phrase in Self.phrases {
+            do {
+                let data = try await HTTP.get(HackerNewsFetcher.searchURL(tags: "comment", query: phrase, since: since, hits: 10))
+                results += try HackerNewsFetcher.parse(data, as: .painPoints, around: Self.plainPhrases)
+            } catch { firstError = firstError ?? error }
+        }
+        do {
+            let data = try await HTTP.get(HackerNewsFetcher.searchURL(tags: "ask_hn", query: nil, since: since, hits: 15))
+            results += try HackerNewsFetcher.parse(data, as: .painPoints)
+        } catch { firstError = firstError ?? error }
+        if results.isEmpty, let firstError { throw firstError }
+        return results
+    }
+}
+
+// MARK: - Vibe-coded projects (mentions of AI app builders on HN and GitHub)
+
+/// Projects built with AI app builders: Hacker News stories mentioning them, and GitHub repos that say
+/// they were vibe-coded or built with Lovable.
+struct VibeCodeFetcher: ItemFetcher {
+    /// Which source this is.
+    let kind = SourceKind.vibeCode
+
+    /// Search terms for Hacker News (15 stories each).
+    static let hnQueries = ["lovable", "bolt.new", "v0.dev", "vibe coded", "vibe coding", "replit agent", "built with cursor"]
+    /// GitHub searches (2 of the 10-per-minute budget).
+    static let githubQueries = ["\"vibe coded\" in:description,readme", "\"built with lovable\" in:description,readme"]
+
+    /// HN searches, then GitHub searches; throws only if every search failed.
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        var results: [FetchedItem] = []
+        var firstError: Error?
+        for query in Self.hnQueries {
+            do {
+                let data = try await HTTP.get(HackerNewsFetcher.searchURL(tags: "story", query: query, since: since, hits: 15))
+                results += try HackerNewsFetcher.parse(data, as: .vibeCode)
+            } catch { firstError = firstError ?? error }
+        }
+        for query in Self.githubQueries {
+            do {
+                results += try await GitHubFetcher.search("\(query) created:>\(GitHubFetcher.day(since))", as: .vibeCode, perPage: 10)
+            } catch { firstError = firstError ?? error }
+        }
+        if results.isEmpty, let firstError { throw firstError }
+        return results
+    }
+}
+
+// MARK: - DEV.to #showdev (developers showing what they built, no key needed)
+
+/// The 40 top #showdev posts for the window. Off by default (developer-focused).
+struct DevToFetcher: ItemFetcher {
+    /// Which source this is.
+    let kind = SourceKind.devTo
+
+    /// Reads the top #showdev posts for the window's length in days.
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        let days = max(1, Int(Date.now.timeIntervalSince(since) / 86_400))
+        let url = URL(string: "https://dev.to/api/articles?tag=showdev&top=\(days)&per_page=40")!
+        return try Self.parse(try await HTTP.get(url))
+    }
+
+    private struct Article: Decodable {
+        let id: Int
+        let title: String
+        let description: String?
+        let url: String
+        let positive_reactions_count: Int
+        let published_at: Date
+    }
+
+    /// Turns articles into items; reactions become the score.
+    static func parse(_ data: Data) throws -> [FetchedItem] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([Article].self, from: data).compactMap { a in
+            guard let url = URL(string: a.url) else { return nil }
+            return FetchedItem(key: "dev-\(a.id)", source: .devTo, title: a.title, detail: TextCleaner.clean(a.description),
+                               url: url, score: a.positive_reactions_count, postedAt: a.published_at)
+        }
+    }
+}
+
+// MARK: - Lobsters "show" (developers presenting their projects)
+
+/// Lobsters "show" posts from the window. Off by default (developer-focused).
+struct LobstersFetcher: ItemFetcher {
+    /// Which source this is.
+    let kind = SourceKind.lobsters
+
+    /// Reads the "show" tag and keeps posts from the window.
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        let data = try await HTTP.get(URL(string: "https://lobste.rs/t/show.json")!)
+        return try Self.parse(data).filter { $0.postedAt >= since }
+    }
+
+    private struct Story: Decodable {
+        let short_id: String
+        let title: String
+        let url: String?
+        let comments_url: String
+        let score: Int?
+        let created_at: Date
+        let description_plain: String?
+    }
+
+    /// Turns stories into items; votes become the score.
+    static func parse(_ data: Data) throws -> [FetchedItem] {
+        try ISODates.decoder().decode([Story].self, from: data).compactMap { s in
+            let link = (s.url?.isEmpty == false ? s.url : nil) ?? s.comments_url
+            guard let url = URL(string: link) else { return nil }
+            return FetchedItem(key: "lob-\(s.short_id)", source: .lobsters, title: s.title,
+                               detail: TextCleaner.clean(s.description_plain), url: url, score: s.score ?? 0, postedAt: s.created_at)
+        }
+    }
+}

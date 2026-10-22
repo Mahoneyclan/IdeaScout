@@ -16,22 +16,28 @@ struct IdeaScoutApp: App {
     /// A database that can't be opened is unrecoverable, so the app stops with a clear message.
     /// Also runs the one-time clean-up of removed sources (Product Hunt).
     init() {
+        TestMode.prepare()
         do {
-            container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self)
+            // UI tests use a throwaway in-memory database so the owner's real data is never touched.
+            let config = ModelConfiguration(isStoredInMemoryOnly: TestMode.isUITesting)
+            container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
+                                           configurations: config)
         } catch {
             fatalError("Could not open the IdeaScout database: \(error)")
         }
         // Security: clear keys left by a previous install and upgrade older keys to "this device only".
-        Keychain.prepareOnLaunch()
+        if !TestMode.isUITesting { Keychain.prepareOnLaunch() }
         DigestService.shared.container = container
-        DigestService.shared.removeRetiredSources()
+        if !TestMode.isUITesting { DigestService.shared.removeRetiredSources() }
     }
 
+    /// One window with the tab bar, the shared services injected, and StoreKit loaded at launch.
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environmentObject(DigestService.shared)
-                .environmentObject(StoreManager.shared)
+                .environment(DigestService.shared)
+                .environment(StoreManager.shared)
+                .defaultAppStorage(AppSettings.defaults)   // @AppStorage uses the UI-test store in test mode
                 .task { await StoreManager.shared.load() }
         }
         .modelContainer(container)

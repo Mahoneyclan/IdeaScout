@@ -8,10 +8,8 @@ import UIKit
 
 // MARK: - Scores, badges and cards
 
-/// The five review scores. `metrics` is also used by the detail screen and the weakest-score summary.
-struct KillerScoreRow: View {
-    let idea: KillerIdea
-
+/// The five review scores: names, symbols and fields, used by the detail screen and the weakest-score summary.
+enum KillerScoreMetrics {
     /// Name, symbol and field of each score, in display order.
     static let metrics: [(name: String, symbol: String, value: KeyPath<KillerIdea, Int>)] = [
         ("Pain", "bandage", \.pain),
@@ -26,21 +24,11 @@ struct KillerScoreRow: View {
         metrics.map { ($0.name, idea[keyPath: $0.value]) }.min { $0.1 < $1.1 } ?? ("", 0)
     }
 
-    var body: some View {
-        HStack(spacing: 10) {
-            ForEach(Self.metrics, id: \.name) { metric in
-                let value = idea[keyPath: metric.value]
-                Label("\(value)", systemImage: metric.symbol)
-                    .accessibilityLabel("\(metric.name) \(value) out of 5")
-            }
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
-    }
 }
 
 /// The killer score in a capsule: orange when it clears the quality bar, grey for a near-miss.
 struct KillerScoreBadge: View {
+    /// The killer score (0–5).
     let score: Double
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
 
@@ -57,6 +45,7 @@ struct KillerScoreBadge: View {
 /// Labels an idea "Killer" (score at or above the quality bar, which the user can change) or "Near-miss".
 /// Recomputed on screen, so changing the bar relabels saved ideas at once.
 struct KillerStatusLabel: View {
+    /// The killer score (0–5).
     let score: Double
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
 
@@ -71,6 +60,7 @@ struct KillerStatusLabel: View {
 /// A card for one idea, used in the leaderboard, History days and Saved: title, score, status, pitch,
 /// buyer and price, weakest score, and how many days it has come back.
 struct KillerIdeaCard: View {
+    /// The idea to show.
     let idea: KillerIdea
 
     var body: some View {
@@ -92,7 +82,7 @@ struct KillerIdeaCard: View {
             Text(idea.pitch).font(.subheadline)
             Text("\(idea.buyer) · \(idea.pricing)").font(.caption).foregroundStyle(.secondary)
             HStack {
-                let weakest = KillerScoreRow.weakest(idea)
+                let weakest = KillerScoreMetrics.weakest(idea)
                 Text("Weakest: \(weakest.name) \(weakest.value)/5").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if idea.timesSeen > 1 {
@@ -169,7 +159,7 @@ struct KillerIdeaDetailView: View {
                 }
             }
             Section {
-                ForEach(KillerScoreRow.metrics, id: \.name) { metric in
+                ForEach(KillerScoreMetrics.metrics, id: \.name) { metric in
                     LabeledContent {
                         Text("\(idea[keyPath: metric.value])/5").monospacedDigit()
                     } label: {
@@ -236,7 +226,7 @@ struct KillerIdeaDetailView: View {
 /// Ideas that come back on several days get a bonus.
 struct LeaderboardView: View {
     @Environment(\.modelContext) private var context
-    @EnvironmentObject private var service: DigestService
+    @Environment(DigestService.self) private var service
     @Query private var ideas: [KillerIdea]
     @Query(sort: \Digest.createdAt, order: .reverse) private var digests: [Digest]
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
@@ -316,7 +306,7 @@ struct TodayStatus: View {
     let today: Digest?
     /// All ideas, to count today's.
     let ideas: [KillerIdea]
-    @EnvironmentObject private var service: DigestService
+    @Environment(DigestService.self) private var service
 
     var body: some View {
         if service.isRefreshing {
@@ -358,8 +348,8 @@ struct TodayStatus: View {
 /// The main action, at the bottom of the screen where the thumb rests. The first refresh of the day
 /// runs straight away; another one the same day asks first, because it costs money.
 struct RefreshBar: View {
-    @EnvironmentObject private var service: DigestService
-    @EnvironmentObject private var store: StoreManager
+    @Environment(DigestService.self) private var service
+    @Environment(StoreManager.self) private var store
     @State private var showPaywall = false
     @State private var showConsent = false
     @Query(sort: \Digest.createdAt, order: .reverse) private var digests: [Digest]

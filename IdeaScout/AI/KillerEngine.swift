@@ -174,6 +174,7 @@ struct KillerEngine {
 
     /// - Returns: The candidates. `replaces` is optional so replies from older prompts still parse.
     static func parseCandidates(_ data: Data) throws -> [Candidate] {
+        /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable {
             struct I: Decodable {
                 let title, pitch, buyer, pricing, why_now, one_week_test, same_as: String
@@ -271,6 +272,7 @@ struct KillerEngine {
 
     /// - Returns: Reviews with every score clamped to 0–5.
     static func parseReviews(_ data: Data) throws -> [Review] {
+        /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable {
             struct R: Decodable {
                 let title, objection, competitors, verdict: String

@@ -96,7 +96,7 @@ struct IdeasView: View {
 struct IdeaDetailView: View {
     /// The project; edits to notes save automatically.
     @Bindable var idea: Idea
-    @EnvironmentObject private var service: DigestService
+    @Environment(DigestService.self) private var service
     /// True while waiting for the AI's suggestions.
     @State private var isSuggesting = false
     /// The last suggestion error, shown under the button.
