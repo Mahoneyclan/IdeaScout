@@ -47,7 +47,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 **Clipboard, errors and logging**
 - Copied prompts are local-only (no Universal Clipboard) and expire after 10 minutes (`SecureClipboard`).
 - Users see plain error messages. Providers' raw replies appear only behind a "Details" disclosure.
-- No `print`, `NSLog` or logging of any kind.
+- No `print` or `NSLog`. The only log is a database save failure (`os.Logger`, `Support/Persistence.swift`): it names the action, and the error text is marked private. Logs stay on the device.
 
 **Money**
 - A daily AI spending limit (default $1.00) is checked before the trend and idea steps and before variant suggestions. A second refresh on the same day asks first and shows the cost.
@@ -66,7 +66,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 | About me and business challenges are in UserDefaults, included in the user's own (encrypted) backups | Low | Not secrets; "Delete all my data" removes them |
 | Trial and unlock are checked on the device only | Low | A server check isn't justified for a $0.99 app; a jailbroken phone could bypass it |
 | Apple App Store review feeds and yc-oss data have no explicit commercial-use terms | Low–Medium (legal) | See `docs/source-terms.md`; consider switching off Y Combinator data for the paid release |
-| One compiler concurrency warning (`DigestService`, Swift 5 language mode) | Low | Moving to Swift 6 strict concurrency is on the quality backlog |
+| Swift 5 language mode (strict Swift 6 concurrency checking off; 0 warnings today) | Low | Moving to Swift 6 strict concurrency is on the quality backlog |
 
 ## Reporting a problem
 Contact the developer at the support address listed in the app (Settings → About & privacy) and on the App Store page.

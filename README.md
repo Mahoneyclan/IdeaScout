@@ -58,6 +58,7 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 - The trends are saved as soon as they're ready, before the idea step, so a later failure can't lose them.
 - A good digest is never replaced by a weaker one (Claude > Apple > keywords) on the same day; the failure is noted on the kept digest instead.
 - Background refreshes stop cleanly when iOS ends the app's background time.
+- If the database can't save, the app shows a plain message instead of failing silently (the error is logged on the device, with details kept private).
 
 ## Secrets and configuration
 
@@ -108,13 +109,25 @@ IdeaScout/
               GamesFetchers, DemandFetchers (one file per source family)
   Models/     Values (sources, signals, items, scores) and StoredModels (SwiftData: Digest, Theme, Item, Idea, KillerIdea)
   Store/      StoreManager (free trial and one-off unlock)
-  Support/    AppSettings, Keychain, UsageTracker (costs), notifications
+  Support/    AppSettings, Keychain, UsageTracker (costs), Persistence (saving with error reporting),
+              TestMode (sealed UI-test mode, Debug only), notifications
   Views/      SwiftUI screens: tabs, Ideas, day view, Saved, Settings, welcome/consent, paywall, About
   PrivacyInfo.xcprivacy, IdeaScout.storekit (test only, not shipped)
-IdeaScoutTests/
+IdeaScoutTests/    Unit tests (Swift Testing)
+IdeaScoutUITests/  Screen tests (XCUITest)
 docs/         Privacy policy, App Store kit, data-source terms check
 project.yml   XcodeGen project definition
 ARCHITECTURE.md  How the app fits together
 SECURITY.md   What data is held, how it's protected, remaining risks
 CLAUDE.md     Conventions for working on this repo
 ```
+
+## Status and open items
+
+Version 1.0 is feature-complete. All 100 tests pass (96 unit, 4 screen) with no compiler warnings, and the last internal quality review scored 84.6 / 100.
+
+Still to do:
+- **Before App Store release (owner):** choose a support email and host the privacy policy publicly, then fill in `AppInfo` in `AboutView.swift`; create the two in-app purchases in App Store Connect; decide whether to keep Y Combinator data (see `docs/source-terms.md`); archive, TestFlight and submit.
+- **Reddit** as a source, once Reddit approves API access.
+- **Model list upkeep:** a future admin routine to update providers, models and prices automatically (today they're hand-maintained in `AI/AIProviders.swift`).
+- **Code quality backlog:** screen tests for History and Saved; split the six files over 300 lines; Swift 6 strict concurrency; typed JSON schemas for AI replies.
