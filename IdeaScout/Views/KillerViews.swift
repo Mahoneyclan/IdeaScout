@@ -29,20 +29,35 @@ struct KillerScoreRow: View {
 
 struct KillerScoreBadge: View {
     let score: Double
+    @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
 
     var body: some View {
         Text(score, format: .number.precision(.fractionLength(1)))
             .font(.headline.monospacedDigit())
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(.orange.opacity(0.2), in: Capsule())
+            .background((score >= qualityBar ? Color.orange : Color.gray).opacity(0.2), in: Capsule())
             .accessibilityLabel("Killer score \(score.formatted(.number.precision(.fractionLength(1)))) out of 5")
     }
 }
 
 /// A card for one killer idea, used on Today and the leaderboard.
+/// "Killer" when the idea clears the quality bar, otherwise "Near-miss".
+struct KillerStatusLabel: View {
+    let score: Double
+    @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
+
+    var body: some View {
+        let killer = score >= qualityBar
+        Label(killer ? "Killer" : "Near-miss", systemImage: killer ? "flame.fill" : "scope")
+            .font(.caption2.bold())
+            .foregroundStyle(killer ? Color.orange : Color.secondary)
+    }
+}
+
 struct KillerIdeaCard: View {
     let idea: KillerIdea
+    var showDate = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -50,6 +65,12 @@ struct KillerIdeaCard: View {
                 Text(idea.title).font(.headline)
                 Spacer()
                 KillerScoreBadge(score: idea.killerScore)
+            }
+            HStack {
+                KillerStatusLabel(score: idea.killerScore)
+                if showDate {
+                    Text(idea.lastSeen.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.secondary)
+                }
             }
             Text(idea.pitch).font(.subheadline)
             Text("\(idea.buyer) · \(idea.pricing)").font(.caption).foregroundStyle(.secondary)
@@ -79,11 +100,18 @@ struct KillerIdeaDetailView: View {
                     Spacer()
                     KillerScoreBadge(score: idea.killerScore)
                 }
+                KillerStatusLabel(score: idea.killerScore)
                 Text(idea.pitch)
             }
             Section("The opportunity") {
                 LabeledContent("Who pays") { Text(idea.buyer).multilineTextAlignment(.trailing) }
                 LabeledContent("Pricing") { Text(idea.pricing).multilineTextAlignment(.trailing) }
+                if !idea.replaces.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Replaces").font(.subheadline.bold())
+                        Text(idea.replaces)
+                    }
+                }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Why now").font(.subheadline.bold())
                     Text(idea.whyNow)
@@ -150,47 +178,57 @@ struct KillerIdeaDetailView: View {
     }
 }
 
-/// Every killer idea so far, best first. Ideas that come back on several days get a bonus.
+/// Every idea so far, best first: killers (at or above the quality bar), then near-misses.
+/// Ideas that come back on several days get a bonus.
 struct LeaderboardView: View {
     @Environment(\.modelContext) private var context
     @Query private var ideas: [KillerIdea]
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
 
-    private var ranked: [KillerIdea] {
-        ideas.filter { $0.killerScore >= qualityBar }.sorted { $0.leaderboardScore > $1.leaderboardScore }
-    }
+    private var ranked: [KillerIdea] { ideas.sorted { $0.leaderboardScore > $1.leaderboardScore } }
 
     var body: some View {
+        let killers = ranked.filter { $0.killerScore >= qualityBar }
+        let nearMisses = ranked.filter { $0.killerScore < qualityBar }
         NavigationStack {
             List {
-                ForEach(Array(ranked.enumerated()), id: \.element.key) { index, idea in
-                    NavigationLink {
-                        KillerIdeaDetailView(idea: idea)
-                    } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            Text("\(index + 1)").font(.title3.bold().monospacedDigit()).foregroundStyle(.secondary)
-                            KillerIdeaCard(idea: idea)
-                        }
+                if !killers.isEmpty {
+                    Section("Killer ideas") { rows(killers) }
+                }
+                if !nearMisses.isEmpty {
+                    Section {
+                        rows(nearMisses)
+                    } header: {
+                        Text("Near-misses")
+                    } footer: {
+                        Text("Survived the devil's advocate but scored below your quality bar (\(qualityBar.formatted()) / 5). They can climb if they come back on later days.")
                     }
-                }
-                .onDelete { offsets in
-                    let current = ranked
-                    offsets.map { current[$0] }.forEach(context.delete)
-                    try? context.save()
-                }
-                let hidden = ideas.count - ranked.count
-                if hidden > 0 {
-                    Text("\(hidden) idea\(hidden == 1 ? "" : "s") below the quality bar (\(qualityBar.formatted()) / 5) hidden. Lower the bar in Settings to see \(hidden == 1 ? "it" : "them").")
-                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .overlay {
-                if ranked.isEmpty && ideas.count == 0 {
+                if ideas.isEmpty {
                     ContentUnavailableView("No killer ideas yet", systemImage: "trophy",
                                            description: Text("Each refresh with Claude proposes ideas and keeps only the ones that survive a devil's-advocate check."))
                 }
             }
             .navigationTitle("Top Ideas")
+        }
+    }
+
+    private func rows(_ list: [KillerIdea]) -> some View {
+        ForEach(Array(list.enumerated()), id: \.element.key) { index, idea in
+            NavigationLink {
+                KillerIdeaDetailView(idea: idea)
+            } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    Text("\(index + 1)").font(.title3.bold().monospacedDigit()).foregroundStyle(.secondary)
+                    KillerIdeaCard(idea: idea)
+                }
+            }
+        }
+        .onDelete { offsets in
+            offsets.map { list[$0] }.forEach(context.delete)
+            try? context.save()
         }
     }
 }

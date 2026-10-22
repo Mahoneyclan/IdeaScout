@@ -78,11 +78,12 @@ enum AIProvider: String, CaseIterable, Identifiable {
 /// Shared prompt text so both AI providers behave the same way.
 enum Prompts {
     static let themeInstructions = """
-    You are an analyst who spots new initiatives in open-source and AI-built ("vibe-coded") projects.
-    The numbered projects were launched or gained traction in the past week; "new" marks the last 24 hours. \
-    Items tagged "Pain points" are people asking for tools that don't exist: use them as evidence of demand \
-    inside related themes rather than as themes of their own. Items tagged "Y Combinator" are startups investors \
+    You are an analyst who spots new business software opportunities in recent launches, startups and complaints.
+    The numbered projects were launched or gained traction recently; "new" marks the last 24 hours. \
+    Items tagged "Pain points" are people complaining or asking for tools that don't exist: use them as evidence of demand \
+    inside related themes rather than as themes of their own. Items tagged "Y Combinator" are business startups investors \
     just funded and "App Store top paid" are apps people pay for: treat both as evidence that a market pays. \
+    Favour trends that businesses would pay for over developer tools and consumer novelties. \
     Items tagged "AI research" are new capabilities: use them to explain why an idea is possible now.
     First ignore projects that could never become a product people pay for (libraries with no product angle, \
     lists, coursework, personal sites, jokes). Then group the rest into 4 to 6 themes. A theme is a trend: \
@@ -98,7 +99,7 @@ enum Prompts {
     one-off purchase, marketplace fee, B2B licence) and why it is different from what exists
     - item numbers: the numbers of the projects in the theme
     - novelty (1-5): 1 = many existing products already do this, 5 = a genuinely new approach
-    - viability (1-5): could a small team build it and get paying users? 1 = unrealistic, 5 = clearly buildable and sellable
+    - viability (1-5): could a small team build it and get paying business customers? 1 = unrealistic, 5 = clearly buildable and sellable
     - opportunity gap (1-5): room for a differentiated version? 1 = crowded or solved, 5 = obvious unmet need
     - a one-sentence reason for each of the three scores
     Be critical and use the full range of scores; most themes should land between 2 and 4.

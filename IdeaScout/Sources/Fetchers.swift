@@ -48,6 +48,20 @@ enum TextCleaner {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return s.count > max ? String(s.prefix(max - 1)) + "…" : s
     }
+
+    /// Up to `max` characters of already-clean text, starting a little before the first matching phrase
+    /// (case-insensitive). Falls back to the start of the text when no phrase is found.
+    static func snippet(_ text: String, around phrases: [String], max: Int = 220, lead: Int = 60) -> String {
+        guard text.count > max else { return text }
+        let lower = text.lowercased()
+        let match = phrases.compactMap { lower.range(of: $0.lowercased()) }.min { $0.lowerBound < $1.lowerBound }
+        guard let match else { return String(text.prefix(max - 1)) + "…" }
+        let offset = lower.distance(from: lower.startIndex, to: match.lowerBound)
+        let start = Swift.max(0, Swift.min(offset - lead, text.count - (max - 1)))
+        let begin = text.index(text.startIndex, offsetBy: start)
+        let body = String(text[begin...].prefix(max - (start > 0 ? 2 : 1)))
+        return (start > 0 ? "…" : "") + body + (start + body.count < text.count ? "…" : "")
+    }
 }
 
 // MARK: - Hacker News (Algolia API, no key needed)
@@ -86,11 +100,12 @@ struct HackerNewsFetcher: ItemFetcher {
         let hits: [Hit]
     }
 
-    static func parse(_ data: Data, as kind: SourceKind) throws -> [FetchedItem] {
+    /// `around`: for comments, phrases to centre the title on (so a long comment keeps the complaint).
+    static func parse(_ data: Data, as kind: SourceKind, around phrases: [String] = []) throws -> [FetchedItem] {
         try JSONDecoder().decode(Response.self, from: data).hits.compactMap { hit in
-            // Comments have no title: use the start of the comment, with the thread it was posted in as detail.
+            // Comments have no title: use the part of the comment around the phrase, with the thread as detail.
             if hit.title == nil, let comment = hit.comment_text {
-                let text = TextCleaner.clean(comment, max: 160)
+                let text = TextCleaner.snippet(TextCleaner.clean(comment, max: 5000), around: phrases, max: 220)
                 guard !text.isEmpty else { return nil }
                 return FetchedItem(key: "hn-\(hit.objectID)", source: kind, title: text,
                                    detail: hit.story_title.map { "In thread: \($0)" } ?? "",
@@ -459,8 +474,11 @@ enum SteamStore {
 struct PainPointsFetcher: ItemFetcher {
     let kind = SourceKind.painPoints
 
-    static let phrases = ["\"I wish there was\"", "\"is there a tool\"", "\"I would pay for\"", "\"I'd pay for\"",
-                          "\"looking for a tool\"", "\"why is there no\""]
+    static let phrases = ["\"I wish there was\"", "\"I would pay for\"", "\"I'd pay for\"", "\"looking for a tool\"",
+                          "\"why is there no\"", "\"too expensive\"", "\"switched from\"", "\"alternative to\""]
+
+    /// The phrases without quotes, used to cut each comment to the part around the complaint.
+    static var plainPhrases: [String] { phrases.map { $0.replacingOccurrences(of: "\"", with: "") } }
 
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         var results: [FetchedItem] = []
@@ -468,7 +486,7 @@ struct PainPointsFetcher: ItemFetcher {
         for phrase in Self.phrases {
             do {
                 let data = try await HTTP.get(HackerNewsFetcher.searchURL(tags: "comment", query: phrase, since: since, hits: 10))
-                results += try HackerNewsFetcher.parse(data, as: .painPoints)
+                results += try HackerNewsFetcher.parse(data, as: .painPoints, around: Self.plainPhrases)
             } catch { firstError = firstError ?? error }
         }
         do {
@@ -503,7 +521,7 @@ enum ISODates {
     }
 }
 
-// MARK: - Y Combinator (latest funded startups, plus Launch HN posts)
+// MARK: - Y Combinator (latest funded B2B startups, plus Launch HN posts)
 
 struct YCombinatorFetcher: ItemFetcher {
     let kind = SourceKind.ycombinator
@@ -524,22 +542,29 @@ struct YCombinatorFetcher: ItemFetcher {
         return results
     }
 
-    /// Newest batch first: YC runs Winter, Spring, Summer and Fall batches.
-    static func candidateBatches(now: Date = .now) -> [String] {
-        let year = Calendar.current.component(.year, from: now)
-        let seasons = ["fall", "summer", "spring", "winter"]
-        return [year + 1, year, year - 1].flatMap { y in seasons.map { "\($0)-\(y)" } }
-    }
+    static let b2bURL = URL(string: "https://yc-oss.github.io/api/industries/b2b.json")!
+    /// A batch is only used once it has this many B2B companies (future batches start nearly empty).
+    static let minimumBatchSize = 30
 
     private func latestBatch(since: Date) async throws -> [FetchedItem] {
-        for batch in Self.candidateBatches() {
-            guard let url = URL(string: "https://yc-oss.github.io/api/batches/\(batch).json"),
-                  let data = try? await HTTP.get(url),
-                  let companies = try? Self.parse(data, postedAt: since), !companies.isEmpty
-            else { continue }
-            return companies
-        }
-        throw FetchError.http(404)
+        try Self.newestBatch(in: try await HTTP.get(Self.b2bURL), postedAt: since)
+    }
+
+    /// Business (B2B) companies from the newest batch that has at least `minimumBatchSize` of them.
+    static func newestBatch(in data: Data, postedAt: Date) throws -> [FetchedItem] {
+        let companies = try JSONDecoder().decode([Company].self, from: data)
+        let counts = Dictionary(grouping: companies.compactMap(\.batch), by: { $0 }).mapValues(\.count)
+        guard let batch = counts.filter({ $0.value >= minimumBatchSize }).keys.max(by: { batchOrder($0) < batchOrder($1) })
+        else { throw FetchError.http(404) }
+        return items(companies.filter { $0.batch == batch }, postedAt: postedAt)
+    }
+
+    /// "Fall 2026" → 20264. YC runs Winter, Spring, Summer and Fall batches.
+    static func batchOrder(_ batch: String) -> Int {
+        let parts = batch.split(separator: " ")
+        guard parts.count == 2, let year = Int(parts[1]) else { return 0 }
+        let season = ["winter": 1, "spring": 2, "summer": 3, "fall": 4][parts[0].lowercased()] ?? 0
+        return year * 10 + season
     }
 
     /// The same batch is sent every day, so rotate through it ~25 companies at a time.
@@ -555,14 +580,20 @@ struct YCombinatorFetcher: ItemFetcher {
         let one_liner: String?
         let url: String
         let industry: String?
+        let subindustry: String?
         let batch: String?
     }
 
     /// Batches have no useful date, so items are dated at the start of the window (never "new").
     static func parse(_ data: Data, postedAt: Date) throws -> [FetchedItem] {
-        try JSONDecoder().decode([Company].self, from: data).compactMap { c in
+        items(try JSONDecoder().decode([Company].self, from: data), postedAt: postedAt)
+    }
+
+    private static func items(_ companies: [Company], postedAt: Date) -> [FetchedItem] {
+        companies.compactMap { c in
             guard let url = URL(string: c.url) else { return nil }
-            let extras = [c.industry, c.batch.map { "YC \($0)" }].compactMap { $0 }.joined(separator: ", ")
+            let area = c.subindustry?.replacingOccurrences(of: " -> ", with: ": ") ?? c.industry
+            let extras = [area, c.batch.map { "YC \($0)" }].compactMap { $0 }.joined(separator: ", ")
             let detail = [c.one_liner ?? "", extras.isEmpty ? "" : "(\(extras))"].filter { !$0.isEmpty }.joined(separator: " ")
             return FetchedItem(key: "yc-\(c.id)", source: .ycombinator, title: c.name, detail: TextCleaner.clean(detail),
                                url: url, score: 0, postedAt: postedAt)

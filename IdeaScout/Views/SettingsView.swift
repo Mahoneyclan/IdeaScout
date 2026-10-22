@@ -10,6 +10,11 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
     @AppStorage(AppSettings.Keys.aboutMe) private var aboutMe = ""
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
+    @AppStorage(AppSettings.Keys.dailyCap) private var dailyCap = AppSettings.defaultDailyCap
+    @AppStorage(AppSettings.Keys.focusIndustry) private var focusIndustry = AppSettings.defaultFocusIndustry
+    @AppStorage(AppSettings.Keys.trendWindowDays) private var trendWindow = AppSettings.defaultTrendWindowDays
+    @AppStorage(AppSettings.Keys.painWindowDays) private var painWindow = AppSettings.defaultPainWindowDays
+    @AppStorage(AppSettings.Keys.claudeMaxItems) private var maxItems = AppSettings.defaultClaudeMaxItems
     @State private var usage = UsageTracker.summary()
 
     @State private var notificationsAllowed: Bool?
@@ -45,6 +50,34 @@ struct SettingsView: View {
                     Text("About me")
                 } footer: {
                     Text("Your skills, industry, time and budget. Claude uses this to score how well each killer idea fits you. Stored only on this iPhone and sent to Claude with each refresh.")
+                }
+
+                Section {
+                    TextField("e.g. energy, utilities and enterprise IT", text: $focusIndustry)
+                        .focused($keyboardOpen)
+                } header: {
+                    Text("Industry focus")
+                } footer: {
+                    Text("Ideas are for business buyers. At least 2 of each day's ideas are aimed at this industry; the rest target small and medium businesses.")
+                }
+
+                Section {
+                    Picker("Trend window", selection: $trendWindow) {
+                        ForEach(AppSettings.windowChoices, id: \.self) { Text("\($0) days").tag($0) }
+                    }
+                    Picker("Pain points window", selection: $painWindow) {
+                        ForEach(AppSettings.windowChoices, id: \.self) { Text("\($0) days").tag($0) }
+                    }
+                    Picker("Items Claude reads", selection: $maxItems) {
+                        ForEach(AppSettings.maxItemChoices, id: \.self) { count in
+                            let cost = AppSettings.estimatedRefreshCost(items: count)
+                            Text("\(count) · ~\(cost.lowerBound.formatted(.currency(code: "USD")))–\(cost.upperBound.formatted(.currency(code: "USD")))").tag(count)
+                        }
+                    }
+                } header: {
+                    Text("Scan")
+                } footer: {
+                    Text("How far back to look, and how many items Claude reads per refresh (with rough cost per refresh). Longer windows favour older, already-popular posts; pain points are rarer, so they get their own window. More items cost more and take longer.")
                 }
 
                 Section("Sources") {
@@ -90,13 +123,17 @@ struct SettingsView: View {
                 } header: {
                     Text("AI")
                 } footer: {
-                    Text("Claude is recommended: it reads up to 150 projects and finds stronger trends (about 10 cents a day). Apple's on-device model is free but reads only about 20. If your choice isn't available, IdeaScout uses the other, then keyword grouping. Keys are stored in the iPhone Keychain.")
+                    Text("Claude is recommended: it reads up to \(maxItems) projects (see Scan) and finds much stronger trends and ideas. Apple's on-device model is free but reads only about 20. If your choice isn't available, IdeaScout uses the other, then keyword grouping. Keys are stored in the iPhone Keychain.")
                 }
 
                 Section {
                     LabeledContent("Today", value: usage.today.cost.formatted(.currency(code: "USD")))
                     LabeledContent("This month", value: usage.thisMonth.cost.formatted(.currency(code: "USD")))
                     LabeledContent("All time", value: usage.allTime.cost.formatted(.currency(code: "USD")))
+                    Picker("Daily limit", selection: $dailyCap) {
+                        ForEach([0.2, 0.4, 0.6, 1.0, 2.0], id: \.self) { Text($0.formatted(.currency(code: "USD"))).tag($0) }
+                        Text("No limit").tag(0.0)
+                    }
                     DisclosureGroup("Details") {
                         ForEach(usage.byFeatureThisMonth, id: \.feature) { row in
                             LabeledContent(row.feature, value: row.usage.cost.formatted(.currency(code: "USD")))
@@ -116,7 +153,7 @@ struct SettingsView: View {
                 } header: {
                     Text("AI costs (Claude)")
                 } footer: {
-                    Text("Estimated from the token counts Claude reports, at Claude Opus 5.5 list prices ($4 in / $20 out per million tokens). Apple's on-device AI is free. Check console.anthropic.com for your actual bill.")
+                    Text("Estimated from the token counts Claude reports, at Claude Opus 5.5 list prices ($4 in / $20 out per million tokens). Once today's spending reaches the daily limit, refreshes skip Claude until tomorrow. Apple's on-device AI is free. Check console.anthropic.com for your actual bill.")
                 }
 
                 Section {
@@ -221,7 +258,7 @@ private struct SourceToggle: View {
 
     init(kind: SourceKind) {
         self.kind = kind
-        _isOn = AppStorage(wrappedValue: true, AppSettings.Keys.sourceEnabled(kind))
+        _isOn = AppStorage(wrappedValue: kind.enabledByDefault, AppSettings.Keys.sourceEnabled(kind))
     }
 
     var body: some View {

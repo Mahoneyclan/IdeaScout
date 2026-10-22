@@ -1,17 +1,17 @@
 # IdeaScout
 
-An iPhone app that hunts for a **killer product idea**. Every day it scans open-source projects, AI "vibe-coded" apps, startup launches and places where people complain about missing tools. It groups what it finds into trends, scores them, and proposes a few product ideas that have survived a devil's-advocate review.
+An iPhone app that hunts for a **killer business software idea**. Every day it scans startup launches, funded B2B startups, top paid apps, open-source projects and places where people complain about missing or overpriced tools. It groups what it finds into trends, scores them, and proposes business product ideas that have survived a devil's-advocate review.
 
 Native Swift / SwiftUI / SwiftData. No backend: everything runs on the phone.
 
 ## What it does
 
-- **Today:** the past 7 days of activity grouped into 4–6 themes. Each theme is scored for novelty, momentum, viability and opportunity gap, and comes with money-making variants.
-- **Killer ideas:** Claude suggests 5 product ideas from the trends. A second, sceptical pass tries to kill each one. Only ideas that survive and clear the quality bar are kept, at most 2 a day.
-- **Top Ideas:** a leaderboard of every killer idea found so far. Ideas that come back on several days rank higher.
+- **Today:** the best ideas (today's, or the best of the past week), then recent activity grouped into 4–6 themes. Each theme is scored for novelty, momentum, viability and opportunity gap, and comes with money-making variants.
+- **Killer ideas:** Claude suggests 5 business product ideas from the trends. Each names a business buyer, a monthly price and the manual task or costly workaround it replaces; at most 1 may be a developer tool and at least 2 target your industry focus. A second, sceptical pass (given each idea's evidence) tries to kill each one. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**.
+- **Top Ideas:** a leaderboard of killer ideas and near-misses. Ideas that come back on several days rank higher.
 - **History:** past daily digests.
 - **Ideas:** projects you've starred, with notes, AI-suggested monetisable variants, and a copyable "flesh out this idea" prompt.
-- **Settings:** topics, an "About me" profile (used to score how well an idea fits you), sources on/off, quality bar, ranking weights, AI provider, an AI cost tracker, and the daily notification time.
+- **Settings:** topics (steer GitHub search), "About me" (used to score fit), industry focus, scan windows and number of items Claude reads, sources on/off, quality bar, ranking weights, AI provider, an AI cost tracker with a daily spending limit, and the daily notification time.
 
 All output is in English. Non-English items are translated by Claude, or filtered out when Apple's on-device model is used.
 
@@ -19,24 +19,33 @@ All output is in English. Non-English items are translated by Claude, or filtere
 
 | Source | What it gives |
 |---|---|
+| Pain points | HN comments such as "I wish there was…", "too expensive", "alternative to", plus Ask HN (own window, default 14 days) |
+| Y Combinator | B2B companies from the newest batch with 30+ of them, plus Launch HN posts |
+| App Store | Top paid iPhone apps |
 | GitHub | New repos with traction, searched by your topics |
 | Hacker News | Show HN posts |
 | Product Hunt | Today's launches (needs a free developer token) |
 | Vibe-code showcases | AI-built apps shared on HN and GitHub |
-| Hugging Face | Trending AI Spaces |
-| DEV | #showdev posts |
-| Games | itch.io, Steam, HN, GitHub and Hugging Face game projects |
-| Pain points | HN comments such as "I wish there was…", plus Ask HN |
-| Y Combinator | The latest YC batch and Launch HN posts |
-| App Store | Top paid iPhone apps |
 | AI research | Hugging Face daily papers |
-| Lobsters | "Show" posts |
+| Hugging Face *(off by default)* | Trending AI Spaces |
+| DEV *(off by default)* | #showdev posts |
+| Games *(off by default)* | itch.io, Steam, HN, GitHub and Hugging Face game projects |
+| Lobsters *(off by default)* | "Show" posts |
+
+Developer and game sources start switched off so ideas lean towards business buyers; turn any of them back on in Settings.
 
 ## AI summarisers
 
-- **Claude** (default, recommended): reads up to 150 projects per refresh and powers the killer ideas and the devil's advocate. Costs roughly 10 cents a day; Settings → AI costs tracks it.
+- **Claude** (default, recommended): reads up to 300 projects per refresh (configurable: 100–500) and powers the killer ideas and the devil's advocate. A full refresh at 300 items costs about $0.40–0.45. Settings → AI costs tracks spending, and a daily limit (default $1.00) skips Claude once it's reached.
 - **Apple Intelligence**: on-device and free, but reads only about 20 projects and can't generate killer ideas.
 - **Keyword grouping**: the fallback when no AI is available.
+
+## Reliability
+
+- Claude replies are streamed, and dropped connections, timeouts and busy-server errors are retried twice (3 s, then 15 s, or the server's retry-after).
+- The trends are saved as soon as they're ready, before the idea step, so a later failure can't lose them.
+- A good digest is never replaced by a weaker one (Claude > Apple > keywords) on the same day; the failure is noted on the kept digest instead.
+- Background refreshes stop cleanly when iOS ends the app's background time.
 
 ## Secrets
 
@@ -55,7 +64,7 @@ Set your own signing team in `project.yml` (`DEVELOPMENT_TEAM`) if you aren't th
 
 ## Tests
 
-43 Swift Testing tests in `IdeaScoutTests/`, covering source parsing, theme building, ranking, the Claude request and reply handling, the killer-idea filter, the cost tracker, the English filter and the quality bar. Run them in Xcode with ⌘U, or:
+57 Swift Testing tests in `IdeaScoutTests/`, covering source parsing, theme building, ranking, Claude request, streaming and retry handling, the killer-idea filter and evidence caps, the cost tracker and daily limit, digest replacement rules, the English filter, scan settings and the business-focus rules. Run them in Xcode with ⌘U, or:
 
 ```sh
 xcodebuild test -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'platform=iOS,id=<device-id>'

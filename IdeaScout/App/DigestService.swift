@@ -7,7 +7,6 @@ import BackgroundTasks
 final class DigestService: ObservableObject {
     static let shared = DigestService()
     static let backgroundTaskID = "com.mahoney.IdeaScout.refresh"
-    static let windowDays = 7.0
 
     @Published private(set) var isRefreshing = false
     @Published var lastError: String?
@@ -18,16 +17,21 @@ final class DigestService: ObservableObject {
     // MARK: - Refresh
 
     /// Builds today's digest. Without `force`, does nothing if one already exists.
-    /// The work runs in its own task, so it isn't cancelled if the screen that
-    /// started it goes away (previously that cut the AI summary off half-way).
-    func refresh(force: Bool, notify: Bool = false) async {
+    /// The work runs in its own task, so it isn't cancelled if the screen that started it goes away
+    /// (previously that cut the AI summary off half-way). A background refresh passes
+    /// `cancelWithCaller` so that when iOS ends the background time, the work stops cleanly.
+    func refresh(force: Bool, notify: Bool = false, cancelWithCaller: Bool = false) async {
         if let running = refreshTask {
             await running.value
             return
         }
         let task = Task { await performRefresh(force: force, notify: notify) }
         refreshTask = task
-        await task.value
+        if cancelWithCaller {
+            await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        } else {
+            await task.value
+        }
         refreshTask = nil
     }
 
@@ -44,21 +48,34 @@ final class DigestService: ObservableObject {
         lastError = nil
         defer { isRefreshing = false }
 
-        // Trends are built from the past week so a theme reflects several projects over several days;
-        // items posted in the last 24 hours are flagged as new.
-        let since = Date.now.addingTimeInterval(-Self.windowDays * 24 * 60 * 60)
+        // Trends are built from the chosen window (default a week) so a theme reflects several projects over
+        // several days; pain points, which are rarer, use their own longer window. Items from the last 24 hours are "new".
+        let since = Self.windowStart(days: AppSettings.trendWindowDays)
+        let painSince = Self.windowStart(days: AppSettings.painWindowDays)
         let topics = AppSettings.topics
-        let (fetched, warnings) = await fetchAll(since: since, topics: topics)
+        let (fetched, warnings) = await fetchAll(since: since, painSince: painSince, topics: topics)
+        if Task.isCancelled { return }
 
-        let items = Self.select(fetched.filter(ProductFilter.isProductShaped), perSource: 25)
+        let enabledSources = SourceKind.allCases.filter(AppSettings.isEnabled).count
+        let perSource = Self.perSourceLimit(maxItems: AppSettings.claudeMaxItems, sources: enabledSources)
+        let items = Self.select(fetched.filter(ProductFilter.isProductShaped), perSource: perSource)
         guard !items.isEmpty else {
             lastError = warnings.isEmpty ? "No new projects found. Try again later." : warnings.joined(separator: "\n")
             return
         }
 
         var summarizer = AppSettings.makeSummarizer()
-        var drafts: [ThemeDraft]
+        let hasClaudeKey = summarizer is ClaudeSummarizer
         var allWarnings = warnings
+        var killerNote: String?
+        let capText = AppSettings.dailyCap.formatted(.currency(code: "USD"))
+        if hasClaudeKey && AppSettings.isOverDailyCap {
+            allWarnings.append("Today's Claude spending limit (\(capText)) is reached, so Claude was skipped. Change it in Settings → AI costs.")
+            killerNote = "Killer ideas skipped: daily spending limit reached."
+            summarizer = AppleSummarizer.isAvailable ? AppleSummarizer() : KeywordSummarizer(topics: topics)
+        }
+
+        var drafts: [ThemeDraft]
         // Claude translates non-English items; without it, leave out items that clearly aren't English.
         let candidates = summarizer is ClaudeSummarizer ? items : items.filter(LanguageFilter.isEnglishOrUnclear)
         var batch = Array(candidates.prefix(summarizer.maxItems))
@@ -66,37 +83,28 @@ final class DigestService: ObservableObject {
             let (themeDrafts, translations) = try await summarizer.themesWithTranslations(for: batch)
             drafts = themeDrafts
             batch = Translations.apply(translations, to: batch)
-        } catch is CancellationError {
-            return  // don't save a half-finished digest
         } catch {
+            if Self.isCancellation(error) || Task.isCancelled { return }  // don't save a half-finished digest
             allWarnings.append("\(summarizer.name) summary failed (\(error.localizedDescription)); grouped by keyword instead.")
+            if summarizer is ClaudeSummarizer { killerNote = "Killer ideas skipped because the Claude summary failed." }
             summarizer = KeywordSummarizer(topics: topics)
             batch = batch.filter(LanguageFilter.isEnglishOrUnclear)
             drafts = (try? await summarizer.themes(for: batch)) ?? []
         }
 
-        let builtThemes = ThemeBuilder.assemble(drafts, items: batch)
-
-        // Killer ideas: Claude only. A failure here doesn't stop the digest being saved.
-        if let claude = summarizer as? ClaudeSummarizer {
-            do {
-                let leaderboard = topKillerIdeas(context: context, limit: 10).map { "\($0.title): \($0.pitch)" }
-                let results = try await KillerEngine(claude: claude).run(
-                    .init(themes: builtThemes, items: batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard),
-                    qualityBar: AppSettings.qualityBar)
-                mergeKillerIdeas(results, items: batch, context: context)
-                if results.isEmpty {
-                    allWarnings.append("No idea cleared the quality bar (\(AppSettings.qualityBar.formatted()) / 5) today.")
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                allWarnings.append("Killer ideas failed: \(error.localizedDescription)")
-            }
-        } else {
-            allWarnings.append("Killer ideas need Claude: add an API key in Settings.")
+        // Never replace a better digest from earlier today (e.g. Claude) with a weaker one (e.g. keywords).
+        if let kept = existing.max(by: { Self.quality($0.summarizer) < Self.quality($1.summarizer) }),
+           !Self.shouldReplace(existing: kept.summarizer, with: summarizer.name) {
+            let time = Date.now.formatted(date: .omitted, time: .shortened)
+            let note = "Refresh at \(time) didn't work (\(allWarnings.last ?? "unknown error")). Kept the earlier \(kept.summarizer) digest."
+            kept.warnings.append(note)
+            try? context.save()
+            lastError = note
+            return
         }
 
+        // Save the trends straight away, so a later failure (or iOS stopping the app) can't lose them.
+        let builtThemes = ThemeBuilder.assemble(drafts, items: batch)
         existing.forEach(context.delete)
         let digest = Digest(day: today, summarizer: summarizer.name, warnings: allWarnings)
         context.insert(digest)
@@ -114,12 +122,67 @@ final class DigestService: ObservableObject {
         }
         try? context.save()
 
-        if notify {
+        // Killer ideas: Claude only. A failure here keeps the saved digest.
+        if let claude = summarizer as? ClaudeSummarizer {
+            if AppSettings.isOverDailyCap {
+                digest.warnings.append("Killer ideas skipped: today's Claude spending limit (\(capText)) was reached during the trend step.")
+            } else {
+                do {
+                    let leaderboard = topKillerIdeas(context: context, limit: 10).map { "\($0.title): \($0.pitch)" }
+                    let results = try await KillerEngine(claude: claude).run(
+                        .init(themes: builtThemes, items: batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard,
+                              focusIndustry: AppSettings.focusIndustry))
+                    mergeKillerIdeas(results, items: batch, context: context)
+                    if results.isEmpty {
+                        digest.warnings.append("The devil's advocate rejected every idea today.")
+                    } else if !results.contains(where: { $0.score >= AppSettings.qualityBar }) {
+                        digest.warnings.append("No idea cleared the quality bar (\(AppSettings.qualityBar.formatted()) / 5) today; the best are shown as near-misses.")
+                    }
+                } catch {
+                    if !(Self.isCancellation(error) || Task.isCancelled) {
+                        digest.warnings.append("Killer ideas failed: \(error.localizedDescription)")
+                    }
+                }
+            }
+        } else if let killerNote {
+            digest.warnings.append(killerNote)
+        } else if !hasClaudeKey {
+            digest.warnings.append("Killer ideas need Claude: add an API key in Settings.")
+        }
+        try? context.save()
+
+        if notify && !Task.isCancelled {
             await Notifier.digestReady(themes: digest.themes.count, items: digest.itemCount)
         }
     }
 
-    private func fetchAll(since: Date, topics: [String]) async -> ([FetchedItem], [String]) {
+    nonisolated static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    /// Claude digests beat Apple's, which beat keyword grouping.
+    nonisolated static func quality(_ summarizer: String) -> Int {
+        switch summarizer {
+        case "Claude": 3
+        case "Apple on-device": 2
+        default: 1
+        }
+    }
+
+    nonisolated static func shouldReplace(existing: String, with new: String) -> Bool {
+        quality(new) >= quality(existing)
+    }
+
+    nonisolated static func windowStart(days: Int, now: Date = .now) -> Date {
+        now.addingTimeInterval(-Double(days) * 24 * 60 * 60)
+    }
+
+    /// Enough items per source to fill Claude's limit, but never fewer than 25.
+    nonisolated static func perSourceLimit(maxItems: Int, sources: Int) -> Int {
+        max(25, Int((Double(maxItems) / Double(max(sources, 1))).rounded(.up)))
+    }
+
+    private func fetchAll(since: Date, painSince: Date, topics: [String]) async -> ([FetchedItem], [String]) {
         // Vibe-code and games first so an item they share with Show HN keeps the more specific label.
         var fetchers: [any ItemFetcher] = []
         if AppSettings.isEnabled(.vibeCode) { fetchers.append(VibeCodeFetcher()) }
@@ -138,7 +201,8 @@ final class DigestService: ObservableObject {
         let results = await withTaskGroup(of: (Int, Result<[FetchedItem], Error>).self) { group in
             for (index, fetcher) in fetchers.enumerated() {
                 group.addTask {
-                    do { return (index, .success(try await fetcher.fetch(since: since, topics: topics))) }
+                    let start = fetcher.kind == .painPoints ? painSince : since
+                    do { return (index, .success(try await fetcher.fetch(since: start, topics: topics))) }
                     catch { return (index, .failure(error)) }
                 }
             }
@@ -198,8 +262,9 @@ final class DigestService: ObservableObject {
                 context.insert(idea)
             }
             idea.pitch = c.pitch; idea.buyer = c.buyer; idea.pricing = c.pricing; idea.whyNow = c.whyNow
-            idea.oneWeekTest = c.oneWeekTest
-            idea.objection = r.objection; idea.competitors = r.competitors; idea.verdict = r.verdict
+            idea.oneWeekTest = c.oneWeekTest; idea.replaces = c.replaces
+            idea.objection = r.objection; idea.competitors = r.competitors
+            idea.verdict = r.evidenceNeeded.isEmpty ? r.verdict : "\(r.verdict) Evidence that would raise the score: \(r.evidenceNeeded)"
             idea.pain = r.pain; idea.willingToPay = r.willingToPay; idea.timing = r.timing; idea.gap = r.gap; idea.fit = r.fit
             let evidence = c.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
             if !evidence.isEmpty {
@@ -239,7 +304,7 @@ final class DigestService: ObservableObject {
 
     func runBackgroundRefresh() async {
         scheduleBackgroundRefresh()
-        await refresh(force: false, notify: true)
+        await refresh(force: false, notify: true, cancelWithCaller: true)
     }
 
     nonisolated static func nextOccurrence(ofHour hour: Int, after date: Date) -> Date {

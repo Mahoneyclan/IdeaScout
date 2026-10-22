@@ -40,6 +40,15 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .lobsters: "ladybug"
         }
     }
+
+    /// Developer- and game-focused sources start switched off, so ideas lean towards business buyers.
+    /// A toggle the user has set in Settings always wins.
+    var enabledByDefault: Bool {
+        switch self {
+        case .games, .devTo, .lobsters, .huggingFace: false
+        default: true
+        }
+    }
 }
 
 /// A raw item returned by a source fetcher, before it is stored.
@@ -245,6 +254,7 @@ struct RankWeights: Equatable, Sendable {
     var pricing: String
     var whyNow: String
     var oneWeekTest: String
+    var replaces: String = ""   // the manual task or costly workaround the product replaces
     var objection: String
     var competitors: String
     var verdict: String
@@ -283,6 +293,15 @@ struct RankWeights: Equatable, Sendable {
     }
 
     var isFromToday: Bool { Calendar.current.isDateInToday(lastSeen) }
+
+    /// Today's ideas, best first; if there are none today, the single best idea from the last 7 days.
+    static func bestToShow(_ ideas: [KillerIdea], now: Date = .now) -> [KillerIdea] {
+        let byScore = ideas.sorted { $0.killerScore > $1.killerScore }
+        let today = byScore.filter { Calendar.current.isDate($0.lastSeen, inSameDayAs: now) }
+        if !today.isEmpty { return Array(today.prefix(KillerEngine.maxPerDay)) }
+        let weekAgo = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        return Array(byScore.filter { $0.lastSeen >= weekAgo }.prefix(1))
+    }
 
     var evidence: [(title: String, url: URL?)] {
         zip(evidenceTitles, evidenceURLs).map { ($0, URL(string: $1)) }

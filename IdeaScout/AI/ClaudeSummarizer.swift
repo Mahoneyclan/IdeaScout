@@ -4,7 +4,7 @@ import Foundation
 /// The API key comes from the Keychain and is never stored in source.
 struct ClaudeSummarizer: Summarizer {
     let name = "Claude"
-    let maxItems = 150
+    var maxItems: Int { AppSettings.claudeMaxItems }
     let apiKey: String
 
     static let model = "claude-opus-5-5"
@@ -19,7 +19,8 @@ struct ClaudeSummarizer: Summarizer {
         + "Leave English projects out of translations."
 
     func themesWithTranslations(for items: [FetchedItem]) async throws -> ([ThemeDraft], [Int: Translation]) {
-        let prompt = "Projects:\n" + Prompts.itemList(items, detailLimit: 200)
+        let prompt = "Window: the last \(AppSettings.trendWindowDays) days (pain points: \(AppSettings.painWindowDays) days).\n\n"
+            + "Projects:\n" + Prompts.itemList(items, detailLimit: 200)
         let data = try await send(Self.requestBody(system: Prompts.themeInstructions + Self.translationInstruction,
                                                    prompt: prompt, schema: Self.themeSchema),
                                   feature: "Trends")
@@ -35,7 +36,27 @@ struct ClaudeSummarizer: Summarizer {
     }
 
     /// Sends a request and records its token cost under `feature` in the usage tracker.
+    /// The reply is streamed (long requests are less likely to time out) and a dropped connection,
+    /// timeout or busy server is retried up to twice before giving up.
     func send(_ body: [String: Any], feature: String) async throws -> Data {
+        var streamed = body
+        streamed["stream"] = true
+        let payload = try JSONSerialization.data(withJSONObject: streamed)
+        var attempt = 0
+        while true {
+            do {
+                return try await sendOnce(payload, feature: feature)
+            } catch {
+                if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
+                guard attempt < Self.retryDelays.count, Self.isRetryable(error) else { throw error }
+                let wait = Self.retryDelay(attempt: attempt, retryAfter: (error as? ClaudeHTTPError)?.retryAfter)
+                attempt += 1
+                try await Task.sleep(for: .seconds(wait))
+            }
+        }
+    }
+
+    private func sendOnce(_ payload: Data, feature: String) async throws -> Data {
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 300
@@ -44,13 +65,47 @@ struct ClaudeSummarizer: Summarizer {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         // Lets the API retry a declined request on a suitable fallback model.
         request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        request.httpBody = payload
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw SummarizerError.badResponse("HTTP \(http.statusCode) \(String(decoding: data.prefix(300), as: UTF8.self))")
+            var body = Data()
+            for try await byte in bytes { body.append(byte); if body.count > 2000 { break } }
+            throw ClaudeHTTPError(status: http.statusCode,
+                                  retryAfter: http.value(forHTTPHeaderField: "retry-after").flatMap(Double.init),
+                                  detail: String(decoding: body.prefix(300), as: UTF8.self))
         }
+        var stream = StreamAssembler()
+        do {
+            for try await line in bytes.lines { try stream.consume(line) }
+        } catch {
+            // Input tokens are billed even if the reply is lost part-way, so record what we know.
+            if let partial = stream.usageOnlyResponse() { UsageTracker.record(response: partial, feature: feature) }
+            throw error
+        }
+        let data = try stream.response()
         UsageTracker.record(response: data, feature: feature)
         return data
+    }
+
+    // MARK: - Retries (static so they can be unit tested)
+
+    static let retryDelays: [Double] = [3, 15]
+
+    /// Only temporary problems are retried; a bad key or a malformed request fails straight away.
+    static func isRetryable(_ error: Error) -> Bool {
+        if let http = error as? ClaudeHTTPError { return [408, 429, 529].contains(http.status) || (500...599).contains(http.status) }
+        if error is StreamAssembler.StreamError { return true }
+        if let url = error as? URLError {
+            return [.networkConnectionLost, .timedOut, .notConnectedToInternet, .cannotConnectToHost,
+                    .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed].contains(url.code)
+        }
+        return false
+    }
+
+    /// The server's retry-after if it gave one (capped at 30 s), otherwise 3 s then 15 s, with a little jitter.
+    static func retryDelay(attempt: Int, retryAfter: Double?, jitter: Double = Double.random(in: 0...1)) -> Double {
+        if let retryAfter { return min(max(retryAfter, 1), 30) }
+        return retryDelays[min(attempt, retryDelays.count - 1)] + jitter
     }
 
     // MARK: - Request / response shapes (static so they can be unit tested)
@@ -58,7 +113,7 @@ struct ClaudeSummarizer: Summarizer {
     static func requestBody(system: String, prompt: String, schema: [String: Any], effort: String = "medium") -> [String: Any] {
         [
             "model": model,
-            "max_tokens": 16000,
+            "max_tokens": 32000,
             "system": system,
             "fallbacks": "default",
             "output_config": [
@@ -157,5 +212,89 @@ struct ClaudeSummarizer: Summarizer {
                        novelty: $0.novelty, viability: $0.viability, gap: $0.opportunity_gap,
                        reasons: ScoreReasons(novelty: $0.novelty_reason, viability: $0.viability_reason, gap: $0.opportunity_gap_reason))
         }
+    }
+}
+
+struct ClaudeHTTPError: LocalizedError, Equatable {
+    let status: Int
+    let retryAfter: Double?
+    let detail: String
+
+    var errorDescription: String? {
+        switch status {
+        case 401: "Claude rejected the API key (HTTP 401). Check it in Settings."
+        case 429: "Claude is rate-limiting requests (HTTP 429)."
+        case 529: "Claude is overloaded right now (HTTP 529)."
+        default: "Claude returned HTTP \(status) \(detail)"
+        }
+    }
+}
+
+/// Rebuilds a normal (non-streamed) Messages API reply from server-sent events, so the existing
+/// parsers and the cost tracker work unchanged. Text from every text block is joined (a mid-stream
+/// model fallback can split the reply into several blocks); thinking and other blocks are skipped.
+struct StreamAssembler {
+    struct StreamError: LocalizedError {
+        let message: String
+        var errorDescription: String? { "Claude stream error: \(message)" }
+    }
+
+    private var blockTypes: [Int: String] = [:]
+    private var texts: [Int: String] = [:]
+    private(set) var stopReason: String?
+    private var usage: [String: Int] = [:]
+    private(set) var started = false
+    private(set) var finished = false
+
+    mutating func consume(_ line: String) throws {
+        guard line.hasPrefix("data:") else { return }
+        let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        guard let data = json.data(using: .utf8),
+              let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = event["type"] as? String else { return }
+        switch type {
+        case "message_start":
+            started = true
+            mergeUsage((event["message"] as? [String: Any])?["usage"])
+        case "content_block_start":
+            if let index = event["index"] as? Int, let block = event["content_block"] as? [String: Any] {
+                blockTypes[index] = block["type"] as? String
+                if let text = block["text"] as? String, !text.isEmpty { texts[index, default: ""] += text }
+            }
+        case "content_block_delta":
+            if let index = event["index"] as? Int, let delta = event["delta"] as? [String: Any],
+               delta["type"] as? String == "text_delta", let text = delta["text"] as? String {
+                texts[index, default: ""] += text
+            }
+        case "message_delta":
+            if let reason = (event["delta"] as? [String: Any])?["stop_reason"] as? String { stopReason = reason }
+            mergeUsage(event["usage"])
+        case "message_stop":
+            finished = true
+        case "error":
+            let error = event["error"] as? [String: Any]
+            throw StreamError(message: (error?["message"] as? String) ?? (error?["type"] as? String) ?? "unknown")
+        default:
+            break
+        }
+    }
+
+    /// Usage counts are cumulative, so keep the largest value seen for each.
+    private mutating func mergeUsage(_ value: Any?) {
+        guard let dict = value as? [String: Any] else { return }
+        for (key, raw) in dict { if let n = raw as? Int { usage[key] = max(usage[key] ?? 0, n) } }
+    }
+
+    func response() throws -> Data {
+        guard started, finished else { throw StreamError(message: "the reply ended early") }
+        let text = blockTypes.keys.sorted().filter { blockTypes[$0] == "text" }.compactMap { texts[$0] }.joined()
+        var object: [String: Any] = ["content": [["type": "text", "text": text]], "usage": usage]
+        if let stopReason { object["stop_reason"] = stopReason }
+        return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    func usageOnlyResponse() -> Data? {
+        guard started else { return nil }
+        return try? JSONSerialization.data(withJSONObject: ["usage": usage])
     }
 }

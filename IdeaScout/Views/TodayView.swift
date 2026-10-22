@@ -4,6 +4,7 @@ import SwiftData
 struct TodayView: View {
     @EnvironmentObject private var service: DigestService
     @Query(sort: \Digest.day, order: .reverse) private var digests: [Digest]
+    @AppStorage(AppSettings.Keys.trendWindowDays) private var windowDays = AppSettings.defaultTrendWindowDays
 
     private var today: Digest? { digests.first { Calendar.current.isDateInToday($0.day) } }
 
@@ -26,7 +27,7 @@ struct TodayView: View {
                 }
             }
             .navigationTitle("Today")
-            .navigationSubtitle("Trends from the past 7 days")
+            .navigationSubtitle("Trends from the past \(windowDays) days")
             .toolbar {
                 if service.isRefreshing && today != nil { ProgressView() }
             }
@@ -66,18 +67,17 @@ struct DigestContentView: View {
         let withItems = Theme.ranked(digest.themes, weights: weights).filter { !visibleItems($0).isEmpty }
         let themes = showBelowBar ? withItems : withItems.filter { $0.clears(qualityBar, weights: weights) }
         let hiddenCount = withItems.count - themes.count
-        let todaysKillers = killerIdeas.filter { $0.isFromToday && $0.killerScore >= qualityBar }
-            .sorted { $0.killerScore > $1.killerScore }
+        let best = KillerIdea.bestToShow(killerIdeas)
         List {
-            if showKillerIdeas && !gamesOnly && !todaysKillers.isEmpty {
+            if showKillerIdeas && !gamesOnly && !best.isEmpty {
                 Section {
-                    ForEach(todaysKillers, id: \.key) { idea in
-                        NavigationLink { KillerIdeaDetailView(idea: idea) } label: { KillerIdeaCard(idea: idea) }
+                    ForEach(best, id: \.key) { idea in
+                        NavigationLink { KillerIdeaDetailView(idea: idea) } label: { KillerIdeaCard(idea: idea, showDate: !idea.isFromToday) }
                     }
                 } header: {
-                    Label("Killer ideas today", systemImage: "flame")
+                    Label(best.contains(where: \.isFromToday) ? "Best ideas today" : "Best idea this week", systemImage: "flame")
                 } footer: {
-                    Text("Survived a devil's-advocate check. See all in Top Ideas.")
+                    Text("Survived a devil's-advocate check. \"Killer\" ideas score at least \(qualityBar.formatted()) / 5; near-misses are just below. See all in Top Ideas.")
                 }
             }
             ForEach(themes) { theme in

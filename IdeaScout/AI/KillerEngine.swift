@@ -15,6 +15,7 @@ struct KillerEngine {
         var oneWeekTest: String
         var evidenceNumbers: [Int]
         var sameAs: String
+        var replaces = ""
     }
 
     struct Review: Equatable, Sendable {
@@ -28,11 +29,13 @@ struct KillerEngine {
         var timing: Int
         var gap: Int
         var fit: Int
+        var evidenceNeeded = ""
     }
 
     struct Result: Equatable, Sendable {
         var candidate: Candidate
         var review: Review
+        var score: Double { KillerEngine.score(review) }
     }
 
     /// Context passed in from the digest: the trends found, the numbered items, the user's profile
@@ -42,33 +45,47 @@ struct KillerEngine {
         var items: [FetchedItem]
         var aboutMe: String
         var leaderboard: [String]
+        var focusIndustry = ""
     }
 
-    func run(_ context: Context, qualityBar: Double) async throws -> [Result] {
+    /// Every idea the devil's advocate didn't kill is kept (up to 3 a day). Whether it counts as a
+    /// "killer" or a "near-miss" is decided on screen from the quality bar, so near-misses can come back and climb.
+    func run(_ context: Context) async throws -> [Result] {
         let candidates = try await generate(context)
         guard !candidates.isEmpty else { return [] }
-        let reviews = try await critique(candidates, aboutMe: context.aboutMe)
-        return Self.survivors(candidates: candidates, reviews: reviews, qualityBar: qualityBar)
+        let reviews = try await critique(candidates, items: context.items, aboutMe: context.aboutMe)
+        return Self.survivors(candidates: candidates, reviews: reviews, items: context.items)
     }
 
     /// No single measure may be this low, however good the average.
     static let minimumSingleScore = 2
+    static let maxPerDay = 3
+    /// Without matching evidence, pain and willingness to pay can't score above this.
+    static let unprovenCap = 3
 
     // MARK: - Pass 1: generate
 
     static let generateInstructions = """
-    You are a sharp product strategist hunting for a "killer" product idea: one with real pain, a specific \
-    buyer who will pay, a reason it is possible now, a clear gap, and a good fit for the person described.
-    Using the trends and numbered projects (projects tagged "Pain points" are people asking for tools that \
-    don't exist; "Y Combinator" and "App Store top paid" show what people already pay for; "AI research" shows \
-    new capabilities that explain why now), propose 5 distinct product ideas. Each must be a concrete product someone could start \
-    building this month, not a trend summary. Prefer ideas supported by several projects and by pain points. \
-    Only propose ideas you would genuinely back; quality matters more than variety.
-    For each idea give: a short memorable title; a one-sentence pitch; the buyer (a specific type of person \
-    or company); pricing (model and rough price); why now (what recently became possible); a one-week test \
-    (the cheapest way to check demand in 7 days); the numbers of the projects that are evidence for it; and \
-    same_as: if the idea is essentially the same as one on the existing leaderboard, copy that title exactly, \
-    otherwise an empty string. Write everything in English.
+    You are a sharp B2B product strategist hunting for a "killer" business software idea: one with real pain, \
+    a specific business buyer with a budget, a reason it is possible now, a clear gap, and a good fit for the person described.
+    Using the trends and numbered projects (projects tagged "Pain points" are people complaining or asking for tools \
+    that don't exist; "Y Combinator" are business startups investors just funded and "App Store top paid" are apps \
+    people pay for, so both show what buyers already pay for; "AI research" shows new capabilities that explain why now), \
+    propose 5 distinct product ideas. Rules:
+    - The buyer must be a business: small and medium businesses are the main market (software they would pay \
+    $20 to $500 a month for), plus larger companies in the focus industry. Never hobbyists or consumers.
+    - At most 1 of the 5 may be a tool for software developers.
+    - At least 2 of the 5 must be aimed at the focus industry given below.
+    - Each must replace a named manual task, spreadsheet or costly workaround that the buyer does today.
+    - Each must be a concrete product someone could start building this month, not a trend summary.
+    Prefer ideas supported by several projects and by pain points. Only propose ideas you would genuinely back; \
+    quality matters more than variety.
+    For each idea give: a short memorable title; a one-sentence pitch; the buyer (a specific role in a specific \
+    type of business); pricing (model and price per customer per month); replaces (the manual task or workaround \
+    it replaces and roughly what that costs the buyer today); why now (what recently became possible); a one-week \
+    test (the cheapest way to check demand in 7 days, with a pass mark); the numbers of the projects that are \
+    evidence for it; and same_as: if the idea is essentially the same as one on the existing leaderboard, copy \
+    that title exactly, otherwise an empty string. Write everything in English.
     """
 
     func generate(_ context: Context) async throws -> [Candidate] {
@@ -80,6 +97,7 @@ struct KillerEngine {
     static func generatePrompt(_ context: Context) -> String {
         var parts: [String] = []
         parts.append("About me: " + (context.aboutMe.isEmpty ? "(not provided)" : context.aboutMe))
+        if !context.focusIndustry.isEmpty { parts.append("Focus industry: " + context.focusIndustry) }
         let trends = context.themes.filter { !$0.isCatchAll }.map { theme in
             "- \(theme.title): \(theme.summary)" + (theme.opportunities.isEmpty ? "" : " Variants: " + theme.opportunities.joined(separator: " | "))
         }
@@ -99,9 +117,10 @@ struct KillerEngine {
                     "properties": [
                         "title": ["type": "string"], "pitch": ["type": "string"], "buyer": ["type": "string"],
                         "pricing": ["type": "string"], "why_now": ["type": "string"], "one_week_test": ["type": "string"],
+                        "replaces": ["type": "string"],
                         "evidence_numbers": ["type": "array", "items": ["type": "integer"]], "same_as": ["type": "string"],
                     ],
-                    "required": ["title", "pitch", "buyer", "pricing", "why_now", "one_week_test", "evidence_numbers", "same_as"],
+                    "required": ["title", "pitch", "buyer", "pricing", "why_now", "one_week_test", "replaces", "evidence_numbers", "same_as"],
                     "additionalProperties": false,
                 ],
             ],
@@ -114,45 +133,64 @@ struct KillerEngine {
         struct Out: Decodable {
             struct I: Decodable {
                 let title, pitch, buyer, pricing, why_now, one_week_test, same_as: String
+                let replaces: String?
                 let evidence_numbers: [Int]
             }
             let ideas: [I]
         }
         return try JSONDecoder().decode(Out.self, from: try ClaudeSummarizer.extractJSON(data)).ideas.map {
             Candidate(title: $0.title, pitch: $0.pitch, buyer: $0.buyer, pricing: $0.pricing, whyNow: $0.why_now,
-                      oneWeekTest: $0.one_week_test, evidenceNumbers: $0.evidence_numbers, sameAs: $0.same_as)
+                      oneWeekTest: $0.one_week_test, evidenceNumbers: $0.evidence_numbers, sameAs: $0.same_as,
+                      replaces: $0.replaces ?? "")
         }
     }
 
     // MARK: - Pass 2: devil's advocate
 
     static let critiqueInstructions = """
-    You are a blunt, experienced investor playing devil's advocate. For each product idea, try hard to kill it: \
-    name existing competitors, question whether the buyer would really pay, and check whether the person \
-    described could realistically build and sell it. Then score each 1-5 (be strict; 5 is rare):
-    - pain: how badly the buyer needs this
-    - willing_to_pay: how likely they are to pay the stated price
-    - timing: how strongly "why now" holds
-    - gap: how open the market is after considering competitors
-    - fit: how well it suits the person described (3 if nothing is known about them)
-    survives is true only if the idea is still worth a one-week test after your objections. Give the single \
-    strongest objection, the main competitors (or "none found"), and a one-sentence verdict. Copy each title exactly. \
+    You are a blunt, experienced B2B investor playing devil's advocate. For each product idea, read its cited \
+    evidence and try hard to kill it: name competitors you are confident exist, question whether the business buyer \
+    really has a budget for it, and check whether the person described could realistically build and sell it. \
+    Give a competitor's price only if you are sure of it; otherwise say "price unknown". Don't invent facts.
+    Score each 1-5 (be strict; 5 is rare):
+    - pain: 1 nice-to-have; 3 a recurring problem people work around; 5 costly and frequent, shown in 2 or more independent evidence items
+    - willing_to_pay: 1 no sign anyone spends money here; 3 businesses pay for nearby tools; 5 buyers already pay for a worse product or name a budget
+    - timing: 1 could have been built years ago; 3 recent tools make it easier; 5 a new capability, rule or price makes it possible or required now
+    - gap: 1 well served by existing products; 3 options exist but leave a clear segment unhappy; 5 no credible option
+    - fit: 1 needs skills or access the person lacks; 3 unknown or neutral; 5 uses their domain experience or access
+    Mark ideas down hard if there is no clear business buyer with a budget, or if the buyer is a consumer or hobbyist.
+    Judge whether the one-week test would really show demand. survives is true only if the idea is still worth \
+    a one-week test after your objections. Give the single strongest objection, the main competitors (or "none found"), \
+    a one-sentence verdict, and evidence_needed: the one fact that would most raise the score. Copy each title exactly. \
     Write everything in English.
     """
 
-    func critique(_ candidates: [Candidate], aboutMe: String) async throws -> [Review] {
+    func critique(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String) async throws -> [Review] {
         let body = ClaudeSummarizer.requestBody(system: Self.critiqueInstructions,
-                                                prompt: Self.critiquePrompt(candidates, aboutMe: aboutMe),
-                                                schema: Self.reviewSchema)
+                                                prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe),
+                                                schema: Self.reviewSchema, effort: "high")
         return try Self.parseReviews(try await claude.send(body, feature: "Devil's advocate"))
     }
 
-    static func critiquePrompt(_ candidates: [Candidate], aboutMe: String) -> String {
+    static func critiquePrompt(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String) -> String {
         var text = "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe) + "\n\nIdeas:"
         for c in candidates {
-            text += "\n\nTitle: \(c.title)\nPitch: \(c.pitch)\nBuyer: \(c.buyer)\nPricing: \(c.pricing)\nWhy now: \(c.whyNow)"
+            text += "\n\nTitle: \(c.title)\nPitch: \(c.pitch)\nBuyer: \(c.buyer)\nPricing: \(c.pricing)"
+            if !c.replaces.isEmpty { text += "\nReplaces: \(c.replaces)" }
+            text += "\nWhy now: \(c.whyNow)\nOne-week test: \(c.oneWeekTest)"
+            let evidence = Self.evidence(for: c, in: items)
+            text += "\nEvidence:" + (evidence.isEmpty ? " (none cited)" : "")
+            for item in evidence {
+                let detail = item.detail.isEmpty ? "" : " — " + String(item.detail.prefix(200))
+                text += "\n- [\(item.source.label)] \(item.title)\(detail)"
+            }
         }
         return text
+    }
+
+    /// The projects an idea cites, by their 1-based numbers in the item list.
+    static func evidence(for candidate: Candidate, in items: [FetchedItem]) -> [FetchedItem] {
+        candidate.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
     }
 
     static let reviewSchema: [String: Any] = [
@@ -167,9 +205,10 @@ struct KillerEngine {
                         "competitors": ["type": "string"], "verdict": ["type": "string"],
                         "pain": ["type": "integer"], "willing_to_pay": ["type": "integer"], "timing": ["type": "integer"],
                         "gap": ["type": "integer"], "fit": ["type": "integer"],
+                        "evidence_needed": ["type": "string"],
                     ],
                     "required": ["title", "survives", "objection", "competitors", "verdict", "pain", "willing_to_pay",
-                                 "timing", "gap", "fit"],
+                                 "timing", "gap", "fit", "evidence_needed"],
                     "additionalProperties": false,
                 ],
             ],
@@ -184,30 +223,42 @@ struct KillerEngine {
                 let title, objection, competitors, verdict: String
                 let survives: Bool
                 let pain, willing_to_pay, timing, gap, fit: Int
+                let evidence_needed: String?
             }
             let reviews: [R]
         }
         return try JSONDecoder().decode(Out.self, from: try ClaudeSummarizer.extractJSON(data)).reviews.map {
             Review(title: $0.title, survives: $0.survives, objection: $0.objection, competitors: $0.competitors,
                    verdict: $0.verdict, pain: Ranking.clamp($0.pain), willingToPay: Ranking.clamp($0.willing_to_pay),
-                   timing: Ranking.clamp($0.timing), gap: Ranking.clamp($0.gap), fit: Ranking.clamp($0.fit))
+                   timing: Ranking.clamp($0.timing), gap: Ranking.clamp($0.gap), fit: Ranking.clamp($0.fit),
+                   evidenceNeeded: $0.evidence_needed ?? "")
         }
     }
 
-    /// Pairs each candidate with its review and keeps only ideas that survived, reach the quality bar
-    /// and have no weak spot (any measure below 2). Best first, at most two.
-    static func survivors(candidates: [Candidate], reviews: [Review], qualityBar: Double = 0) -> [Result] {
+    /// Pairs each candidate with its review and keeps ideas that survived and have no weak spot
+    /// (any measure below 2), after capping scores the evidence doesn't support. Best first, at most three.
+    static func survivors(candidates: [Candidate], reviews: [Review], items: [FetchedItem] = []) -> [Result] {
         let byKey = Dictionary(reviews.map { (KillerIdea.key(for: $0.title), $0) }, uniquingKeysWith: { first, _ in first })
         return candidates.compactMap { candidate in
-            guard let review = byKey[KillerIdea.key(for: candidate.title)], review.survives,
-                  score(review) >= qualityBar,
-                  [review.pain, review.willingToPay, review.timing, review.gap, review.fit].min() ?? 0 >= minimumSingleScore
+            guard let raw = byKey[KillerIdea.key(for: candidate.title)], raw.survives else { return nil }
+            let review = capped(raw, evidence: evidence(for: candidate, in: items))
+            guard [review.pain, review.willingToPay, review.timing, review.gap, review.fit].min() ?? 0 >= minimumSingleScore
             else { return nil }
             return Result(candidate: candidate, review: review)
         }
         .sorted { score($0.review) > score($1.review) }
-        .prefix(2)
+        .prefix(maxPerDay)
         .map { $0 }
+    }
+
+    /// High pain needs a pain-point item as evidence; high willingness to pay needs a pain point or proof
+    /// that people pay (a funded startup or a top paid app). Enforced here rather than trusted to the prompt.
+    static func capped(_ review: Review, evidence: [FetchedItem]) -> Review {
+        var r = review
+        let sources = Set(evidence.map(\.source))
+        if !sources.contains(.painPoints) { r.pain = min(r.pain, unprovenCap) }
+        if sources.isDisjoint(with: [.painPoints, .ycombinator, .appStore]) { r.willingToPay = min(r.willingToPay, unprovenCap) }
+        return r
     }
 
     static func score(_ r: Review) -> Double { Double(r.pain + r.willingToPay + r.timing + r.gap + r.fit) / 5 }
@@ -220,6 +271,7 @@ extension Prompts {
         lines += ["Idea: \(idea.title)", "Pitch: \(idea.pitch)", "Buyer: \(idea.buyer)", "Pricing: \(idea.pricing)",
                   "Why now: \(idea.whyNow)", "Strongest objection so far: \(idea.objection)",
                   "Known competitors: \(idea.competitors)"]
+        if !idea.replaces.isEmpty { lines.insert("Replaces: \(idea.replaces)", at: lines.count - 2) }
         let about = AppSettings.aboutMe
         if !about.isEmpty { lines.append("About me: \(about)") }
         if !idea.evidenceTitles.isEmpty {

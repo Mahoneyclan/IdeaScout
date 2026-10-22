@@ -287,7 +287,7 @@ struct KillerEngineTests {
         #expect(r.first?.fit == 0)
     }
 
-    @Test func keepsOnlySurvivorsBestFirstMaxTwo() {
+    @Test func keepsSurvivorsBestFirstMaxThree() {
         func cand(_ t: String) -> KillerEngine.Candidate {
             .init(title: t, pitch: "", buyer: "", pricing: "", whyNow: "", oneWeekTest: "", evidenceNumbers: [], sameAs: "")
         }
@@ -295,9 +295,13 @@ struct KillerEngineTests {
             .init(title: t, survives: s, objection: "", competitors: "", verdict: "", pain: score, willingToPay: score,
                   timing: score, gap: score, fit: score)
         }
-        let out = KillerEngine.survivors(candidates: [cand("A"), cand("B"), cand("C"), cand("D")],
-                                         reviews: [rev("a", true, 3), rev("B", false, 5), rev("C", true, 4), rev("D", true, 2)])
-        #expect(out.map(\.candidate.title) == ["C", "A"])
+        let out = KillerEngine.survivors(candidates: [cand("A"), cand("B"), cand("C"), cand("D"), cand("E"), cand("F")],
+                                         reviews: [rev("a", true, 3), rev("B", false, 5), rev("C", true, 3), rev("D", true, 2),
+                                                   rev("E", true, 3), rev("F", true, 1)])
+        // B was killed, F has a weak spot; the rest are kept, at most three.
+        #expect(out.count == 3)
+        #expect(!out.map(\.candidate.title).contains("B"))
+        #expect(!out.map(\.candidate.title).contains("F"))
     }
 
     @Test func promptIncludesProfileAndLeaderboard() {
@@ -376,7 +380,7 @@ struct QualityBarTests {
         .init(title: t, pitch: "", buyer: "", pricing: "", whyNow: "", oneWeekTest: "", evidenceNumbers: [], sameAs: "")
     }
 
-    @Test func dropsIdeasBelowBarOrWithAWeakSpot() {
+    @Test func keepsNearMissesButDropsWeakSpots() {
         let strong = KillerEngine.Review(title: "Strong", survives: true, objection: "", competitors: "", verdict: "",
                                          pain: 4, willingToPay: 4, timing: 4, gap: 4, fit: 4)
         let average = KillerEngine.Review(title: "Average", survives: true, objection: "", competitors: "", verdict: "",
@@ -384,8 +388,10 @@ struct QualityBarTests {
         let weakSpot = KillerEngine.Review(title: "Weak spot", survives: true, objection: "", competitors: "", verdict: "",
                                            pain: 5, willingToPay: 1, timing: 5, gap: 5, fit: 5)
         let out = KillerEngine.survivors(candidates: [cand("Strong"), cand("Average"), cand("Weak spot")],
-                                         reviews: [strong, average, weakSpot], qualityBar: 3.5)
-        #expect(out.map(\.candidate.title) == ["Strong"])
+                                         reviews: [strong, average, weakSpot])
+        // Without pain-point evidence, pain and willingness to pay are capped at 3.
+        #expect(out.map(\.candidate.title) == ["Strong", "Average"])
+        #expect(out[0].review.pain == 3 && out[0].review.willingToPay == 3)
     }
 
     @Test func themeClearsBar() {
@@ -423,10 +429,18 @@ struct MoreSourcesTests {
         #expect(Set(day1.map(\.key)) != Set(day2.map(\.key)))
     }
 
-    @Test func ycBatchesNewestFirst() {
-        let now = ISO8601DateFormatter().date(from: "2026-10-19T00:00:00Z")!
-        let batches = YCombinatorFetcher.candidateBatches(now: now)
-        #expect(batches.prefix(5) == ["fall-2027", "summer-2027", "spring-2027", "winter-2027", "fall-2026"])
+    @Test func ycPicksNewestBatchWithEnoughB2BCompanies() throws {
+        func company(_ id: Int, _ batch: String) -> [String: Any] {
+            ["id": id, "name": "C\(id)", "one_liner": "x", "url": "https://yc.com/\(id)", "industry": "B2B",
+             "subindustry": "B2B -> Finance and Accounting", "batch": batch]
+        }
+        let list = (0..<40).map { company($0, "Fall 2026") } + (40..<75).map { company($0, "Summer 2026") }
+            + [company(99, "Summer 2027")]
+        let items = try YCombinatorFetcher.newestBatch(in: JSONSerialization.data(withJSONObject: list), postedAt: .now)
+        #expect(items.count == 40)
+        #expect(items.first?.detail == "x (B2B: Finance and Accounting, YC Fall 2026)")
+        #expect(YCombinatorFetcher.batchOrder("Fall 2026") > YCombinatorFetcher.batchOrder("Summer 2026"))
+        #expect(YCombinatorFetcher.batchOrder("Winter 2027") > YCombinatorFetcher.batchOrder("Fall 2026"))
     }
 
     @Test func parsesAppStoreTopPaid() throws {
@@ -460,5 +474,159 @@ struct MoreSourcesTests {
         #expect(items.first?.url.absoluteString == "https://lobste.rs/s/ireiaf")
         let expected = ISO8601DateFormatter().date(from: "2026-10-14T18:41:38Z")!.addingTimeInterval(0.972)
         #expect(abs((items.first?.postedAt ?? .distantPast).timeIntervalSince(expected)) < 0.001)
+    }
+}
+
+struct ReliabilityTests {
+    @Test func rebuildsStreamedReplyAcrossBlocks() throws {
+        let lines = [
+            "event: message_start",
+            #"data: {"type":"message_start","message":{"usage":{"input_tokens":1000,"output_tokens":1}}}"#,
+            #"data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#,
+            #"data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}"#,
+            #"data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"#,
+            #"data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"{\"suggestions\":"}}"#,
+            #"data: {"type":"content_block_start","index":2,"content_block":{"type":"fallback"}}"#,
+            #"data: {"type":"content_block_start","index":3,"content_block":{"type":"text","text":""}}"#,
+            #"data: {"type":"content_block_delta","index":3,"delta":{"type":"text_delta","text":"[\"a\"]}"}}"#,
+            #"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":500}}"#,
+            #"data: {"type":"message_stop"}"#,
+        ]
+        var stream = StreamAssembler()
+        for line in lines { try stream.consume(line) }
+        let data = try stream.response()
+        #expect(String(decoding: try ClaudeSummarizer.extractJSON(data), as: UTF8.self) == #"{"suggestions":["a"]}"#)
+        let usage = try #require(UsageTracker.parseUsage(data))
+        #expect(usage.input == 1000 && usage.output == 500)
+    }
+
+    @Test func streamErrorsAndEarlyEndsAreRetryable() throws {
+        var stream = StreamAssembler()
+        #expect(throws: StreamAssembler.StreamError.self) {
+            try stream.consume(#"data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#)
+        }
+        #expect(throws: StreamAssembler.StreamError.self) { try StreamAssembler().response() }
+        #expect(ClaudeSummarizer.isRetryable(StreamAssembler.StreamError(message: "x")))
+    }
+
+    @Test func retriesOnlyTemporaryProblems() {
+        #expect(ClaudeSummarizer.isRetryable(URLError(.networkConnectionLost)))
+        #expect(ClaudeSummarizer.isRetryable(URLError(.timedOut)))
+        #expect(ClaudeSummarizer.isRetryable(ClaudeHTTPError(status: 529, retryAfter: nil, detail: "")))
+        #expect(ClaudeSummarizer.isRetryable(ClaudeHTTPError(status: 503, retryAfter: nil, detail: "")))
+        #expect(!ClaudeSummarizer.isRetryable(ClaudeHTTPError(status: 401, retryAfter: nil, detail: "")))
+        #expect(!ClaudeSummarizer.isRetryable(ClaudeHTTPError(status: 400, retryAfter: nil, detail: "")))
+        #expect(!ClaudeSummarizer.isRetryable(SummarizerError.refused))
+        #expect(ClaudeSummarizer.retryDelay(attempt: 0, retryAfter: nil, jitter: 0) == 3)
+        #expect(ClaudeSummarizer.retryDelay(attempt: 1, retryAfter: nil, jitter: 0) == 15)
+        #expect(ClaudeSummarizer.retryDelay(attempt: 0, retryAfter: 120, jitter: 0) == 30)
+    }
+
+    @Test func neverReplacesABetterDigest() {
+        #expect(!DigestService.shouldReplace(existing: "Claude", with: "Keywords"))
+        #expect(!DigestService.shouldReplace(existing: "Claude", with: "Apple on-device"))
+        #expect(DigestService.shouldReplace(existing: "Keywords", with: "Claude"))
+        #expect(DigestService.shouldReplace(existing: "Claude", with: "Claude"))
+        #expect(DigestService.isCancellation(URLError(.cancelled)))
+        #expect(!DigestService.isCancellation(URLError(.networkConnectionLost)))
+    }
+
+    @Test func dailySpendingCap() {
+        #expect(AppSettings.overCap(spent: 0.41, cap: 0.40))
+        #expect(!AppSettings.overCap(spent: 0.39, cap: 0.40))
+        #expect(!AppSettings.overCap(spent: 5, cap: 0))   // 0 = no limit
+    }
+
+    @Test func requestsAllowLongReplies() {
+        let body = ClaudeSummarizer.requestBody(system: "s", prompt: "p", schema: [:])
+        #expect(body["max_tokens"] as? Int == 32000)
+    }
+}
+
+struct BestIdeaTests {
+    private func cand(_ t: String, evidence: [Int]) -> KillerEngine.Candidate {
+        .init(title: t, pitch: "", buyer: "", pricing: "", whyNow: "", oneWeekTest: "check", evidenceNumbers: evidence, sameAs: "")
+    }
+
+    @Test func evidenceUnlocksHighPainAndPayScores() {
+        let review = KillerEngine.Review(title: "A", survives: true, objection: "", competitors: "", verdict: "",
+                                         pain: 5, willingToPay: 5, timing: 4, gap: 4, fit: 4)
+        let items = [item("p", .painPoints), item("y", .ycombinator), item("g", .github)]
+        let withPain = KillerEngine.survivors(candidates: [cand("A", evidence: [1])], reviews: [review], items: items)
+        #expect(withPain.first?.review.pain == 5 && withPain.first?.review.willingToPay == 5)
+        let withYC = KillerEngine.survivors(candidates: [cand("A", evidence: [2])], reviews: [review], items: items)
+        #expect(withYC.first?.review.pain == 3 && withYC.first?.review.willingToPay == 5)
+        let supplyOnly = KillerEngine.survivors(candidates: [cand("A", evidence: [3, 99])], reviews: [review], items: items)
+        #expect(supplyOnly.first?.review.pain == 3 && supplyOnly.first?.review.willingToPay == 3)
+    }
+
+    @Test func critiqueSeesEvidenceAndTest() {
+        let items = [FetchedItem(key: "p", source: .painPoints, title: "Our rostering is a spreadsheet nightmare",
+                                 detail: "In thread: Ask HN", url: URL(string: "https://x.dev")!, score: 0, postedAt: .now)]
+        var c = cand("Roster AI", evidence: [1])
+        c.replaces = "Weekly spreadsheet rostering"
+        let prompt = KillerEngine.critiquePrompt([c], items: items, aboutMe: "")
+        #expect(prompt.contains("- [Pain points] Our rostering is a spreadsheet nightmare"))
+        #expect(prompt.contains("One-week test: check"))
+        #expect(prompt.contains("Replaces: Weekly spreadsheet rostering"))
+        #expect(KillerEngine.critiqueInstructions.contains("price unknown"))
+    }
+
+    @Test func showsTodaysIdeasOrBestOfWeek() {
+        let now = Date.now
+        let old = KillerIdea(key: "old", title: "Old"); old.lastSeen = now.addingTimeInterval(-3 * 86400); old.pain = 3
+        let older = KillerIdea(key: "older", title: "Older"); older.lastSeen = now.addingTimeInterval(-10 * 86400); older.pain = 5
+        #expect(KillerIdea.bestToShow([old, older], now: now).map(\.key) == ["old"])
+        let fresh = KillerIdea(key: "new", title: "New"); fresh.lastSeen = now; fresh.pain = 1
+        #expect(KillerIdea.bestToShow([old, older, fresh], now: now).map(\.key) == ["new"])
+    }
+
+    @Test func painCommentTitleKeepsTheComplaint() throws {
+        let long = String(repeating: "Some unrelated context about my week. ", count: 10)
+            + "Honestly QuickBooks is too expensive for what it does and I'd switch tomorrow."
+        let json = try JSONSerialization.data(withJSONObject: ["hits": [["objectID": "1", "created_at_i": 1760000000,
+                                                                         "comment_text": long, "story_title": "Ask HN"]]])
+        let items = try HackerNewsFetcher.parse(json, as: .painPoints, around: PainPointsFetcher.plainPhrases)
+        let title = try #require(items.first?.title)
+        #expect(title.contains("too expensive"))
+        #expect(title.count <= 220)
+        #expect(!PainPointsFetcher.phrases.contains("\"is there a tool\""))
+    }
+}
+
+struct BusinessFocusTests {
+    @Test func developerSourcesOffByDefault() {
+        #expect(!SourceKind.games.enabledByDefault)
+        #expect(!SourceKind.devTo.enabledByDefault)
+        #expect(!SourceKind.lobsters.enabledByDefault)
+        #expect(!SourceKind.huggingFace.enabledByDefault)
+        #expect(SourceKind.painPoints.enabledByDefault && SourceKind.ycombinator.enabledByDefault)
+    }
+
+    @Test func promptsAimAtBusinessBuyers() {
+        #expect(KillerEngine.generateInstructions.contains("At most 1 of the 5 may be a tool for software developers"))
+        #expect(KillerEngine.generateInstructions.contains("focus industry"))
+        #expect(KillerEngine.critiqueInstructions.contains("business buyer with a budget"))
+        let p = KillerEngine.generatePrompt(.init(themes: [], items: [], aboutMe: "", leaderboard: [], focusIndustry: "energy"))
+        #expect(p.contains("Focus industry: energy"))
+        let required = (((KillerEngine.candidateSchema["properties"] as? [String: Any])?["ideas"] as? [String: Any])?["items"] as? [String: Any])?["required"] as? [String]
+        #expect(required?.contains("replaces") == true)
+    }
+}
+
+struct ScanSettingsTests {
+    @Test func perSourceLimitFillsClaudesQuota() {
+        #expect(DigestService.perSourceLimit(maxItems: 150, sources: 8) == 25)
+        #expect(DigestService.perSourceLimit(maxItems: 300, sources: 8) == 38)
+        #expect(DigestService.perSourceLimit(maxItems: 100, sources: 0) == 100)
+    }
+
+    @Test func windowsAndDefaults() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        #expect(DigestService.windowStart(days: 14, now: now) == now.addingTimeInterval(-14 * 86400))
+        #expect(AppSettings.defaultTrendWindowDays == 7)
+        #expect(AppSettings.defaultPainWindowDays == 14)
+        #expect(AppSettings.defaultClaudeMaxItems == 300)
+        #expect(AppSettings.estimatedRefreshCost(items: 300).lowerBound < AppSettings.estimatedRefreshCost(items: 500).lowerBound)
     }
 }
