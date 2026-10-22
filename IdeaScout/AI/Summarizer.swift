@@ -1,18 +1,29 @@
+// Summarizer.swift
+// The shared AI layer: the Summarizer protocol every AI option implements (cloud LLMs, Apple on-device,
+// keyword fallback), the prompt text, and the code that turns an AI reply into ranked themes
+// (ThemeBuilder, Ranking). Also the English-language filter used when no AI can translate.
+
 import Foundation
 import NaturalLanguage
 
-/// A theme as proposed by a summariser, before it is matched to stored items.
+// MARK: - What a summariser returns
+
+/// A trend or pain cluster as proposed by a summariser, before it is matched to items (see ThemeBuilder).
 struct ThemeDraft: Equatable, Sendable {
+    /// Short name.
     var title: String
+    /// One or two sentences.
     var summary: String
+    /// Two or three money-making variants (trends only).
     var opportunities: [String]
     var itemNumbers: [Int]   // 1-based positions in the prompt's item list
     // AI ranking scores, 1–5 (0 = not scored). Momentum is calculated from real numbers instead.
     var novelty = 0
     var viability = 0
     var gap = 0
+    /// One-sentence reason per score (momentum's is filled in later).
     var reasons = ScoreReasons()
-    // Pain clusters (Claude only): one problem, one buyer, built from demand items.
+    // Pain clusters (cloud AI only): one problem, one buyer, built from demand items.
     var isPainCluster = false
     var buyer = ""
     var workaround = ""
@@ -21,29 +32,44 @@ struct ThemeDraft: Equatable, Sendable {
 
 /// Everything a summariser returns for one refresh.
 struct Analysis: Sendable {
+    /// Trends and pain clusters.
     var drafts: [ThemeDraft]
+    /// English versions of non-English items, by 1-based item number (cloud AI only).
     var translations: [Int: Translation] = [:]
     /// 1-based numbers of items the AI judged to be noise; they're left out of "Other projects".
     var noise: Set<Int> = []
 }
 
-/// What the summariser needs to suggest extensions for a saved idea.
+/// A saved project, as sent to the AI for "Suggest variants".
 struct IdeaBrief: Sendable {
+    /// The project's title.
     var title: String
+    /// The project's description.
     var detail: String
+    /// The user's notes, so suggestions follow their angle.
     var note: String
 }
 
+/// One way of turning items into themes. Implemented by LLMSummarizer (any cloud AI), AppleSummarizer
+/// and KeywordSummarizer; AppSettings.makeSummarizer picks one. Methods are async and may run off the
+/// main thread; they make network or model calls but don't touch the database.
 protocol Summarizer: Sendable {
+    /// Name stored on the digest (e.g. "Claude", "Apple on-device", "Keywords").
     var name: String { get }
     /// How many items this summariser can handle in one go.
     var maxItems: Int { get }
+    /// Groups items into trends.
+    /// - Parameter items: Candidates, in prompt order (item numbers are 1-based positions).
+    /// - Throws: Network, provider or model errors.
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft]
     /// Themes plus, where supported, pain clusters, English translations and noise.
     func analyse(_ items: [FetchedItem]) async throws -> Analysis
+    /// Suggests 4–6 money-making variants of a saved project.
+    /// - Throws: `SummarizerError.unavailable` if this summariser can't do it, or provider errors.
     func extensions(for idea: IdeaBrief) async throws -> [String]
 }
 
+/// An English title and description for one non-English item.
 struct Translation: Equatable, Sendable {
     var title: String
     var detail: String
@@ -56,8 +82,13 @@ extension Summarizer {
     }
 }
 
+/// Applies AI translations to items before they are stored.
 enum Translations {
     /// Replaces non-English titles and descriptions with their translations.
+    /// - Parameters:
+    ///   - translations: By 1-based item number; out-of-range numbers are ignored.
+    ///   - items: The items sent to the AI.
+    /// - Returns: The items with translated text where provided.
     static func apply(_ translations: [Int: Translation], to items: [FetchedItem]) -> [FetchedItem] {
         var items = items
         for (number, t) in translations where items.indices.contains(number - 1) && !t.title.isEmpty {
@@ -68,9 +99,13 @@ enum Translations {
     }
 }
 
+/// Errors from any summariser, worded for the user.
 enum SummarizerError: LocalizedError {
+    /// The chosen option can't do this (e.g. keyword mode asked for suggestions).
     case unavailable
+    /// The AI declined (safety refusal).
     case refused
+    /// The reply couldn't be used: cut off, empty, or not valid JSON. The text says which.
     case badResponse(String)
 
     var errorDescription: String? {
@@ -82,8 +117,13 @@ enum SummarizerError: LocalizedError {
     }
 }
 
-/// Shared prompt text so both AI providers behave the same way.
+// MARK: - Prompt text
+
+/// Prompt text shared by every AI option. The JSON field names they ask for must match the schemas and
+/// parsers in LLMSummarizer and KillerEngine, and the source labels they mention must match SourceKind.label.
 enum Prompts {
+    /// Instructions for the trend step: business focus, how to use each tag, 4–6 themes of 3+ items, and
+    /// strict 1–5 scoring. LLMSummarizer adds translation and pain-cluster instructions on top.
     static let themeInstructions = """
     You are an analyst who spots new business software opportunities in recent launches, startups and complaints.
     The numbered projects were launched or gained traction recently; "new" marks the last 24 hours. \
@@ -116,6 +156,7 @@ enum Prompts {
     Write everything in English.
     """
 
+    /// Instructions for "Suggest variants" on a saved project.
     static let extensionInstructions = """
     You help a product owner turn a project they spotted into their own idea.
     Suggest 4 to 6 monetisable extensions or variants of it. Each suggestion is one or two sentences \
@@ -125,6 +166,7 @@ enum Prompts {
     """
 
     /// A ready-to-paste prompt for Claude, ChatGPT, Lovable, Bolt etc. to turn a saved idea into a product brief.
+    /// - Returns: The prompt text, including the user's notes, scores and variants.
     static func fleshOut(_ idea: Idea) -> String {
         var lines = ["Act as an experienced product strategist. Flesh out this product idea.", ""]
         lines.append("Idea: \(idea.title)")
@@ -160,6 +202,11 @@ enum Prompts {
 
     /// One line per item, tagged with its signal and source. Demand items (complaints) keep more text,
     /// since the useful part is often deep in the comment; supply items keep less.
+    /// - Parameters:
+    ///   - items: The items, numbered from 1 in this order.
+    ///   - detailLimit: Characters of detail for timing items (demand gets at least 300, supply at most 140).
+    ///   - now: Used to tag items from the last 24 hours as "new".
+    /// - Returns: One line per item, e.g. `3. [Demand · Pain points, score 12, new] Title — detail`.
     static func itemList(_ items: [FetchedItem], detailLimit: Int, now: Date = .now) -> String {
         items.enumerated().map { index, item in
             let limit = switch item.source.signal {
@@ -175,6 +222,7 @@ enum Prompts {
         }.joined(separator: "\n")
     }
 
+    /// A saved project as prompt text for "Suggest variants".
     static func ideaText(_ idea: IdeaBrief) -> String {
         var text = "Project: \(idea.title)"
         if !idea.detail.isEmpty { text += "\nDescription: \(idea.detail)" }
@@ -183,14 +231,19 @@ enum Prompts {
     }
 }
 
+// MARK: - Turning AI drafts into themes
+
 /// Turns AI drafts into clean themes: drops bad item numbers and duplicates,
-/// and puts any unassigned items into a final "Other new projects" theme.
+/// and puts any unassigned, non-noise items into a final "Other projects" theme.
 enum ThemeBuilder {
+    /// A finished theme or pain cluster with its items, ready to save as a Theme.
     struct Built: Equatable {
         var title: String
         var summary: String
         var opportunities: [String]
+        /// Member items, in the order the AI listed them.
         var items: [FetchedItem]
+        /// Clamped AI scores plus measured momentum (all 0 for pain clusters and the catch-all).
         var scores = ThemeScores()
         var reasons = ScoreReasons()
         var isCatchAll = false
@@ -200,7 +253,13 @@ enum ThemeBuilder {
         var paySignals = ""
     }
 
-    /// `noise`: 1-based item numbers to leave out of "Other projects" (they can still be in a theme).
+    /// Matches drafts to items. An item can belong to only one theme (first claim wins); bad numbers are
+    /// ignored; drafts left with no items are dropped. Pain clusters get no scores.
+    /// - Parameters:
+    ///   - drafts: Trends and clusters from the AI.
+    ///   - items: The items the AI saw, in prompt order.
+    ///   - noise: 1-based item numbers to leave out of "Other projects" (they can still be in a theme).
+    /// - Returns: The themes, then "Other projects" if any items are left.
     static func assemble(_ drafts: [ThemeDraft], items: [FetchedItem], noise: Set<Int> = []) -> [Built] {
         var used = Set<Int>()
         var built: [Built] = []
@@ -235,10 +294,13 @@ enum ThemeBuilder {
 /// Momentum is measured from real traction numbers, not judged by the AI,
 /// so the ranking isn't driven purely by what sounds exciting.
 enum Ranking {
+    /// Keeps AI scores in 1–5; 0 or less means "not scored". Models sometimes return 0 or 9.
     static func clamp(_ score: Int) -> Int { score <= 0 ? 0 : min(score, 5) }
 
-    /// 1–5 from how highly the theme's projects rank within their own source
-    /// (stars, points and votes aren't comparable across sources) and how many projects share the theme.
+    /// 1–5 from how highly the theme's projects rank within their own source (50%)
+    /// (stars, points and votes aren't comparable across sources), how many projects share the theme (30%,
+    /// full marks at 8) and how many appeared in the last 48 hours (20%). The weights favour proven traction.
+    /// - Returns: The score and a one-sentence reason shown to the user.
     static func momentum(of members: [FetchedItem], among all: [FetchedItem], now: Date = .now) -> (score: Int, reason: String) {
         guard !members.isEmpty else { return (0, "") }
         let rank = members.map { percentile(of: $0, among: all) }.reduce(0, +) / Double(members.count)
@@ -251,7 +313,7 @@ enum Ranking {
         return (score, "\(projects) this week, on average in the top \(top)% of their source; \(recent)% appeared in the last 2 days.")
     }
 
-    /// 0 (lowest score in its source) to 1 (highest).
+    /// Where an item's score sits among items from the same source: 0 (lowest) to 1 (highest); 0.5 if alone.
     static func percentile(of item: FetchedItem, among all: [FetchedItem]) -> Double {
         let peers = all.filter { $0.source == item.source }
         guard peers.count > 1 else { return 0.5 }
@@ -259,10 +321,15 @@ enum Ranking {
     }
 }
 
-/// Fallback when no AI is available: groups items by matching topic keyword.
+// MARK: - Fallbacks
+
+/// Fallback when no AI is available, or when the AI fails: groups items by matching topic keyword.
+/// No scores, clusters or suggestions.
 struct KeywordSummarizer: Summarizer {
     let name = "Keywords"
+    /// Enough for a quick keyword pass; there's no context limit.
     let maxItems = 60
+    /// The user's topics, in order: each item goes to the first topic it mentions.
     let topics: [String]
 
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft] {
@@ -288,6 +355,7 @@ struct KeywordSummarizer: Summarizer {
 /// Used when no AI can translate: drops items that are clearly not in English.
 /// Short or ambiguous text (e.g. a product name) is kept.
 enum LanguageFilter {
+    /// - Returns: `false` only when the text is confidently (80%+) another language.
     static func isEnglishOrUnclear(_ item: FetchedItem) -> Bool {
         let recognizer = NLLanguageRecognizer()
         recognizer.processString("\(item.title) \(item.detail)")

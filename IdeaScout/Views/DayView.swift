@@ -1,22 +1,34 @@
+// DayView.swift
+// One day's results (DigestContentView), opened from History or the Ideas tab's status row: that day's
+// ideas, pain clusters, ranked trends with their projects, and the refresh's notes. Also the small
+// pieces it uses: score badges, score reasons and the project row with its star.
+
 import SwiftUI
 import SwiftData
 
 /// One day's digest: the ideas proposed that day, pain clusters and trends. Opened from History.
 struct DigestContentView: View {
+    /// The day to show.
     let digest: Digest
+    /// All killer ideas, filtered to the ones proposed on this day.
     @Query private var killerIdeas: [KillerIdea]
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var service: DigestService
+    /// Starred projects, to show which rows are starred.
     @Query private var ideas: [Idea]
+    /// The user's ranking weights, so trends re-rank as soon as they change.
     @AppStorage(AppSettings.Keys.weightNovelty) private var wNovelty = 1.0
     @AppStorage(AppSettings.Keys.weightMomentum) private var wMomentum = 1.0
     @AppStorage(AppSettings.Keys.weightViability) private var wViability = 1.0
     @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
+    /// "Games only" filter, kept between launches.
     @AppStorage("filter.gamesOnly") private var gamesOnly = false
     /// The filter only applies while the Games source is on (otherwise its picker is hidden).
     private var gamesFilter: Bool { gamesOnly && AppSettings.isEnabled(.games) }
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
+    /// Whether trends below the quality bar are shown.
     @State private var showBelowBar = false
+    /// Trends whose score breakdown is open (tap the score to toggle).
     @State private var expandedScores: Set<PersistentIdentifier> = []
 
     private var weights: RankWeights {
@@ -156,10 +168,13 @@ struct DigestContentView: View {
     }
 }
 
+// MARK: - Score pieces
+
 /// The four ranking scores, shown compactly. Each score's full name is in its accessibility label.
 struct ScoreBadges: View {
     let scores: ThemeScores
 
+    /// Name, symbol and field of each trend score, in display order.
     static let metrics: [(name: String, symbol: String, value: KeyPath<ThemeScores, Int>)] = [
         ("Novelty", "sparkles", \.novelty),
         ("Momentum", "chart.line.uptrend.xyaxis", \.momentum),
@@ -183,6 +198,7 @@ struct ScoreBadges: View {
     }
 }
 
+/// Each trend score with its one-sentence reason (scores of 0 are hidden).
 struct ScoreReasonsView: View {
     let scores: ThemeScores
     let reasons: ScoreReasons
@@ -204,9 +220,14 @@ struct ScoreReasonsView: View {
     }
 }
 
+/// One project, post, review or contract. Tapping the text opens the original (web links only); the
+/// star saves it to Saved projects. The star has its own 44-point target with a gap, so it isn't
+/// confused with the link.
 struct ItemRow: View {
     let item: Item
+    /// Whether it's already in Saved projects.
     let isStarred: Bool
+    /// Called when the star is tapped.
     let toggleStar: () -> Void
 
     var body: some View {
@@ -230,6 +251,7 @@ struct ItemRow: View {
         }
     }
 
+    /// Title, detail, NEW tag, source and score.
     private var content: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.title).font(.body.weight(.medium))

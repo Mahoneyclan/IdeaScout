@@ -1,3 +1,8 @@
+// IdeasView.swift
+// The Saved tab: bookmarked killer ideas, then starred projects. A starred project opens IdeaDetailView,
+// where the user adds notes, asks the AI for money-making variants and copies a "flesh out" prompt.
+// (The type keeps its original name, IdeasView, from before the tab was renamed.)
+
 import SwiftUI
 import SwiftData
 import UIKit
@@ -5,9 +10,12 @@ import UIKit
 /// The Saved tab: killer ideas the user bookmarked, then projects they starred.
 struct IdeasView: View {
     @Environment(\.modelContext) private var context
+    /// Starred projects, newest first.
     @Query(sort: \Idea.starredAt, order: .reverse) private var ideas: [Idea]
+    /// Killer ideas the user saved, most recently saved first.
     @Query(filter: #Predicate<KillerIdea> { $0.isSaved }, sort: \KillerIdea.savedAt, order: .reverse)
     private var savedIdeas: [KillerIdea]
+    /// Sort projects by their trend's score instead of by date.
     @AppStorage("ideas.sortByScore") private var sortByScore = false
     @AppStorage(AppSettings.Keys.weightNovelty) private var wNovelty = 1.0
     @AppStorage(AppSettings.Keys.weightMomentum) private var wMomentum = 1.0
@@ -18,6 +26,7 @@ struct IdeasView: View {
         RankWeights(novelty: wNovelty, momentum: wMomentum, viability: wViability, gap: wGap)
     }
 
+    /// Projects in the chosen order.
     private var sortedIdeas: [Idea] {
         guard sortByScore else { return ideas }
         return ideas.sorted { ($0.scores.overall(weights) ?? 0) > ($1.scores.overall(weights) ?? 0) }
@@ -82,10 +91,15 @@ struct IdeasView: View {
     }
 }
 
+/// One starred project: description, link, its trend's scores, the user's notes, AI variant suggestions
+/// and the "flesh out" prompt to copy or share.
 struct IdeaDetailView: View {
+    /// The project; edits to notes save automatically.
     @Bindable var idea: Idea
     @EnvironmentObject private var service: DigestService
+    /// True while waiting for the AI's suggestions.
     @State private var isSuggesting = false
+    /// The last suggestion error, shown under the button.
     @State private var error: String?
     @State private var copied = false
 
@@ -151,6 +165,7 @@ struct IdeaDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    /// Asks the current AI for variants and shows any error.
     private func suggest() async {
         isSuggesting = true
         error = nil

@@ -14,7 +14,9 @@ targets:
     type: application
     platform: iOS
     sources:
-      - IdeaScout
+      - path: IdeaScout
+        excludes:
+          - IdeaScout.storekit   # test-only purchase setup, not shipped in the app
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mahoney.IdeaScout
@@ -30,6 +32,8 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIBackgroundModes: [fetch]
         BGTaskSchedulerPermittedIdentifiers: [com.mahoney.IdeaScout.refresh]
+        # Only standard HTTPS is used, so no export-compliance paperwork is needed at upload.
+        ITSAppUsesNonExemptEncryption: false
   IdeaScoutTests:
     type: bundle.unit-test
     platform: iOS
@@ -47,6 +51,9 @@ schemes:
       targets:
         IdeaScout: all
         IdeaScoutTests: [test]
+    run:
+      # Lets purchases be tested from Xcode without real money (local StoreKit test file).
+      storeKitConfiguration: IdeaScout/IdeaScout.storekit
     test:
       targets:
         - IdeaScoutTests

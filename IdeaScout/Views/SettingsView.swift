@@ -1,5 +1,12 @@
+// SettingsView.swift
+// The Settings tab and its Advanced pages (Sources, Scan & ranking, AI & costs), plus the reusable
+// controls they use: SecretField (API keys, stored in the Keychain), WeightSlider, SourceToggle and
+// ModelChooser. All other settings are UserDefaults keys from AppSettings.Keys, edited via @AppStorage.
+
 import SwiftUI
 import SwiftData
+
+// MARK: - Main Settings tab
 
 /// Everyday inputs up front; configuration that rarely changes sits behind links.
 struct SettingsView: View {
@@ -7,8 +14,11 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Keys.fieldNotes) private var fieldNotes = ""
     @AppStorage(AppSettings.Keys.focusIndustry) private var focusIndustry = AppSettings.defaultFocusIndustry
     @AppStorage(AppSettings.Keys.notifyHour) private var notifyHour = 7
+    /// Spending summary for the "AI & costs" row; refreshed when the screen appears.
     @State private var usage = UsageTracker.summary()
+    /// Set after the user answers the notification prompt.
     @State private var notificationsAllowed: Bool?
+    /// Whether a text field has the keyboard (the Done button clears it).
     @FocusState private var keyboardOpen: Bool
 
     var body: some View {
@@ -22,7 +32,8 @@ struct SettingsView: View {
                 } header: {
                     Text("About me")
                 } footer: {
-                    Text("Skills, industry, time and budget. Used to score how well each idea fits you.")
+                    // Security: this text is sent to the chosen AI provider, so steer users away from confidential details.
+                    Text("Skills, industry, time and budget. Used to score how well each idea fits you. Sent to your AI provider, so avoid confidential or personal details.")
                 }
 
                 Section {
@@ -32,7 +43,8 @@ struct SettingsView: View {
                 } header: {
                     Text("My Business Challenges")
                 } footer: {
-                    Text("One per line. Each is treated as strong evidence of demand.")
+                    // Security: sent to the chosen AI provider; describing problems generically avoids leaking employer secrets.
+                    Text("One per line. Each is treated as strong evidence of demand. Sent to your AI provider, so describe problems in general terms: no confidential company information or client names.")
                 }
 
                 Section {
@@ -64,6 +76,11 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    AccessStatusRow()
+                    NavigationLink { AboutView() } label: { Text("About & privacy") }
+                }
+
+                Section {
                     NavigationLink { SourcesSettings() } label: {
                         LabeledContent("Sources", value: "\(SourceKind.allCases.filter(AppSettings.isEnabled).count) on")
                     }
@@ -86,6 +103,7 @@ struct SettingsView: View {
 
 /// Lets the user drag the form to close the keyboard, and adds a Done button above it.
 extension View {
+    /// - Parameter focus: The screen's focus state; Done sets it to `false`.
     func keyboardDone(_ focus: FocusState<Bool>.Binding) -> some View {
         scrollDismissesKeyboard(.interactively)
             .toolbar {
@@ -97,6 +115,10 @@ extension View {
     }
 }
 
+// MARK: - Advanced pages
+
+/// Topics and the on/off switch for every source, grouped by signal, with each source's item count in the
+/// last digest.
 struct SourcesSettings: View {
     @AppStorage(AppSettings.Keys.topics) private var topics = AppSettings.defaultTopics
     @Query(sort: \Digest.createdAt, order: .reverse) private var digests: [Digest]
@@ -138,6 +160,7 @@ struct SourcesSettings: View {
     }
 }
 
+/// Look-back windows, items the AI reads (with cost estimates), the quality bar and trend ranking weights.
 struct ScanRankingSettings: View {
     @AppStorage(AppSettings.Keys.trendWindowDays) private var trendWindow = AppSettings.defaultTrendWindowDays
     @AppStorage(AppSettings.Keys.painWindowDays) private var painWindow = AppSettings.defaultPainWindowDays
@@ -200,14 +223,22 @@ struct ScanRankingSettings: View {
     }
 }
 
+/// Provider, model, API key, data-sharing consent, spending summary and daily limit. Switching to a cloud
+/// provider without consent opens the consent screen straight away.
 struct AISettings: View {
     @AppStorage(AppSettings.Keys.aiProvider) private var provider = AIProvider.claude.rawValue
+    /// The provider whose consent screen is showing.
+    @State private var consentFor: AIProvider?
+    /// Bumped after consent changes, so the "Data sharing" row redraws.
+    @State private var consentVersion = 0
     @AppStorage(AppSettings.Keys.dailyCap) private var dailyCap = AppSettings.defaultDailyCap
     @AppStorage(AppSettings.Keys.claudeMaxItems) private var maxItems = AppSettings.defaultClaudeMaxItems
     @State private var usage = UsageTracker.summary()
+    /// Shows the "Reset the cost tracker?" confirmation.
     @State private var confirmReset = false
     @FocusState private var keyboardOpen: Bool
 
+    /// The chosen provider (unknown values fall back to Claude).
     private var chosen: AIProvider { AIProvider(rawValue: provider) ?? .claude }
 
     var body: some View {
@@ -218,6 +249,14 @@ struct AISettings: View {
                 }
                 if chosen.isCloud {
                     ModelChooser(provider: chosen)
+                    Button {
+                        if AppSettings.hasConsent(chosen) { AppSettings.setConsent(chosen, false); consentVersion += 1 }
+                        else { consentFor = chosen }
+                    } label: {
+                        LabeledContent("Data sharing", value: AppSettings.hasConsent(chosen) ? "Agreed · tap to withdraw" : "Not agreed · tap to review")
+                    }
+                    .id(consentVersion)
+                    .frame(minHeight: 44)
                     SecretField(title: "\(chosen.shortName) API key", key: chosen.keychainKey!)
                         .id(chosen)   // reload the saved state when the provider changes
                         .focused($keyboardOpen)
@@ -271,19 +310,33 @@ struct AISettings: View {
             }
         }
         .navigationTitle("AI & costs")
+        // Switching to a cloud provider asks for consent before any data is sent to it.
+        .onChange(of: provider) { _, value in
+            if let new = AIProvider(rawValue: value), new.isCloud, !AppSettings.hasConsent(new) { consentFor = new }
+        }
+        .sheet(item: $consentFor) { target in
+            ConsentView(provider: target) { _ in consentVersion += 1 }
+        }
         .keyboardDone($keyboardOpen)
         .onAppear { usage = UsageTracker.summary() }
     }
 }
 
+// MARK: - Reusable controls
+
 /// Entry for a secret stored in the Keychain. Shows whether one is saved (last 4 characters only).
 /// Only non-empty input is saved, so the field clearing itself when tapped again (normal for
 /// password fields) can't erase a saved key; removing one is a deliberate tap.
 struct SecretField: View {
+    /// Field label, e.g. "Claude API key".
     let title: String
+    /// Which Keychain entry it edits.
     let key: Keychain.Key
+    /// What the user is typing (never pre-filled with the saved key).
     @State private var input = ""
+    /// The saved key, read on appear; only its last 4 characters are shown.
     @State private var saved = ""
+    /// Shows the "Remove the key?" confirmation.
     @State private var confirmRemove = false
 
     var body: some View {
@@ -318,6 +371,7 @@ struct SecretField: View {
     }
 }
 
+/// A 0–2 slider (steps of 0.5) for one trend ranking weight; 0 shows "Off".
 struct WeightSlider: View {
     let name: String
     let symbol: String
@@ -336,6 +390,8 @@ struct WeightSlider: View {
     }
 }
 
+/// One source's on/off switch, with its signal and last-digest count. Defaults to the source's own default
+/// until the user changes it.
 struct SourceToggle: View {
     let kind: SourceKind
     var count: Int?
@@ -364,10 +420,14 @@ struct SourceToggle: View {
 
 /// Model picker for one provider: the recommended model first, a few alternatives, or any other model name.
 struct ModelChooser: View {
+    /// The provider whose model is being chosen.
     let provider: AIProvider
+    /// The chosen model ID (defaults to the recommended one).
     @AppStorage private var model: String
+    /// Prices typed in for an "Other…" model, per million tokens.
     @AppStorage private var customInput: Double
     @AppStorage private var customOutput: Double
+    /// Whether "Other…" is selected, so a custom name can be typed.
     @State private var useOther = false
     @FocusState private var typing: Bool
 
@@ -379,6 +439,7 @@ struct ModelChooser: View {
         _customOutput = AppStorage(wrappedValue: fallback.output, AppSettings.Keys.customPrice(provider, "output"))
     }
 
+    /// Whether the model is one of the listed ones.
     private var isKnown: Bool { provider.models.contains { $0.id == model } }
 
     var body: some View {

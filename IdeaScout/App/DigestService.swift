@@ -1,19 +1,39 @@
+// DigestService.swift
+// Runs a refresh and saves the result. The steps, in order:
+//  1. Check the trial/unlock (StoreManager); stop with a message if refreshes aren't allowed.
+//  2. Fetch every enabled source in parallel (Fetchers.swift, DemandFetchers.swift); remove duplicates and noise.
+//  3. Choose up to N items by signal: 40% demand, 40% supply, 20% timing (selectBySignal).
+//  4. Pick the AI (AppSettings.makeSummarizer), respecting consent and the daily spending limit.
+//  5. Trend step: themes, pain clusters, translations, noise. On failure fall back to keyword grouping.
+//  6. Never replace a better digest from earlier today with a weaker one.
+//  7. Save the digest immediately, so a later failure can't lose it.
+//  8. Idea step (cloud AI only): KillerEngine; merge survivors into the leaderboard (KillerIdea).
+//  9. Notify if this was a background refresh.
+// Also: starring projects, variant suggestions, background scheduling, and removing retired sources.
+
 import Foundation
 import SwiftData
 import BackgroundTasks
 
-/// Fetches sources, asks the AI for themes and saves the day's digest.
+/// Fetches sources, asks the AI for themes and ideas, and saves the day's digest. Runs on the main thread
+/// (`@MainActor`) because it drives the UI and uses the main SwiftData context; network and AI calls are
+/// `await`ed, so the UI stays responsive. Helpers marked `nonisolated` are pure functions that tests call directly.
 @MainActor
 final class DigestService: ObservableObject {
+    /// The single shared instance, injected into SwiftUI by IdeaScoutApp.
     static let shared = DigestService()
+    /// Must match BGTaskSchedulerPermittedIdentifiers in project.yml.
     static let backgroundTaskID = "com.mahoney.IdeaScout.refresh"
 
+    /// True while a refresh runs (drives the progress row and disables the refresh button).
     @Published private(set) var isRefreshing = false
     /// Which step a running refresh is on, for the progress shown on screen.
     @Published private(set) var stage: Stage?
 
+    /// Refresh steps shown as "Step n of 4". Raw values are the step numbers.
     enum Stage: Int, CaseIterable {
         case fetching = 1, trends, ideas, critique
+        /// Plain-English step name.
         var label: String {
             switch self {
             case .fetching: "Fetching sources"
@@ -23,8 +43,11 @@ final class DigestService: ObservableObject {
             }
         }
     }
+    /// Why the last refresh didn't produce a new digest (trial ended, nothing found, kept an earlier
+    /// digest…), shown on the Ideas tab. Cleared when a refresh starts.
     @Published var lastError: String?
 
+    /// The database, set by IdeaScoutApp at launch. Refreshes do nothing until it's set.
     var container: ModelContainer?
     private var refreshTask: Task<Void, Never>?
 
@@ -32,8 +55,13 @@ final class DigestService: ObservableObject {
 
     /// Builds today's digest. Without `force`, does nothing if one already exists.
     /// The work runs in its own task, so it isn't cancelled if the screen that started it goes away
-    /// (previously that cut the AI summary off half-way). A background refresh passes
+    /// (a view's `.task` is cancelled when the view disappears, which would stop the AI call). A background refresh passes
     /// `cancelWithCaller` so that when iOS ends the background time, the work stops cleanly.
+    /// If a refresh is already running, waits for it instead of starting another.
+    /// - Parameters:
+    ///   - force: Rebuild even if today's digest exists (the refresh button).
+    ///   - notify: Post a notification when done (background refreshes).
+    ///   - cancelWithCaller: Stop when the caller is cancelled (background refreshes only).
     func refresh(force: Bool, notify: Bool = false, cancelWithCaller: Bool = false) async {
         if let running = refreshTask {
             await running.value
@@ -49,6 +77,8 @@ final class DigestService: ObservableObject {
         refreshTask = nil
     }
 
+    /// The refresh itself (see the steps at the top of this file). Saves to the database; never throws:
+    /// problems become digest warnings or `lastError`.
     private func performRefresh(force: Bool, notify: Bool) async {
         guard let context = container?.mainContext else { return }
         let today = Calendar.current.startOfDay(for: .now)
@@ -57,6 +87,15 @@ final class DigestService: ObservableObject {
         let fellBack = existing.contains { $0.summarizer == KeywordSummarizer(topics: []).name }
             && !(AppSettings.makeSummarizer() is KeywordSummarizer)
         if !force && !existing.isEmpty && !fellBack { return }
+
+        // After the free trial, new refreshes need the one-off unlock. Saved history stays readable.
+        await StoreManager.shared.ensureLoaded()
+        guard StoreManager.shared.access.canRefresh else {
+            lastError = StoreManager.shared.access == .notStarted
+                ? "Start your free 7-day trial to find new ideas."
+                : "Your free trial has ended. Unlock IdeaScout to keep finding new ideas."
+            return
+        }
 
         isRefreshing = true
         stage = .fetching
@@ -81,6 +120,9 @@ final class DigestService: ObservableObject {
         var summarizer = AppSettings.makeSummarizer()
         let hasCloudAI = summarizer is LLMSummarizer
         var allWarnings = warnings
+        if AppSettings.needsConsent {
+            allWarnings.append("\(AppSettings.provider.shortName) wasn't used because you haven't agreed to share data with it. Agree in Settings → Advanced → AI & costs.")
+        }
         var killerNote: String?
         let capText = AppSettings.dailyCap.formatted(.currency(code: "USD"))
         if hasCloudAI && AppSettings.isOverDailyCap {
@@ -91,7 +133,7 @@ final class DigestService: ObservableObject {
 
         var drafts: [ThemeDraft]
         var noise = Set<Int>()
-        // Claude translates non-English items; without it, leave out items that clearly aren't English.
+        // A cloud AI translates non-English items; without one, leave out items that clearly aren't English.
         let candidates = summarizer is LLMSummarizer ? items : items.filter(LanguageFilter.isEnglishOrUnclear)
         var batch = Array(candidates.prefix(summarizer.maxItems))
         stage = .trends
@@ -110,7 +152,7 @@ final class DigestService: ObservableObject {
             drafts = (try? await summarizer.themes(for: batch)) ?? []
         }
 
-        // Never replace a better digest from earlier today (e.g. Claude) with a weaker one (e.g. keywords).
+        // Never replace a better digest from earlier today (e.g. cloud AI) with a weaker one (e.g. keywords).
         if let kept = existing.max(by: { Self.quality($0.summarizer) < Self.quality($1.summarizer) }),
            !Self.shouldReplace(existing: kept.summarizer, with: summarizer.name) {
             let time = Date.now.formatted(date: .omitted, time: .shortened)
@@ -142,7 +184,7 @@ final class DigestService: ObservableObject {
         }
         try? context.save()
 
-        // Killer ideas: Claude only. A failure here keeps the saved digest.
+        // Killer ideas: cloud AI only. A failure here keeps the saved digest.
         if let llm = summarizer as? LLMSummarizer {
             if AppSettings.isOverDailyCap {
                 digest.warnings.append("Killer ideas skipped: today's AI spending limit (\(capText)) was reached during the trend step.")
@@ -182,6 +224,7 @@ final class DigestService: ObservableObject {
         }
     }
 
+    /// Whether an error means "stopped on purpose" (task cancelled or request cancelled), which isn't reported.
     nonisolated static func isCancellation(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
     }
@@ -195,14 +238,22 @@ final class DigestService: ObservableObject {
         }
     }
 
+    /// - Returns: `true` if a digest from `new` is at least as good as the existing one.
     nonisolated static func shouldReplace(existing: String, with new: String) -> Bool {
         quality(new) >= quality(existing)
     }
 
+    /// The start of a look-back window of `days` days before `now`.
     nonisolated static func windowStart(days: Int, now: Date = .now) -> Date {
         now.addingTimeInterval(-Double(days) * 24 * 60 * 60)
     }
 
+    /// Fetches every enabled source at the same time. A failing source becomes a warning; the others continue.
+    /// - Parameters:
+    ///   - since: Start of the trend window.
+    ///   - painSince: Start of the (longer) window for Pain points and App Store complaints.
+    ///   - topics: The user's topics (used by GitHub).
+    /// - Returns: De-duplicated items in source order, and one warning per failed source.
     private func fetchAll(since: Date, painSince: Date, topics: [String]) async -> ([FetchedItem], [String]) {
         // Vibe-code and games first so an item they share with Show HN keeps the more specific label.
         var fetchers: [any ItemFetcher] = []
@@ -252,9 +303,13 @@ final class DigestService: ObservableObject {
         return items.filter { seenKeys.insert($0.key).inserted && seenURLs.insert($0.url.absoluteString.lowercased()).inserted }
     }
 
-    /// Fills Claude's quota by signal: field notes first, then 40% demand, 40% supply and 20% timing,
+    /// Fills the AI's quota by signal: business challenges first, then 40% demand, 40% supply and 20% timing,
     /// each shared fairly between its sources. Unused share rolls over. The result interleaves the
     /// signals so a summariser that reads only the first few items still sees each kind.
+    /// - Parameters:
+    ///   - items: Candidates from every source.
+    ///   - maxItems: The AI's item limit.
+    /// - Returns: At most `maxItems` items (plus all business challenges).
     nonisolated static func selectBySignal(_ items: [FetchedItem], maxItems: Int) -> [FetchedItem] {
         let notes = items.filter { $0.source == .fieldNotes }
         let rest = items.filter { $0.source != .fieldNotes }
@@ -282,6 +337,10 @@ final class DigestService: ObservableObject {
     }
 
     /// Takes the highest-scoring items from each source so no single source dominates.
+    /// - Parameters:
+    ///   - items: Candidates.
+    ///   - perSource: Most items to take from any one source.
+    /// - Returns: The best of each source, interleaved (1st of each source, then 2nd of each, …).
     nonisolated static func select(_ items: [FetchedItem], perSource: Int) -> [FetchedItem] {
         let bySource = Dictionary(grouping: items, by: \.source)
         let tops = SourceKind.allCases.map { (bySource[$0] ?? []).sorted { $0.score > $1.score }.prefix(perSource) }
@@ -311,12 +370,18 @@ final class DigestService: ObservableObject {
 
     // MARK: - Killer ideas
 
+    /// The leaderboard's top ideas (including dismissed ones), best first. Sent to the idea step so a
+    /// returning idea keeps its title.
+    /// - Parameters:
+    ///   - context: The database context.
+    ///   - limit: How many to return.
     func topKillerIdeas(context: ModelContext, limit: Int) -> [KillerIdea] {
         let all = (try? context.fetch(FetchDescriptor<KillerIdea>())) ?? []
         return Array(all.sorted { $0.leaderboardScore > $1.leaderboardScore }.prefix(limit))
     }
 
-    /// Adds new killer ideas, or updates ones that came back (they climb the leaderboard).
+    /// Adds new killer ideas, or updates ones that came back (they climb the leaderboard). An idea matches an
+    /// existing one by the AI's `same_as` title or by its own title. Coming back un-dismisses it and records the day.
     private func mergeKillerIdeas(_ results: [KillerEngine.Result], items: [FetchedItem], context: ModelContext) {
         let all = (try? context.fetch(FetchDescriptor<KillerIdea>())) ?? []
         for result in results {
@@ -349,6 +414,7 @@ final class DigestService: ObservableObject {
 
     // MARK: - Saved ideas
 
+    /// Stars a project (copies it into Saved projects) or unstars it, and saves.
     func toggleStar(_ item: Item, ideas: [Idea], context: ModelContext) {
         if let idea = ideas.first(where: { $0.key == item.key }) {
             context.delete(idea)
@@ -358,6 +424,8 @@ final class DigestService: ObservableObject {
         try? context.save()
     }
 
+    /// Asks the current AI for money-making variants of a saved project and stores them on it.
+    /// - Throws: `SummarizerError.unavailable` in keyword mode, or AI errors.
     func suggestExtensions(for idea: Idea) async throws {
         let summarizer = AppSettings.makeSummarizer()
         idea.extensions = try await summarizer.extensions(for: IdeaBrief(title: idea.title, detail: idea.detail, note: idea.note))
@@ -373,11 +441,14 @@ final class DigestService: ObservableObject {
         try? BGTaskScheduler.shared.submit(request)
     }
 
+    /// Called when iOS grants a background refresh: books the next one, then refreshes (only if today has
+    /// no digest yet) and notifies. Stops cleanly if iOS ends the background time.
     func runBackgroundRefresh() async {
         scheduleBackgroundRefresh()
         await refresh(force: false, notify: true, cancelWithCaller: true)
     }
 
+    /// The next time the clock shows `hour`:00 after `date` (today if still ahead, otherwise tomorrow).
     nonisolated static func nextOccurrence(ofHour hour: Int, after date: Date) -> Date {
         Calendar.current.nextDate(after: date, matching: DateComponents(hour: hour, minute: 0), matchingPolicy: .nextTime) ?? date
     }

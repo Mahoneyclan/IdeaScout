@@ -1,12 +1,20 @@
+// IdeaScoutTests.swift
+// Unit tests (Swift Testing). They run inside the app on a real iPhone (the simulator on the development
+// Mac hangs) and make no network calls: every source parser and AI reply is tested against small
+// hand-written samples of the real formats. Keychain tests use a separate test service so they never
+// touch the user's saved keys.
+
 import Foundation
 import Testing
 @testable import IdeaScout
 
+/// Builds a minimal FetchedItem for tests.
 private func item(_ key: String, _ source: SourceKind = .github, score: Int = 0, url: String? = nil, title: String = "Title") -> FetchedItem {
     FetchedItem(key: key, source: source, title: title, detail: "", url: URL(string: url ?? "https://example.com/\(key)")!,
                 score: score, postedAt: .now)
 }
 
+/// Hacker News, GitHub parsing.
 struct SourceParsingTests {
     @Test func parsesShowHN() throws {
         let json = """
@@ -37,6 +45,7 @@ struct SourceParsingTests {
 
 }
 
+/// Matching AI drafts to items, the catch-all, and keyword grouping.
 struct ThemeBuilderTests {
     @Test func dropsBadNumbersAndDuplicatesAndCollectsLeftovers() {
         let items = [item("a"), item("b"), item("c"), item("d")]
@@ -61,6 +70,7 @@ struct ThemeBuilderTests {
     }
 }
 
+/// De-duplication, per-source selection and background-refresh timing.
 struct DigestSelectionTests {
     @Test func dedupesByKeyAndLink() {
         let items = [item("a"), item("a"), item("b", url: "https://x.com"), item("c", url: "https://X.com")]
@@ -81,10 +91,11 @@ struct DigestSelectionTests {
     }
 }
 
+/// Claude request shape and parsing of trend replies, including refusals.
 struct ClaudeTests {
     @Test func requestUsesModelSchemaAndFallback() throws {
         let body = ClaudeClient.requestBody(system: "sys", prompt: "hi", schema: LLMSummarizer.themeSchema)
-        #expect(body["model"] as? String == "claude-opus-5-5")
+        #expect(body["model"] as? String == "claude-sonnet-5-5")
         #expect(body["fallbacks"] as? String == "default")
         let config = try #require(body["output_config"] as? [String: Any])
         let format = try #require(config["format"] as? [String: Any])
@@ -114,6 +125,7 @@ struct ClaudeTests {
     }
 }
 
+/// Saving and removing a secret (in a test-only Keychain service).
 struct KeychainTests {
     /// Uses a separate test-only Keychain area so running tests never touches the user's real keys.
     static let testService = "com.mahoney.IdeaScout.tests"
@@ -126,6 +138,7 @@ struct KeychainTests {
     }
 }
 
+/// Weighted overall scores, momentum and score clamping.
 struct RankingTests {
     @Test func overallIsWeightedAndSkipsMissingScores() {
         let scores = ThemeScores(novelty: 5, momentum: 1, viability: 0, gap: 3)
@@ -165,6 +178,7 @@ struct RankingTests {
     }
 }
 
+/// The "flesh out" prompt for saved projects.
 struct FleshOutPromptTests {
     @Test func includesIdeaNotesScoresAndExtensions() {
         let stored = Item(item("gh-1", .github, title: "me/mealbot"))
@@ -182,6 +196,7 @@ struct FleshOutPromptTests {
     }
 }
 
+/// Hugging Face, DEV, the product filter and item-list formatting.
 struct NewSourceTests {
     @Test func parsesHuggingFaceSpaces() throws {
         let json = """
@@ -232,6 +247,7 @@ struct NewSourceTests {
     }
 }
 
+/// itch.io and Steam parsing.
 struct GamesSourceTests {
     @Test func parsesItchFeed() throws {
         let xml = """
@@ -258,6 +274,7 @@ struct GamesSourceTests {
     }
 }
 
+/// Idea and review parsing, survivor selection, prompts and the leaderboard bonus.
 struct KillerEngineTests {
     private func wrap(_ json: String) throws -> Data {
         try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": json]], "stop_reason": "end_turn"])
@@ -309,6 +326,7 @@ struct KillerEngineTests {
     }
 }
 
+/// Token costs and spending summaries.
 struct UsageTrackerTests {
     @Test func parsesUsageAndCost() throws {
         let data = try JSONSerialization.data(withJSONObject: ["usage": ["input_tokens": 1_000_000, "output_tokens": 100_000,
@@ -333,6 +351,7 @@ struct UsageTrackerTests {
     }
 }
 
+/// Translations and the English-language filter.
 struct EnglishOnlyTests {
     @Test func appliesClaudeTranslations() throws {
         let inner = #"{"themes":[],"translations":[{"number":2,"title":"Video generator","description":"Makes short videos"}]}"#
@@ -359,6 +378,7 @@ struct EnglishOnlyTests {
     }
 }
 
+/// Near-misses are kept, weak spots dropped, and trends hidden below the bar.
 struct QualityBarTests {
     private func cand(_ t: String) -> KillerEngine.Candidate {
         .init(title: t, pitch: "", buyer: "", pricing: "", whyNow: "", oneWeekTest: "", evidenceNumbers: [], sameAs: "")
@@ -394,6 +414,7 @@ struct QualityBarTests {
     }
 }
 
+/// Y Combinator, App Store top paid, research papers and Lobsters.
 struct MoreSourcesTests {
     @Test func parsesYCBatchAndRotates() throws {
         let json = """
@@ -461,6 +482,7 @@ struct MoreSourcesTests {
     }
 }
 
+/// Streaming, retries, digest replacement rules, the spending limit and reply length.
 struct ReliabilityTests {
     @Test func rebuildsStreamedReplyAcrossBlocks() throws {
         let lines = [
@@ -527,6 +549,7 @@ struct ReliabilityTests {
     }
 }
 
+/// Evidence caps, the devil's-advocate prompt, days seen and complaint snippets.
 struct BestIdeaTests {
     private func cand(_ t: String, evidence: [Int]) -> KillerEngine.Candidate {
         .init(title: t, pitch: "", buyer: "", pricing: "", whyNow: "", oneWeekTest: "check", evidenceNumbers: evidence, sameAs: "")
@@ -589,6 +612,7 @@ struct BestIdeaTests {
     }
 }
 
+/// Developer sources off by default and the business rules in the prompts.
 struct BusinessFocusTests {
     @Test func developerSourcesOffByDefault() {
         #expect(!SourceKind.games.enabledByDefault)
@@ -609,6 +633,7 @@ struct BusinessFocusTests {
     }
 }
 
+/// Look-back windows and scan defaults.
 struct ScanSettingsTests {
     @Test func windowsAndDefaults() {
         let now = Date(timeIntervalSince1970: 1_000_000)
@@ -620,6 +645,7 @@ struct ScanSettingsTests {
     }
 }
 
+/// Demand sources, signal-based selection, pain clusters and noise.
 struct DemandSourceTests {
     @Test func fieldNotesBecomeDemandItems() {
         let items = FieldNotesFetcher.items(from: "Timesheets re-keyed into SAP\n\n  Meter data chased by email  ", postedAt: .now)
@@ -733,6 +759,7 @@ struct DemandSourceTests {
     }
 }
 
+/// Provider catalogue, OpenAI-style requests per model, reply conversion and costs.
 struct ProviderChoiceTests {
     private let schema: [String: Any] = ["type": "object", "properties": ["a": ["type": "string"]], "required": ["a"],
                                          "additionalProperties": false]
@@ -743,7 +770,8 @@ struct ProviderChoiceTests {
             #expect(provider.keychainKey != nil)
             if provider != .claude { #expect(provider.chatURL != nil) }
         }
-        #expect(AIProvider.claude.recommendedModel == "claude-opus-5-5")
+        #expect(AIProvider.claude.recommendedModel == "claude-sonnet-5-5")
+        #expect(AIProvider.claude.models.map(\.id) == ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"])
         #expect(AIProvider.openai.recommendedModel == "gpt-6.1-sol")
         #expect(Set(AIProvider.allCases.compactMap(\.keychainKey)).count == 9)
         #expect(AIProvider.grok.recommendedModel == "grok-4.3")
@@ -832,6 +860,7 @@ struct ProviderChoiceTests {
     }
 }
 
+/// Saving and dismissing ideas.
 struct SavedIdeaTests {
     @Test func savingAndDismissing() {
         let idea = KillerIdea(key: "a", title: "A")
@@ -841,5 +870,33 @@ struct SavedIdeaTests {
         #expect(idea.isSaved)   // dismissing keeps it in Saved
         idea.toggleSaved()
         #expect(!idea.isSaved && idea.savedAt == nil)
+    }
+}
+
+/// Trial and unlock rules, consent defaults and StoreKit product IDs.
+struct StoreAndConsentTests {
+    @Test func trialLastsSevenDaysThenNeedsTheUnlock() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        #expect(StoreManager.access(unlocked: false, trialStart: nil, now: start) == .notStarted)
+        #expect(StoreManager.access(unlocked: false, trialStart: start, now: start) == .trial(daysLeft: 7))
+        #expect(StoreManager.access(unlocked: false, trialStart: start, now: start.addingTimeInterval(6.5 * 86_400)) == .trial(daysLeft: 1))
+        #expect(StoreManager.access(unlocked: false, trialStart: start, now: start.addingTimeInterval(7 * 86_400)) == .expired)
+        #expect(StoreManager.access(unlocked: true, trialStart: start, now: start.addingTimeInterval(30 * 86_400)) == .unlocked)
+        #expect(!StoreManager.Access.expired.canRefresh && !StoreManager.Access.notStarted.canRefresh)
+        #expect(StoreManager.Access.trial(daysLeft: 3).canRefresh && StoreManager.Access.unlocked.canRefresh)
+    }
+
+    @Test func appleNeverNeedsConsent() {
+        #expect(AppSettings.hasConsent(.apple))
+        #expect(AppSettings.Keys.consent(.kimi) != AppSettings.Keys.consent(.claude))
+    }
+
+    @Test func storeProductIDsMatchTheTestFile() throws {
+        // The StoreKit test file in the repo must offer the same product IDs the app asks for.
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("IdeaScout/IdeaScout.storekit")
+        guard let data = try? Data(contentsOf: url) else { return }   // not readable on device; checked on Mac builds
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains(StoreManager.trialID) && text.contains(StoreManager.unlockID))
     }
 }

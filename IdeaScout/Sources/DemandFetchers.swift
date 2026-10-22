@@ -1,11 +1,17 @@
+// DemandFetchers.swift
+// The demand sources: evidence of what businesses need or pay for. "My Business Challenges" (typed by
+// the user), 1–2 star App Store reviews of top-grossing business apps, Atlassian Marketplace add-ons and
+// Australian government IT contracts (AusTender, CC BY 4.0: credited in About). Each gets the "demand"
+// share of the AI's items except Atlassian, which counts as supply.
+
 import Foundation
 
-// Sources of demand: what businesses complain about, ask for or spend money on.
+// MARK: - My Business Challenges (source kind `fieldNotes`: the owner's own work problems, typed in Settings)
 
-// MARK: - Field notes (the owner's own work problems, typed in Settings)
-
+/// "My Business Challenges" from Settings, one item per line. Makes no network calls.
 struct FieldNotesFetcher: ItemFetcher {
     let kind = SourceKind.fieldNotes
+    /// The text from Settings.
     let notes: String
 
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
@@ -29,15 +35,23 @@ struct FieldNotesFetcher: ItemFetcher {
 
 // MARK: - App Store complaints (1-2 star reviews of top-grossing business apps)
 
+/// Recent 1–2 star reviews of top-grossing Business, Finance and Productivity apps in the Australian and
+/// US stores: what paying customers are unhappy about. Uses Apple's public RSS feeds (6 charts plus
+/// 12 review requests a day).
 struct AppReviewsFetcher: ItemFetcher {
     let kind = SourceKind.appReviews
+    /// App Store countries checked: the owner's market and the largest one.
     static let countries = ["au", "us"]
+    /// App Store genre IDs and names.
     static let genres = ["6000": "Business", "6015": "Finance", "6007": "Productivity"]
+    /// Apps whose reviews are read each day.
     static let appsPerDay = 12
+    /// Most low-star reviews kept per app, so one unpopular app can't dominate.
     static let reviewsPerApp = 5
     /// Low-star reviews of business apps are rare, so look back further than other sources.
     static let windowDays = 60.0
 
+    /// One app from a top-grossing chart.
     struct App: Equatable, Sendable {
         var id: String
         var name: String
@@ -46,6 +60,7 @@ struct AppReviewsFetcher: ItemFetcher {
         var rank: Int
     }
 
+    /// Reads the charts, picks today's apps, then reads their recent reviews. Throws only if every chart failed.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         var apps: [App] = []
         var firstError: Error?
@@ -83,6 +98,7 @@ struct AppReviewsFetcher: ItemFetcher {
         let feed: Feed
     }
 
+    /// - Returns: The chart's apps with their rank (1-based).
     static func parseChart(_ data: Data, country: String, genre: String) throws -> [App] {
         (try JSONDecoder().decode(Chart.self, from: data).feed.entry ?? []).enumerated().map { index, entry in
             App(id: entry.id.attributes.id, name: entry.name.label, country: country, genre: genre, rank: index + 1)
@@ -113,6 +129,8 @@ struct AppReviewsFetcher: ItemFetcher {
         let feed: Feed
     }
 
+    /// Keeps reviews of 1–2 stars posted since `since` (at most `reviewsPerApp`). Score is 2 for one star,
+    /// 1 for two, so the angriest come first.
     static func parseReviews(_ data: Data, app: App, since: Date) throws -> [FetchedItem] {
         let entries = try JSONDecoder().decode(Reviews.self, from: data).feed.entry ?? []
         let url = URL(string: "https://apps.apple.com/\(app.country)/app/id\(app.id)")!
@@ -132,6 +150,7 @@ struct AppReviewsFetcher: ItemFetcher {
 
 // MARK: - Atlassian Marketplace (add-ons enterprise teams are adopting)
 
+/// Trending (12) and new (15) Jira and Confluence cloud apps: gaps enterprise teams pay to fill.
 struct AtlassianFetcher: ItemFetcher {
     let kind = SourceKind.atlassian
 
@@ -167,6 +186,11 @@ struct AtlassianFetcher: ItemFetcher {
         let _embedded: Embedded
     }
 
+    /// Turns add-ons into items; installs become the score.
+    /// - Parameters:
+    ///   - data: The Marketplace reply.
+    ///   - label: "trending" or "new", included in the detail.
+    ///   - postedAt: Date given to every item (listings have no useful date, so the window start is used).
     static func parse(_ data: Data, label: String, postedAt: Date) throws -> [FetchedItem] {
         try JSONDecoder().decode(Response.self, from: data)._embedded.addons.map { addon in
             let installs = addon._embedded?.distribution?.totalInstalls ?? 0
@@ -183,13 +207,17 @@ struct AtlassianFetcher: ItemFetcher {
 
 // MARK: - AusTender (Australian government IT contracts: who is paying for what)
 
+/// Australian Government IT contracts published in the window, largest first: who is paying for what.
 struct AusTenderFetcher: ItemFetcher {
     let kind = SourceKind.ausTender
+    /// Each page holds 100 contracts of all kinds; 5 pages is enough to find the window's main IT contracts.
     static let maxPages = 5
+    /// Largest IT contracts kept.
     static let maxItems = 15
     /// UNSPSC codes: 43 = IT equipment and software, 8111 = computer services.
     static let itPrefixes = ["43", "8111"]
 
+    /// Follows the API's "next" links up to `maxPages` pages.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         let f = ISO8601DateFormatter()
         var next: URL? = URL(string: "https://api.tenders.gov.au/ocds/findByDates/contractPublished/\(f.string(from: since))/\(f.string(from: .now))")

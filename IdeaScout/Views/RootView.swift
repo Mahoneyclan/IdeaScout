@@ -1,8 +1,16 @@
+// RootView.swift
+// The app's top level: four tabs (Ideas, History, Saved, Settings), the first-launch welcome screens and
+// the automatic refresh when the app opens. Also the History list.
+
 import SwiftUI
 import SwiftData
 
+/// The tab bar. Shows the welcome screens until they're finished, then starts the day's automatic refresh
+/// (which does nothing if today's digest already exists).
 struct RootView: View {
     @EnvironmentObject private var service: DigestService
+    /// Whether the welcome screens are done.
+    @AppStorage(AppSettings.Keys.onboarded) private var onboarded = false
 
     var body: some View {
         TabView {
@@ -11,7 +19,11 @@ struct RootView: View {
             Tab("Saved", systemImage: "bookmark") { IdeasView() }
             Tab("Settings", systemImage: "gearshape") { SettingsView() }
         }
-        .task { if !AppSettings.isRunningTests { await service.refresh(force: false) } }
+        .fullScreenCover(isPresented: Binding(get: { !onboarded && !AppSettings.isRunningTests }, set: { _ in })) {
+            WelcomeView()
+        }
+        // The first automatic refresh waits until the welcome screens are finished.
+        .task(id: onboarded) { if onboarded && !AppSettings.isRunningTests { await service.refresh(force: false) } }
     }
 }
 
@@ -20,6 +32,7 @@ struct RootView: View {
 struct HistoryView: View {
     @EnvironmentObject private var service: DigestService
     @Query(sort: \Digest.day, order: .reverse) private var digests: [Digest]
+    /// All killer ideas, to find each day's best.
     @Query private var ideas: [KillerIdea]
     @AppStorage(AppSettings.Keys.trendWindowDays) private var windowDays = AppSettings.defaultTrendWindowDays
 
@@ -46,8 +59,11 @@ struct HistoryView: View {
     }
 }
 
+/// One day in History: the date ("Today" for today), its best idea with Killer/Near-miss, and its
+/// pain clusters (or its top trends when there are none).
 struct HistoryRow: View {
     let digest: Digest
+    /// The best idea proposed that day, if any.
     let best: KillerIdea?
 
     var body: some View {

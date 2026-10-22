@@ -1,58 +1,84 @@
+// KillerEngine.swift
+// The idea step of a refresh: two cloud AI calls. Pass 1 proposes 5 business ideas from the pain clusters,
+// trends and items; pass 2 plays devil's advocate and scores them. Code then applies the evidence rules
+// and keeps up to 3 survivors, which DigestService saves as KillerIdeas. Also the "flesh out" prompt
+// for a killer idea.
+
 import Foundation
 
-/// Turns the week's trends into one or two "killer" product ideas, then has a second,
-/// sceptical pass try to kill them. Only ideas that survive are kept. Needs a cloud AI:
+/// Turns the trends and pain clusters into business product ideas, then has a second,
+/// sceptical pass try to kill them. Up to 3 survivors a day are kept. Needs a cloud AI:
 /// Apple's on-device model is too small for this kind of reasoning.
 struct KillerEngine {
+    /// The cloud AI to use (only its client is needed).
     let llm: LLMSummarizer
     /// Called when the devil's-advocate step starts (for progress on screen).
     var onCritique: @Sendable () async -> Void = {}
 
+    /// One idea from pass 1, as the AI described it.
     struct Candidate: Equatable, Sendable {
+        /// Short, memorable name. Also the key that matches it to its review and to past ideas.
         var title: String
         var pitch: String
         var buyer: String
         var pricing: String
         var whyNow: String
         var oneWeekTest: String
+        /// 1-based numbers of the items cited as evidence.
         var evidenceNumbers: [Int]
+        /// The exact title of an existing leaderboard idea this repeats, or "" if new.
         var sameAs: String
+        /// The manual task or costly workaround it replaces.
         var replaces = ""
     }
 
+    /// The devil's advocate's verdict on one candidate. Scores are clamped to 0–5 when parsed.
     struct Review: Equatable, Sendable {
         var title: String
+        /// Whether it's still worth a one-week test after the objections.
         var survives: Bool
         var objection: String
         var competitors: String
         var verdict: String
+        /// How badly the buyer needs it (1–5). The other scores: willingness to pay, why now, gap, fit for the user.
         var pain: Int
         var willingToPay: Int
         var timing: Int
         var gap: Int
         var fit: Int
+        /// The one fact that would most raise the score.
         var evidenceNeeded = ""
     }
 
+    /// A surviving idea with its (evidence-capped) review.
     struct Result: Equatable, Sendable {
         var candidate: Candidate
         var review: Review
+        /// Average of the five scores: the killer score.
         var score: Double { KillerEngine.score(review) }
     }
 
     /// Context passed in from the digest: the trends found, the numbered items, the user's profile
     /// and the current leaderboard (so a returning idea reuses its title).
     struct Context: Sendable {
+        /// Trends and pain clusters from the trend step.
         var themes: [ThemeBuilder.Built]
+        /// The items in prompt order, so evidence numbers can be resolved.
         var items: [FetchedItem]
+        /// The user's profile, used for the "fit" score.
         var aboutMe: String
+        /// Top existing ideas as "Title: pitch", so a returning idea reuses its title.
         var leaderboard: [String]
+        /// Industry that at least 2 ideas must target.
         var focusIndustry = ""
+        /// Pain clusters as one-line summaries for the prompt.
         var painClusters: [String] = []
     }
 
     /// Every idea the devil's advocate didn't kill is kept (up to 3 a day). Whether it counts as a
     /// "killer" or a "near-miss" is decided on screen from the quality bar, so near-misses can come back and climb.
+    /// - Throws: Errors from either AI call or the parsers.
+    /// - Note: `onCritique` is called between the two passes.
     func run(_ context: Context) async throws -> [Result] {
         let candidates = try await generate(context)
         guard !candidates.isEmpty else { return [] }
@@ -63,12 +89,15 @@ struct KillerEngine {
 
     /// No single measure may be this low, however good the average.
     static let minimumSingleScore = 2
+    /// At most this many ideas are kept per refresh, so the leaderboard isn't flooded.
     static let maxPerDay = 3
     /// Without matching evidence, pain and willingness to pay can't score above this.
     static let unprovenCap = 3
 
     // MARK: - Pass 1: generate
 
+    /// Pass 1 instructions: business buyers only, at most 1 developer tool, at least 2 in the focus industry,
+    /// each replacing a named manual task, with a one-week test. Field names must match `candidateSchema`.
     static let generateInstructions = """
     You are a sharp B2B product strategist hunting for a "killer" business software idea: one with real pain, \
     a specific business buyer with a budget, a reason it is possible now, a clear gap, and a good fit for the person described.
@@ -94,12 +123,16 @@ struct KillerEngine {
     that title exactly, otherwise an empty string. Write everything in English.
     """
 
+    /// Pass 1: asks for 5 candidate ideas (feature "Killer ideas", medium effort).
+    /// - Throws: Errors from the AI call or the parser.
     func generate(_ context: Context) async throws -> [Candidate] {
         let data = try await llm.client.complete(system: Self.generateInstructions, prompt: Self.generatePrompt(context),
                                                  schema: Self.candidateSchema, effort: "medium", feature: "Killer ideas")
         return try Self.parseCandidates(data)
     }
 
+    /// The pass 1 prompt: profile, focus industry, pain clusters, trends with variants, numbered items
+    /// (160 characters of detail) and the existing leaderboard.
     static func generatePrompt(_ context: Context) -> String {
         var parts: [String] = []
         parts.append("About me: " + (context.aboutMe.isEmpty ? "(not provided)" : context.aboutMe))
@@ -116,6 +149,7 @@ struct KillerEngine {
         return parts.joined(separator: "\n\n")
     }
 
+    /// JSON Schema for pass 1. Keep in sync with `parseCandidates` and the instructions.
     static let candidateSchema: [String: Any] = [
         "type": "object",
         "properties": [
@@ -138,6 +172,7 @@ struct KillerEngine {
         "additionalProperties": false,
     ]
 
+    /// - Returns: The candidates. `replaces` is optional so replies from older prompts still parse.
     static func parseCandidates(_ data: Data) throws -> [Candidate] {
         struct Out: Decodable {
             struct I: Decodable {
@@ -156,6 +191,8 @@ struct KillerEngine {
 
     // MARK: - Pass 2: devil's advocate
 
+    /// Pass 2 instructions: try to kill each idea using its evidence, with a defined meaning for every
+    /// score level; no invented competitor prices. Field names must match `reviewSchema`.
     static let critiqueInstructions = """
     You are a blunt, experienced B2B investor playing devil's advocate. For each product idea, read its cited \
     evidence and try hard to kill it: name competitors you are confident exist, question whether the business buyer \
@@ -174,6 +211,9 @@ struct KillerEngine {
     Write everything in English.
     """
 
+    /// Pass 2: the devil's advocate (feature "Devil's advocate"). Uses high effort because judging is where
+    /// quality matters most.
+    /// - Throws: Errors from the AI call or the parser.
     func critique(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String) async throws -> [Review] {
         let data = try await llm.client.complete(system: Self.critiqueInstructions,
                                                  prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe),
@@ -181,6 +221,8 @@ struct KillerEngine {
         return try Self.parseReviews(data)
     }
 
+    /// The pass 2 prompt: each idea with its pitch, buyer, price, what it replaces, why now, one-week test
+    /// and its cited evidence (200 characters each), so the critic can check claims.
     static func critiquePrompt(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String) -> String {
         var text = "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe) + "\n\nIdeas:"
         for c in candidates {
@@ -202,6 +244,7 @@ struct KillerEngine {
         candidate.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
     }
 
+    /// JSON Schema for pass 2. Keep in sync with `parseReviews` and the instructions.
     static let reviewSchema: [String: Any] = [
         "type": "object",
         "properties": [
@@ -226,6 +269,7 @@ struct KillerEngine {
         "additionalProperties": false,
     ]
 
+    /// - Returns: Reviews with every score clamped to 0–5.
     static func parseReviews(_ data: Data) throws -> [Review] {
         struct Out: Decodable {
             struct R: Decodable {
@@ -260,11 +304,14 @@ struct KillerEngine {
         .map { $0 }
     }
 
-    /// High pain needs a complaint or field note as evidence; high willingness to pay needs a complaint or proof
-    /// that people pay (a funded startup, a top paid app, a government contract). Enforced here rather than trusted to the prompt.
+    /// Sources that count as evidence of pain: complaints and the user's own business challenges.
     static let painEvidence: Set<SourceKind> = [.painPoints, .appReviews, .fieldNotes]
+    /// Sources that count as evidence that people pay: complaints, funded startups, top paid apps, government contracts.
     static let payEvidence: Set<SourceKind> = [.painPoints, .appReviews, .ycombinator, .appStore, .ausTender]
 
+    /// Caps pain at 3 without pain evidence, and willingness to pay at 3 without pay evidence. Enforced
+    /// in code rather than trusted to the prompt, because models tend to score generously.
+    /// - Returns: The review with capped scores.
     static func capped(_ review: Review, evidence: [FetchedItem]) -> Review {
         var r = review
         let sources = Set(evidence.map(\.source))
@@ -273,6 +320,7 @@ struct KillerEngine {
         return r
     }
 
+    /// The killer score: the average of the five scores.
     static func score(_ r: Review) -> Double { Double(r.pain + r.willingToPay + r.timing + r.gap + r.fit) / 5 }
 }
 

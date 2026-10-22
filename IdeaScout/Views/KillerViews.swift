@@ -1,11 +1,18 @@
+// KillerViews.swift
+// Everything about killer ideas on screen: the Ideas tab (leaderboard with today's status and the refresh
+// button), idea cards, badges and the idea detail screen with its plan prompt.
+
 import SwiftUI
 import SwiftData
 import UIKit
 
-/// The five review scores, shown compactly.
+// MARK: - Scores, badges and cards
+
+/// The five review scores. `metrics` is also used by the detail screen and the weakest-score summary.
 struct KillerScoreRow: View {
     let idea: KillerIdea
 
+    /// Name, symbol and field of each score, in display order.
     static let metrics: [(name: String, symbol: String, value: KeyPath<KillerIdea, Int>)] = [
         ("Pain", "bandage", \.pain),
         ("Willing to pay", "dollarsign.circle", \.willingToPay),
@@ -32,6 +39,7 @@ struct KillerScoreRow: View {
     }
 }
 
+/// The killer score in a capsule: orange when it clears the quality bar, grey for a near-miss.
 struct KillerScoreBadge: View {
     let score: Double
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
@@ -46,8 +54,8 @@ struct KillerScoreBadge: View {
     }
 }
 
-/// A card for one killer idea, used on Today and the leaderboard.
-/// "Killer" when the idea clears the quality bar, otherwise "Near-miss".
+/// Labels an idea "Killer" (score at or above the quality bar, which the user can change) or "Near-miss".
+/// Recomputed on screen, so changing the bar relabels saved ideas at once.
 struct KillerStatusLabel: View {
     let score: Double
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
@@ -60,6 +68,8 @@ struct KillerStatusLabel: View {
     }
 }
 
+/// A card for one idea, used in the leaderboard, History days and Saved: title, score, status, pitch,
+/// buyer and price, weakest score, and how many days it has come back.
 struct KillerIdeaCard: View {
     let idea: KillerIdea
 
@@ -96,11 +106,15 @@ struct KillerIdeaCard: View {
     }
 }
 
+/// Everything about one idea: the opportunity, one-week test, devil's advocate, scores, evidence links,
+/// and a pinned "Copy plan prompt" button. The bookmark in the toolbar saves it.
 struct KillerIdeaDetailView: View {
+    /// The idea shown; bindable so saving updates the screen.
     @Bindable var idea: KillerIdea
     @Environment(\.modelContext) private var context
     @State private var copied = false
 
+    /// The days it was proposed, as text (first and last day for ideas saved before days were recorded).
     private var seenDays: String {
         let days = idea.daysSeen.isEmpty ? Array(Set([idea.firstSeen, idea.lastSeen].map { Calendar.current.startOfDay(for: $0) })).sorted() : idea.daysSeen.sorted()
         return days.map { $0.formatted(date: .abbreviated, time: .omitted) }.joined(separator: ", ")
@@ -216,6 +230,8 @@ struct KillerIdeaDetailView: View {
     }
 }
 
+// MARK: - Ideas tab
+
 /// Every idea so far, best first: killers (at or above the quality bar), then near-misses.
 /// Ideas that come back on several days get a bonus.
 struct LeaderboardView: View {
@@ -224,8 +240,10 @@ struct LeaderboardView: View {
     @Query private var ideas: [KillerIdea]
     @Query(sort: \Digest.createdAt, order: .reverse) private var digests: [Digest]
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
+    /// The idea waiting for "Dismiss" confirmation.
     @State private var pendingDismiss: KillerIdea?
 
+    /// Ideas not dismissed, best leaderboard score first.
     private var ranked: [KillerIdea] { ideas.filter { !$0.isDismissed }.sorted { $0.leaderboardScore > $1.leaderboardScore } }
 
     var body: some View {
@@ -291,8 +309,12 @@ struct LeaderboardView: View {
 }
 
 /// One line at the top of the Ideas tab: whether today's refresh has run and what it found.
+/// The first row of the Ideas tab: refresh progress, or when today's digest was made, how many ideas it
+/// produced and the latest note (e.g. limit reached). Tapping it opens today's full digest.
 struct TodayStatus: View {
+    /// Today's digest, if there is one.
     let today: Digest?
+    /// All ideas, to count today's.
     let ideas: [KillerIdea]
     @EnvironmentObject private var service: DigestService
 
@@ -331,15 +353,22 @@ struct TodayStatus: View {
     }
 }
 
+// MARK: - Refresh button
+
 /// The main action, at the bottom of the screen where the thumb rests. The first refresh of the day
 /// runs straight away; another one the same day asks first, because it costs money.
 struct RefreshBar: View {
     @EnvironmentObject private var service: DigestService
+    @EnvironmentObject private var store: StoreManager
+    @State private var showPaywall = false
+    @State private var showConsent = false
     @Query(sort: \Digest.createdAt, order: .reverse) private var digests: [Digest]
     @AppStorage(AppSettings.Keys.claudeMaxItems) private var maxItems = AppSettings.defaultClaudeMaxItems
     @AppStorage(AppSettings.Keys.dailyCap) private var dailyCap = AppSettings.defaultDailyCap
+    /// Shows the "Run another refresh today?" confirmation.
     @State private var confirm = false
 
+    /// The estimated cost of one refresh, shown on the button.
     private var costText: String {
         AppSettings.estimatedRefreshCost(items: maxItems).upperBound.formatted(.currency(code: "USD"))
     }
@@ -347,11 +376,21 @@ struct RefreshBar: View {
     var body: some View {
         let hasToday = digests.contains { Calendar.current.isDateInToday($0.day) }
         Button {
-            if hasToday { confirm = true } else { Task { await service.refresh(force: true) } }
+            if !store.access.canRefresh { showPaywall = true }
+            else if AppSettings.needsConsent { showConsent = true }
+            else if hasToday { confirm = true }
+            else { Task { await service.refresh(force: true) } }
         } label: {
-            Label(service.isRefreshing ? "Refreshing…" : (hasToday ? "Refresh again · ~\(costText)" : "Find today's ideas · ~\(costText)"),
-                  systemImage: "arrow.clockwise")
+            Label(!store.access.canRefresh ? (store.access == .expired ? "Unlock to find new ideas · \(store.unlockPrice)" : "Start free trial")
+                  : service.isRefreshing ? "Refreshing…" : (hasToday ? "Refresh again · ~\(costText)" : "Find today's ideas · ~\(costText)"),
+                  systemImage: store.access.canRefresh ? "arrow.clockwise" : "lock.open")
                 .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .sheet(isPresented: $showPaywall) { PaywallView() }
+        .sheet(isPresented: $showConsent) {
+            ConsentView(provider: AppSettings.provider) { agreed in
+                if agreed { Task { await service.refresh(force: !hasToday) } }
+            }
         }
         .buttonStyle(.borderedProminent)
         .disabled(service.isRefreshing)

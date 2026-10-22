@@ -1,10 +1,29 @@
+// Fetchers.swift
+// The supply and timing sources (Hacker News, GitHub, vibe-coded projects, Hugging Face, DEV, games,
+// Y Combinator, App Store top paid, AI research, Lobsters), the Hacker News pain-point source, and the
+// shared HTTP, text-cleaning and date helpers. Demand sources are in DemandFetchers.swift.
+//
+// Every fetcher is keyless, read-only and uses public APIs. Each returns FetchedItems for the window
+// starting at `since`; DigestService runs them in parallel and turns a thrown error into a warning.
+
 import Foundation
 
+// MARK: - Shared fetcher plumbing
+
+/// One source of items.
 protocol ItemFetcher: Sendable {
+    /// Which source this is (used in warnings and to pick the window).
     var kind: SourceKind { get }
+    /// Fetches the source's items for the window.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (only GitHub uses them).
+    /// - Returns: Items, in the source's own order.
+    /// - Throws: Network, HTTP or decoding errors; sources with several feeds only throw if all of them fail.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem]
 }
 
+/// Errors from source requests, worded for the user.
 enum FetchError: LocalizedError {
     case http(Int)
     case missingCredential(String)
@@ -17,7 +36,12 @@ enum FetchError: LocalizedError {
     }
 }
 
+/// Plain GET requests for sources: a 30-second timeout, an honest "IdeaScout" User-Agent, and an error
+/// for any non-2xx status.
 enum HTTP {
+    /// Sends a request.
+    /// - Returns: The body.
+    /// - Throws: `FetchError.http` for non-2xx replies, or network errors.
     static func data(for request: URLRequest) async throws -> Data {
         var request = request
         request.timeoutInterval = 30
@@ -29,6 +53,8 @@ enum HTTP {
         return data
     }
 
+    /// GET with optional extra headers.
+    /// - Throws: As `data(for:)`.
     static func get(_ url: URL, headers: [String: String] = [:]) async throws -> Data {
         var request = URLRequest(url: url)
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
@@ -36,8 +62,9 @@ enum HTTP {
     }
 }
 
+/// Turns HTML or long text from sources into short plain text for prompts and the UI.
 enum TextCleaner {
-    /// Strips HTML tags/entities and trims to a maximum length.
+    /// Strips HTML tags, decodes common entities, collapses whitespace and trims to `max` characters (with "…").
     static func clean(_ html: String?, max: Int = 220) -> String {
         guard var s = html, !s.isEmpty else { return "" }
         s = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
@@ -66,15 +93,22 @@ enum TextCleaner {
 
 // MARK: - Hacker News (Algolia API, no key needed)
 
+/// Show HN posts from the window, most upvoted first.
 struct HackerNewsFetcher: ItemFetcher {
     let kind = SourceKind.hackerNews
 
+    /// 60 Show HN posts.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         let data = try await HTTP.get(Self.searchURL(tags: "show_hn", query: nil, since: since, hits: 60))
         return try Self.parse(data, as: .hackerNews)
     }
 
-    /// Uses Algolia's popularity-ranked search, so a week-long window returns the most upvoted posts.
+    /// Uses Algolia's popularity-ranked search, so a multi-day window returns the most upvoted posts.
+    /// - Parameters:
+    ///   - tags: Algolia tags, e.g. "show_hn", "story", "comment", "ask_hn", "launch_hn".
+    ///   - query: Optional search text.
+    ///   - since: Only items created after this.
+    ///   - hits: How many results.
     static func searchURL(tags: String, query: String?, since: Date, hits: Int) -> URL {
         var c = URLComponents(string: "https://hn.algolia.com/api/v1/search")!
         c.queryItems = [
@@ -100,7 +134,12 @@ struct HackerNewsFetcher: ItemFetcher {
         let hits: [Hit]
     }
 
-    /// `around`: for comments, phrases to centre the title on (so a long comment keeps the complaint).
+    /// Turns Algolia hits into items. Stories use their title (minus "Show HN:"); comments have no title, so
+    /// the comment text becomes the title and "In thread: …" the detail.
+    /// - Parameters:
+    ///   - data: The Algolia reply.
+    ///   - kind: Source label for the items (Hacker News search is shared by several sources).
+    ///   - phrases: For comments, phrases to centre the title on (so a long comment keeps the complaint).
     static func parse(_ data: Data, as kind: SourceKind, around phrases: [String] = []) throws -> [FetchedItem] {
         try JSONDecoder().decode(Response.self, from: data).hits.compactMap { hit in
             // Comments have no title: use the part of the comment around the phrase, with the thread as detail.
@@ -126,8 +165,11 @@ struct HackerNewsFetcher: ItemFetcher {
 
 // MARK: - GitHub (search API, no key needed; 10 searches/minute)
 
+/// New repositories (created in the window, 10+ stars) matching the user's topics, most starred first.
 struct GitHubFetcher: ItemFetcher {
     let kind = SourceKind.github
+    /// Unauthenticated GitHub search allows 10 searches a minute: 7 topics here, plus 2 for vibe-coded projects
+    /// and 1 for games.
     static let maxTopics = 7
 
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
@@ -140,6 +182,7 @@ struct GitHubFetcher: ItemFetcher {
         return results
     }
 
+    /// The date as yyyy-MM-dd for GitHub's `created:>` filter.
     static func day(_ date: Date) -> String {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
@@ -148,6 +191,12 @@ struct GitHubFetcher: ItemFetcher {
         return f.string(from: date)
     }
 
+    /// Runs one repository search, most stars first.
+    /// - Parameters:
+    ///   - query: GitHub search syntax.
+    ///   - kind: Source label for the results (GitHub is shared by several sources).
+    ///   - perPage: How many results.
+    /// - Throws: Network, HTTP (e.g. 403 when rate-limited) or decoding errors.
     static func search(_ query: String, as kind: SourceKind, perPage: Int = 10) async throws -> [FetchedItem] {
         var c = URLComponents(string: "https://api.github.com/search/repositories")!
         c.queryItems = [
@@ -172,6 +221,7 @@ struct GitHubFetcher: ItemFetcher {
         let items: [Repo]
     }
 
+    /// Turns a search reply into items; stars become the score.
     static func parse(_ data: Data, as kind: SourceKind) throws -> [FetchedItem] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -186,10 +236,14 @@ struct GitHubFetcher: ItemFetcher {
 
 // MARK: - Vibe-coded projects (mentions of AI app builders on HN and GitHub)
 
+/// Projects built with AI app builders: Hacker News stories mentioning them, and GitHub repos that say
+/// they were vibe-coded or built with Lovable.
 struct VibeCodeFetcher: ItemFetcher {
     let kind = SourceKind.vibeCode
 
+    /// Search terms for Hacker News (15 stories each).
     static let hnQueries = ["lovable", "bolt.new", "v0.dev", "vibe coded", "vibe coding", "replit agent", "built with cursor"]
+    /// GitHub searches (2 of the 10-per-minute budget).
     static let githubQueries = ["\"vibe coded\" in:description,readme", "\"built with lovable\" in:description,readme"]
 
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
@@ -213,6 +267,7 @@ struct VibeCodeFetcher: ItemFetcher {
 
 // MARK: - Hugging Face trending Spaces (AI demo apps, no key needed)
 
+/// The 40 trending AI demo apps (Spaces). Off by default (developer-focused).
 struct HuggingFaceFetcher: ItemFetcher {
     let kind = SourceKind.huggingFace
 
@@ -236,6 +291,7 @@ struct HuggingFaceFetcher: ItemFetcher {
         let cardData: Card?
     }
 
+    /// Turns Spaces into items; likes become the score.
     static func parse(_ data: Data) throws -> [FetchedItem] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -256,6 +312,7 @@ struct HuggingFaceFetcher: ItemFetcher {
 
 // MARK: - DEV.to #showdev (developers showing what they built, no key needed)
 
+/// The 40 top #showdev posts for the window. Off by default (developer-focused).
 struct DevToFetcher: ItemFetcher {
     let kind = SourceKind.devTo
 
@@ -274,6 +331,7 @@ struct DevToFetcher: ItemFetcher {
         let published_at: Date
     }
 
+    /// Turns articles into items; reactions become the score.
     static func parse(_ data: Data) throws -> [FetchedItem] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -289,10 +347,12 @@ struct DevToFetcher: ItemFetcher {
 
 /// Drops items that can't become a product people pay for (lists, dotfiles, coursework, personal sites).
 enum ProductFilter {
+    /// Words that mark non-products (or adult content), matched in title and description.
     static let noise = ["awesome-", "awesome list", "dotfiles", "homework", "tutorial", "course notes", "cheatsheet",
                         "cheat sheet", "interview questions", "leetcode", ".github.io", "my portfolio", "hall of fame",
                         "weekly digest", "uncensored", "nsfw", "hentai", "lewd", "18+", "porn"]
 
+    /// - Returns: `false` if the item contains any noise word.
     static func isProductShaped(_ item: FetchedItem) -> Bool {
         let text = "\(item.title) \(item.detail)".lowercased()
         return !noise.contains { text.contains($0) }
@@ -301,6 +361,7 @@ enum ProductFilter {
 
 // MARK: - Games (itch.io newest, Steam coming soon, and game searches on HN, GitHub and Hugging Face)
 
+/// New and upcoming games from five places. Off by default. Each part can fail independently.
 struct GamesFetcher: ItemFetcher {
     let kind = SourceKind.games
 
@@ -336,6 +397,7 @@ final class ItchFeed: NSObject, XMLParserDelegate {
     private var current = ""
     private var inItem = false
 
+    /// Parses an itch.io RSS feed into items (no score; dated by creation date).
     static func parse(_ data: Data) throws -> [FetchedItem] {
         let feed = ItchFeed()
         let parser = XMLParser(data: data)
@@ -351,6 +413,7 @@ final class ItchFeed: NSObject, XMLParserDelegate {
         return f
     }()
 
+    /// XMLParserDelegate callbacks: collect each <item>'s fields, then build an item when it closes.
     func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?, qualifiedName: String?,
                 attributes: [String: String] = [:]) {
         if name == "item" { inItem = true; fields = [:] }
@@ -378,6 +441,7 @@ final class ItchFeed: NSObject, XMLParserDelegate {
 
 /// Steam's public store endpoints: featured "coming soon" and "new releases", plus a short description per game.
 enum SteamStore {
+    /// The featured-categories reply (only the two sections used).
     struct Featured: Decodable {
         struct Section: Decodable { let items: [Entry] }
         struct Entry: Decodable { let id: Int; let name: String; let type: Int? }
@@ -385,6 +449,8 @@ enum SteamStore {
         let new_releases: Section?
     }
 
+    /// Up to 20 featured "coming soon" and "new releases" games, each with its short description (one
+    /// detail call per game, made in parallel; failures are skipped).
     static func upcoming() async throws -> [FetchedItem] {
         let data = try await HTTP.get(URL(string: "https://store.steampowered.com/api/featuredcategories?cc=us&l=english")!)
         let entries = try parseFeatured(data)
@@ -398,6 +464,7 @@ enum SteamStore {
         }
     }
 
+    /// Featured entries, de-duplicated, games only (type 0).
     static func parseFeatured(_ data: Data) throws -> [Featured.Entry] {
         let featured = try JSONDecoder().decode(Featured.self, from: data)
         var seen = Set<Int>()
@@ -421,9 +488,12 @@ enum SteamStore {
 
 // MARK: - Pain points (people asking for tools that don't exist yet)
 
+/// Hacker News comments where people complain or ask for a tool (10 per phrase), plus Ask HN posts.
 struct PainPointsFetcher: ItemFetcher {
     let kind = SourceKind.painPoints
 
+    /// Exact phrases searched in comments. "is there a tool" was dropped (almost no hits); "too expensive",
+    /// "switched from" and "alternative to" find far more real complaints, though noisier (the AI filters them).
     static let phrases = ["\"I wish there was\"", "\"I would pay for\"", "\"I'd pay for\"", "\"looking for a tool\"",
                           "\"why is there no\"", "\"too expensive\"", "\"switched from\"", "\"alternative to\""]
 
@@ -450,6 +520,7 @@ struct PainPointsFetcher: ItemFetcher {
 
 // MARK: - Shared date parsing
 
+/// Date parsing shared by sources whose dates vary in format.
 enum ISODates {
     /// Parses ISO 8601 dates with or without fractional seconds and with any time-zone offset.
     static func parse(_ text: String) -> Date? {
@@ -458,6 +529,7 @@ enum ISODates {
         return fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text)
     }
 
+    /// A JSON decoder that reads ISO 8601 dates in any of the formats above.
     static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -473,8 +545,10 @@ enum ISODates {
 
 // MARK: - Y Combinator (latest funded B2B startups, plus Launch HN posts)
 
+/// Business startups from the newest Y Combinator batch (via the unofficial yc-oss data), plus Launch HN posts.
 struct YCombinatorFetcher: ItemFetcher {
     let kind = SourceKind.ycombinator
+    /// Companies sent per day from the batch.
     static let perDay = 25
 
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
@@ -492,10 +566,12 @@ struct YCombinatorFetcher: ItemFetcher {
         return results
     }
 
+    /// yc-oss's list of every B2B company (about 5 MB), refreshed daily by that project.
     static let b2bURL = URL(string: "https://yc-oss.github.io/api/industries/b2b.json")!
     /// A batch is only used once it has this many B2B companies (future batches start nearly empty).
     static let minimumBatchSize = 30
 
+    /// Downloads the B2B list and keeps the newest full batch.
     private func latestBatch(since: Date) async throws -> [FetchedItem] {
         try Self.newestBatch(in: try await HTTP.get(Self.b2bURL), postedAt: since)
     }
@@ -553,6 +629,7 @@ struct YCombinatorFetcher: ItemFetcher {
 
 // MARK: - App Store top paid iPhone apps (what people pay for right now)
 
+/// The 25 top paid iPhone apps in the US: evidence of what people pay for.
 struct AppStoreFetcher: ItemFetcher {
     let kind = SourceKind.appStore
 
@@ -591,6 +668,8 @@ struct AppStoreFetcher: ItemFetcher {
 
 // MARK: - Hugging Face daily papers (new AI capabilities: the "why now")
 
+/// The 20 most upvoted AI papers from the window (Hugging Face daily papers): new capabilities that
+/// explain "why now".
 struct ResearchFetcher: ItemFetcher {
     let kind = SourceKind.research
 
@@ -611,6 +690,7 @@ struct ResearchFetcher: ItemFetcher {
         let publishedAt: Date?
     }
 
+    /// Turns papers into items; upvotes become the score; uses the AI summary when available.
     static func parse(_ data: Data) throws -> [FetchedItem] {
         try ISODates.decoder().decode([Entry].self, from: data).compactMap { entry in
             let p = entry.paper
@@ -624,6 +704,7 @@ struct ResearchFetcher: ItemFetcher {
 
 // MARK: - Lobsters "show" (developers presenting their projects)
 
+/// Lobsters "show" posts from the window. Off by default (developer-focused).
 struct LobstersFetcher: ItemFetcher {
     let kind = SourceKind.lobsters
 
@@ -642,6 +723,7 @@ struct LobstersFetcher: ItemFetcher {
         let description_plain: String?
     }
 
+    /// Turns stories into items; votes become the score.
     static func parse(_ data: Data) throws -> [FetchedItem] {
         try ISODates.decoder().decode([Story].self, from: data).compactMap { s in
             let link = (s.url?.isEmpty == false ? s.url : nil) ?? s.comments_url

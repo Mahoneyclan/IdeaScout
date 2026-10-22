@@ -41,9 +41,16 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 
 ## AI summarisers
 
-- **Cloud AI** (choose one in Settings → Advanced → AI & costs, each with its own API key in the Keychain and a recommended model preselected): Claude (Opus 5.5 default, Fable 5.1), ChatGPT (GPT-6.1 Sol, GPT-6 Astra), Gemini (4 Argon, Gemma 4 31B), Grok 4.3, DeepSeek V4.1, Qwen 3.8 Max, GLM-5.3, Kimi K3, MiMo-V2.6-Pro, or any other model name with its own price. Claude talks to Anthropic's API; the others use one OpenAI-compatible client. Reads up to 300 projects per refresh (configurable: 100–500) and powers the killer ideas and the devil's advocate. A full Claude Opus refresh at 300 items costs about $0.40–0.45. Costs are tracked per model, and a daily limit (default $1.00) applies to every provider. If the chosen provider isn't set up, the app uses Apple's on-device AI, never another paid provider.
+- **Cloud AI** (choose one in Settings → Advanced → AI & costs, each with its own API key in the Keychain and a recommended model preselected): Claude (Sonnet 5.5 default, Opus 5.5, Fable 5.1), ChatGPT (GPT-6.1 Sol, GPT-6 Astra), Gemini (4 Argon, Gemma 4 31B), Grok 4.3, DeepSeek V4.1, Qwen 3.8 Max, GLM-5.3, Kimi K3, MiMo-V2.6-Pro, or any other model name with its own price. Claude talks to Anthropic's API; the others use one OpenAI-compatible client. Reads up to 300 projects per refresh (configurable: 100–500) and powers the killer ideas and the devil's advocate. A full refresh at 300 items costs about $0.20–0.25 with Claude Sonnet 5.5 (about $0.40–0.45 with Opus 5.5). Costs are tracked per model, and a daily limit (default $1.00) applies to every provider. If the chosen provider isn't set up, the app uses Apple's on-device AI, never another paid provider.
 - **Apple Intelligence**: on-device and free, but reads only about 20 projects and can't generate killer ideas.
 - **Keyword grouping**: the fallback when no AI is available.
+
+## Trial, purchase and privacy
+
+- Free download with a **7-day free trial** (a $0 non-consumable "7-Day Trial", as Apple requires) and a one-off **$0.99 unlock** (StoreKit 2). After the trial only new refreshes are locked; history and saved ideas stay readable. Debug builds without store products run as a "Developer build". `IdeaScout/IdeaScout.storekit` lets purchases be tested from Xcode.
+- A **welcome flow** on first launch, and a **consent screen** before any data goes to a cloud AI (asked per provider, withdrawable in Settings).
+- **About & privacy** screen with data-source credits; `PrivacyInfo.xcprivacy` privacy manifest; export-compliance flag set.
+- Submission drafts in `docs/`: privacy policy, App Store listing, App Privacy answers, review notes, in-app purchase setup, and a data-source terms check.
 
 ## Reliability
 
@@ -52,9 +59,13 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 - A good digest is never replaced by a weaker one (Claude > Apple > keywords) on the same day; the failure is noted on the kept digest instead.
 - Background refreshes stop cleanly when iOS ends the app's background time.
 
-## Secrets
+## Secrets and configuration
 
-API keys are **never** stored in source. Each provider's API key is entered in Settings and saved in the iPhone Keychain. `.gitignore` excludes `*.xcconfig` and `.env`.
+API keys are **never** stored in source. Each AI provider's key is entered by the user in the app (Settings → Advanced → AI & costs, or the welcome screens) and saved in the iPhone Keychain.
+
+**No configuration file is required to build.** The project has no `.xcconfig` keys today. If one is ever needed (for example a signing override), put it in an untracked `*.xcconfig` file: `.gitignore` already excludes `*.xcconfig` and `.env`. Never commit key values.
+
+Placeholders to fill in before an App Store release: `AppInfo.privacyPolicyURL` and `AppInfo.supportEmail` in `IdeaScout/Views/AboutView.swift` (the matching rows stay hidden while they're empty).
 
 ## Building
 
@@ -65,26 +76,38 @@ xcodegen generate        # creates IdeaScout.xcodeproj from project.yml (the pro
 open IdeaScout.xcodeproj
 ```
 
-Set your own signing team in `project.yml` (`DEVELOPMENT_TEAM`) if you aren't the original author, then build to a device.
+Set your own signing team in `project.yml` (`DEVELOPMENT_TEAM`) if you aren't the original author, then build to a device. Running from Xcode uses `IdeaScout/IdeaScout.storekit`, so the trial and unlock can be tested without real purchases. Debug builds installed another way show "Developer build" and skip the purchase check until the products exist in App Store Connect; Release builds never do.
 
 ## Tests
 
-Swift Testing tests in `IdeaScoutTests/`, covering source parsing, theme building, ranking, Claude request, streaming and retry handling, the killer-idea filter and evidence caps, the cost tracker and daily limit, digest replacement rules, the English filter, scan settings, the business-focus rules, the demand sources, signal-based selection and pain clusters. Run them in Xcode with ⌘U, or:
+Swift Testing tests in `IdeaScoutTests/IdeaScoutTests.swift` (no network calls; samples of each source and AI reply format). They cover source parsing, theme building and ranking, the Claude and OpenAI-style request and reply handling, streaming and retries, the killer-idea rules and evidence caps, costs and the daily limit, digest replacement rules, the English filter, scan settings, business-focus rules, demand sources, signal-based selection, pain clusters, saving ideas, and the trial and consent rules.
+
+Run them in Xcode with ⌘U, or on a connected iPhone:
 
 ```sh
-xcodebuild test -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'platform=iOS,id=<device-id>'
+xcodebuild -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'id=<device-id>' build-for-testing
+xcodebuild -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'id=<device-id>' test-without-building
 ```
+
+(The iOS simulator on the original development Mac hangs, so tests are run on a physical iPhone.)
 
 ## Project layout
 
 ```
 IdeaScout/
-  App/        App entry point, DigestService (fetch → filter → summarise → save)
-  AI/         Claude, Apple and keyword summarisers; prompts; KillerEngine
-  Sources/    One fetcher per source
-  Models/     SwiftData models (Digest, Theme, Item, Idea, KillerIdea)
-  Support/    Settings, Keychain, cost tracker, notifications
-  Views/      SwiftUI screens
+  App/        IdeaScoutApp (entry point), DigestService (the refresh: fetch → select → AI → save)
+  AI/         Summarizer protocol and prompts, LLMSummarizer (cloud AI, Claude client, retries),
+              OpenAICompatibleClient (all other providers), AIProviders (provider and model catalogue),
+              AppleSummarizer (on-device), KillerEngine (ideas and devil's advocate)
+  Sources/    Fetchers (supply, timing, pain points, shared helpers), DemandFetchers (demand sources)
+  Models/     Value types and SwiftData models (Digest, Theme, Item, Idea, KillerIdea)
+  Store/      StoreManager (free trial and one-off unlock)
+  Support/    AppSettings, Keychain, UsageTracker (costs), notifications
+  Views/      SwiftUI screens: tabs, Ideas, day view, Saved, Settings, welcome/consent, paywall, About
+  PrivacyInfo.xcprivacy, IdeaScout.storekit (test only, not shipped)
 IdeaScoutTests/
+docs/         Privacy policy, App Store kit, data-source terms check
 project.yml   XcodeGen project definition
+ARCHITECTURE.md  How the app fits together
+CLAUDE.md     Conventions for working on this repo
 ```

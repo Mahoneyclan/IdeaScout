@@ -1,0 +1,45 @@
+{
+  "identifier" : "8F3C1D2E",
+  "nonRenewingSubscriptions" : [ ],
+  "products" : [
+    {
+      "displayPrice" : "0.0",
+      "familyShareable" : false,
+      "internalID" : "6740000001",
+      "localizations" : [
+        {
+          "description" : "Use every feature of IdeaScout free for 7 days.",
+          "displayName" : "7-Day Trial",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.mahoney.IdeaScout.trial7",
+      "referenceName" : "7-Day Trial",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : true,
+      "internalID" : "6740000002",
+      "localizations" : [
+        {
+          "description" : "Unlock IdeaScout forever with a one-off purchase.",
+          "displayName" : "Unlock IdeaScout",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.mahoney.IdeaScout.unlock",
+      "referenceName" : "Full Unlock",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_storeKitErrors" : [ ]
+  },
+  "subscriptionGroups" : [ ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

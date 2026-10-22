@@ -1,14 +1,25 @@
+// OpenAICompatibleClient.swift
+// The client for every cloud provider except Claude: ChatGPT, Gemini (including Gemma), Grok, DeepSeek,
+// Qwen, GLM, Kimi and MiMo all accept OpenAI-style chat requests. Per-model differences (JSON mode,
+// system messages, reasoning effort, reply-length field) come from AIProviders.swift.
+
 import Foundation
 
 /// One client for every provider that accepts OpenAI-style chat requests: ChatGPT, Gemini, Grok,
-/// DeepSeek and Mistral. The reply is converted to the same shape as Claude's, so parsing and
+/// DeepSeek, Qwen, GLM, Kimi and MiMo. The reply is converted to the same shape as Claude's, so parsing and
 /// cost tracking are shared.
 struct OpenAICompatibleClient: LLMClient {
+    /// Which provider (decides the address and request details).
     let provider: AIProvider
+    /// The user's key for this provider, from the Keychain. Sent only to `provider.chatURL` as a Bearer token.
     let apiKey: String
+    /// API model ID.
     let model: String
+    /// Price used for cost tracking.
     let price: ModelPrice
 
+    /// Sends one request (see LLMClient.complete). On HTTP 400 it tries once more without the optional
+    /// settings, because some models reject `reasoning_effort` or the reply-length field rather than ignoring them.
     func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
         guard let url = provider.chatURL else { throw SummarizerError.unavailable }
         let full = Self.requestBody(provider: provider, model: model, system: system, prompt: prompt, schema: schema, effort: effort)
@@ -22,6 +33,8 @@ struct OpenAICompatibleClient: LLMClient {
         }
     }
 
+    /// Sends with retries, converts the reply and records its cost.
+    /// - Throws: `LLMHTTPError`, network errors, or decoding errors.
     private func send(_ body: [String: Any], to url: URL, feature: String) async throws -> Data {
         let payload = try JSONSerialization.data(withJSONObject: body)
         return try await LLMRetry.run {
@@ -45,6 +58,16 @@ struct OpenAICompatibleClient: LLMClient {
 
     // MARK: - Request / response shapes (static so they can be unit tested)
 
+    /// The chat request for a provider and model.
+    /// - Parameters:
+    ///   - provider: Decides JSON mode, message layout and setting names (with `model`).
+    ///   - model: API model ID.
+    ///   - system: Instructions.
+    ///   - prompt: The user message.
+    ///   - schema: JSON Schema the reply must follow.
+    ///   - effort: Reasoning effort, sent only where the model accepts it.
+    ///   - optionalSettings: `false` leaves out `reasoning_effort` and the reply-length field (used for the retry).
+    /// - Returns: The JSON body. With JSON mode `.object` or `.prompt`, the schema is written into the instructions.
     static func requestBody(provider: AIProvider, model: String, system: String, prompt: String, schema: [String: Any],
                             effort: String, optionalSettings: Bool = true) -> [String: Any] {
         let caps = provider.capabilities(for: model)
@@ -71,7 +94,10 @@ struct OpenAICompatibleClient: LLMClient {
         return body
     }
 
-    /// Turns an OpenAI-style chat reply into the Claude-style shape the parsers expect.
+    /// Turns an OpenAI-style chat reply into the Claude-style shape the parsers expect: `finish_reason` "length"
+    /// becomes "max_tokens", "content_filter" or a refusal becomes "refusal"; cached prompt tokens are split
+    /// out of the input count so they're priced at the cache rate.
+    /// - Throws: Decoding errors, or `.badResponse` if there's no reply.
     static func convert(_ data: Data) throws -> Data {
         struct Response: Decodable {
             struct Choice: Decodable {

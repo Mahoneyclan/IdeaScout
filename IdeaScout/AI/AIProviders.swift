@@ -1,17 +1,36 @@
+// AIProviders.swift
+// The catalogue of AI providers and models the user can choose from (Settings → Advanced → AI & costs):
+// names, countries, key pages, models with list prices, and how each provider's API must be called.
+// This list is maintained by hand; prices and model names change, so check them before each release
+// (an automatic update routine is planned).
+
 import Foundation
+
+// MARK: - Prices and capabilities
 
 /// Price per million tokens, in US dollars.
 struct ModelPrice: Equatable, Sendable {
+    /// Uncached input tokens.
     var input: Double
+    /// Output tokens (including any reasoning tokens).
     var output: Double
+    /// Input tokens read from the provider's cache.
     var cachedInput: Double
 
+    /// Creates a price. If no cache price is given, assumes the common 10% of the input price.
     init(input: Double, output: Double, cachedInput: Double? = nil) {
         self.input = input
         self.output = output
         self.cachedInput = cachedInput ?? input / 10
     }
 
+    /// Dollar cost of one call.
+    /// - Parameters:
+    ///   - inTokens: Uncached input tokens.
+    ///   - outTokens: Output tokens.
+    ///   - cacheWrite: Tokens written to the cache, charged at 1.25× input (Anthropic's rate; others rarely report it).
+    ///   - cacheRead: Tokens read from the cache.
+    /// - Returns: US dollars.
     func cost(input inTokens: Int, output outTokens: Int, cacheWrite: Int = 0, cacheRead: Int = 0) -> Double {
         (Double(inTokens) * input + Double(outTokens) * output
          + Double(cacheWrite) * input * 1.25 + Double(cacheRead) * cachedInput) / 1_000_000
@@ -27,26 +46,38 @@ enum JSONMode: Sendable {
 
 /// What a model accepts, beyond the basics.
 struct ModelCapabilities: Equatable, Sendable {
+    /// How to ask for JSON.
     var json: JSONMode
+    /// Whether the `reasoning_effort` setting may be sent.
     var reasoningEffort: Bool
+    /// Whether a separate system (instructions) message is accepted; if not, instructions go in the user message.
     var systemMessage = true
 }
 
+/// One model offered in Settings.
 struct ModelOption: Equatable, Sendable, Identifiable {
+    /// The API model ID, sent in requests.
     var id: String
+    /// Name shown in the model picker.
     var label: String
+    /// List price, used by the cost tracker.
     var price: ModelPrice
     /// nil = the provider's usual capabilities.
     var capabilities: ModelCapabilities? = nil
 }
 
+// MARK: - Providers
+
 /// The AI services IdeaScout can use. Only one is active at a time. Apple runs on the iPhone;
 /// the others are cloud services that need the user's own API key (kept in the Keychain).
 enum AIProvider: String, CaseIterable, Identifiable, Sendable {
+    /// Raw values are stored in settings and Keychain names; don't rename. Removed providers fall back to Claude.
     case claude, openai, gemini, grok, deepseek, qwen, glm, kimi, mimo, apple
 
+    /// Identity for SwiftUI pickers.
     var id: String { rawValue }
 
+    /// Full name shown in pickers, e.g. "Claude (Anthropic)".
     var label: String {
         switch self {
         case .claude: "Claude (Anthropic)"
@@ -96,8 +127,10 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Whether it needs an API key and sends data off the phone (everything except Apple).
     var isCloud: Bool { self != .apple }
 
+    /// Where this provider's API key is stored; `nil` for Apple.
     var keychainKey: Keychain.Key? {
         switch self {
         case .claude: .claudeAPIKey
@@ -130,11 +163,12 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// Models offered in Settings. The first is the recommended default. Prices are list prices
-    /// as checked in October 2026; any other model can be typed in with its own price.
+    /// as checked in October 2026 (Claude's from Anthropic's pricing page); any other model can be typed in with its own price.
     var models: [ModelOption] {
         switch self {
         case .claude:
-            [ModelOption(id: "claude-opus-5-5", label: "Claude Opus 5.5", price: ModelPrice(input: 4, output: 20, cachedInput: 0.2)),
+            [ModelOption(id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", price: ModelPrice(input: 2, output: 10, cachedInput: 0.1)),
+             ModelOption(id: "claude-opus-5-5", label: "Claude Opus 5.5 (sharper, 2× cost)", price: ModelPrice(input: 4, output: 20, cachedInput: 0.2)),
              ModelOption(id: "claude-fable-5-1", label: "Claude Fable 5.1 (most capable, ~2.5× cost)",
                          price: ModelPrice(input: 10, output: 50, cachedInput: 0.25))]
         case .openai:
@@ -162,9 +196,11 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// The default model: the first in `models`.
     var recommendedModel: String { models.first?.id ?? "" }
 
-    /// Gemini 4 Argon's introductory price ends on 1 December 2026.
+    /// Gemini 4 Argon's price: introductory until 1 December 2026 (UTC), then doubled. Evaluated when the model
+    /// list is read, so a running app picks up the new price after a relaunch.
     static func geminiArgonPrice(on date: Date = .now) -> ModelPrice {
         let end = DateComponents(calendar: Calendar(identifier: .gregorian), timeZone: TimeZone(identifier: "UTC"),
                                  year: 2026, month: 12, day: 1).date!
@@ -173,6 +209,8 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
 
     // MARK: - How to call the OpenAI-compatible providers
 
+    /// The chat-completions address for OpenAI-compatible providers; `nil` for Claude (own client) and Apple.
+    /// Qwen uses Alibaba's US (Virginia) region so data stays outside China.
     var chatURL: URL? {
         switch self {
         case .openai: URL(string: "https://api.openai.com/v1/chat/completions")
@@ -199,6 +237,7 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Capabilities for a model: its own if listed with special needs (e.g. Gemma), otherwise the provider's.
     func capabilities(for model: String) -> ModelCapabilities {
         models.first { $0.id == model }?.capabilities ?? defaultCapabilities
     }
@@ -206,5 +245,7 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
     /// Name of the reply-length setting (OpenAI's newer models renamed it).
     var maxTokensField: String { self == .openai ? "max_completion_tokens" : "max_tokens" }
 
+    /// Reply length limit. Large enough for a 300-item trend reply; DeepSeek gets less because its documented
+    /// maximum is lower.
     var maxTokens: Int { self == .deepseek ? 16_000 : 32_000 }
 }

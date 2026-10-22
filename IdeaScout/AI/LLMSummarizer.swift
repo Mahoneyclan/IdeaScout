@@ -1,28 +1,53 @@
+// LLMSummarizer.swift
+// Cloud AI support. Defines LLMClient (one request → structured JSON reply) and LLMSummarizer (trends,
+// pain clusters, translations and variant suggestions using any LLMClient), plus the Claude client
+// (streaming), the retry rules shared by every provider, and the stream decoder.
+// OpenAICompatibleClient.swift holds the client for every other provider.
+
 import Foundation
+
+// MARK: - Client protocol and summariser
 
 /// A cloud AI that returns structured JSON. Every client returns its reply in the same shape
 /// (a Claude-style message with `content`, `stop_reason` and `usage`), so the parsers and the
 /// cost tracker work the same for every provider. API keys come from the Keychain, never from source.
 protocol LLMClient: Sendable {
+    /// Which provider this client talks to.
     var provider: AIProvider { get }
+    /// The API model ID used for requests.
     var model: String { get }
+    /// Sends one request and returns the reply. Records the call's cost in UsageTracker. Retries temporary failures.
+    /// - Parameters:
+    ///   - system: Instructions.
+    ///   - prompt: The user message (usually the numbered item list).
+    ///   - schema: JSON Schema the reply must follow.
+    ///   - effort: "medium" or "high": how hard the model should think, where supported.
+    ///   - feature: Cost-tracker label, e.g. "Trends".
+    /// - Returns: The reply in Claude's message format (`content`, `stop_reason`, `usage`).
+    /// - Throws: `LLMHTTPError`, network errors, `StreamAssembler.StreamError`, or `CancellationError`.
     func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data
 }
 
 /// Trends, pain clusters, translations and variant suggestions from whichever cloud AI is chosen.
 struct LLMSummarizer: Summarizer {
+    /// The chosen provider's client (from AppSettings.makeClient).
     let client: any LLMClient
+    /// Stored on the digest, e.g. "Claude" or "Gemini".
     var name: String { client.provider.shortName }
+    /// The user's "Items the AI reads" setting (the key name predates other providers).
     var maxItems: Int { AppSettings.claudeMaxItems }
 
+    /// Trends and clusters only (drops translations and noise).
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft] {
         try await analyse(items).drafts
     }
 
+    /// Asks for English translations of non-English items in the same call, so no separate request is needed.
     static let translationInstruction = "\nSome projects are not in English. For every project whose title or description "
         + "is not in English, add an entry to translations with its number and an English title and description. "
         + "Leave English projects out of translations."
 
+    /// Asks for pain clusters from Demand items and a list of noise items, alongside the trends.
     static let clusterInstruction = """
 
     Items are tagged Demand (complaints, requests, spending), Supply (things being built) or Timing (new startups \
@@ -35,6 +60,8 @@ struct LLMSummarizer: Summarizer {
     off-topic or useless as product evidence.
     """
 
+    /// One call that returns trends, pain clusters, translations and noise (feature "Trends").
+    /// - Throws: Errors from `complete` or the parsers.
     func analyse(_ items: [FetchedItem]) async throws -> Analysis {
         let prompt = "Window: the last \(AppSettings.trendWindowDays) days (pain points: \(AppSettings.painWindowDays) days).\n\n"
             + "Projects:\n" + Prompts.itemList(items, detailLimit: 200)
@@ -44,6 +71,8 @@ struct LLMSummarizer: Summarizer {
                         translations: try Self.parseTranslations(data), noise: try Self.parseNoise(data))
     }
 
+    /// Money-making variants for a saved project (feature "Variant suggestions").
+    /// - Throws: Errors from `complete` or the parser.
     func extensions(for idea: IdeaBrief) async throws -> [String] {
         let data = try await client.complete(system: Prompts.extensionInstructions, prompt: Prompts.ideaText(idea),
                                              schema: Self.extensionSchema, effort: "medium", feature: "Variant suggestions")
@@ -53,6 +82,8 @@ struct LLMSummarizer: Summarizer {
 
     // MARK: - Schemas and parsing (static so they can be unit tested)
 
+    /// JSON Schema for the trend step. Every property is required and extra properties are forbidden, as
+    /// strict structured outputs require. Keep in sync with the parsers below and the prompt wording.
     static let themeSchema: [String: Any] = [
         "type": "object",
         "properties": [
@@ -107,6 +138,7 @@ struct LLMSummarizer: Summarizer {
         "additionalProperties": false,
     ]
 
+    /// JSON Schema for "Suggest variants".
     static let extensionSchema: [String: Any] = [
         "type": "object",
         "properties": ["suggestions": ["type": "array", "items": ["type": "string"]]],
@@ -114,7 +146,8 @@ struct LLMSummarizer: Summarizer {
         "additionalProperties": false,
     ]
 
-    /// Returns the JSON text Claude produced, after checking it wasn't refused or cut off.
+    /// Returns the JSON text the AI produced, after checking it wasn't refused or cut off.
+    /// - Throws: `SummarizerError.refused`, or `.badResponse` if cut off at the length limit or empty.
     static func extractJSON(_ data: Data) throws -> Data {
         struct Response: Decodable {
             struct Block: Decodable { let type: String; let text: String? }
@@ -130,6 +163,7 @@ struct LLMSummarizer: Summarizer {
         return Data(text.utf8)
     }
 
+    /// - Returns: English title and description by 1-based item number (first entry wins on duplicates).
     static func parseTranslations(_ data: Data) throws -> [Int: Translation] {
         struct Out: Decodable {
             struct T: Decodable { let number: Int; let title: String; let description: String }
@@ -140,6 +174,7 @@ struct LLMSummarizer: Summarizer {
                           uniquingKeysWith: { first, _ in first })
     }
 
+    /// - Returns: Pain clusters as drafts with `isPainCluster` set (empty if the reply has none).
     static func parseClusters(_ data: Data) throws -> [ThemeDraft] {
         struct Out: Decodable {
             struct C: Decodable {
@@ -154,11 +189,13 @@ struct LLMSummarizer: Summarizer {
         }
     }
 
+    /// - Returns: 1-based numbers of items the AI marked as noise.
     static func parseNoise(_ data: Data) throws -> Set<Int> {
         struct Out: Decodable { let noise_numbers: [Int]? }
         return Set(try JSONDecoder().decode(Out.self, from: try extractJSON(data)).noise_numbers ?? [])
     }
 
+    /// - Returns: Trend drafts with the AI's scores (clamped later by ThemeBuilder).
     static func parseThemes(_ data: Data) throws -> [ThemeDraft] {
         struct Out: Decodable {
             struct T: Decodable {
@@ -183,13 +220,19 @@ struct LLMSummarizer: Summarizer {
 /// Calls the Claude Messages API directly with URLSession (there is no official Swift SDK).
 /// The reply is streamed, so long requests are less likely to time out.
 struct ClaudeClient: LLMClient {
+    /// Always Claude.
     let provider = AIProvider.claude
+    /// The user's Anthropic key, from the Keychain. Only ever sent to Anthropic in the `x-api-key` header.
     let apiKey: String
+    /// Model ID (Sonnet by default).
     var model = AIProvider.claude.recommendedModel
+    /// Price used for cost tracking.
     var price = AIProvider.claude.models[0].price
 
+    /// Anthropic's Messages API.
     static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
 
+    /// Streams one request, with retries. See LLMClient.complete.
     func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
         var body = Self.requestBody(system: system, prompt: prompt, schema: schema, effort: effort, model: model)
         body["stream"] = true
@@ -197,6 +240,8 @@ struct ClaudeClient: LLMClient {
         return try await LLMRetry.run { try await sendOnce(payload, feature: feature) }
     }
 
+    /// One attempt: sends the request, reads the event stream and rebuilds a normal reply.
+    /// - Throws: `LLMHTTPError` for non-2xx replies (with up to 300 characters of the body), stream or network errors.
     private func sendOnce(_ payload: Data, feature: String) async throws -> Data {
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
@@ -228,6 +273,8 @@ struct ClaudeClient: LLMClient {
         return data
     }
 
+    /// The Messages API request: structured output via `output_config.format`, effort level, a 32,000-token
+    /// reply limit (enough for 300-item trend replies), and `fallbacks: "default"` (server-side model fallback).
     static func requestBody(system: String, prompt: String, schema: [String: Any], effort: String = "medium",
                             model: String = AIProvider.claude.recommendedModel) -> [String: Any] {
         [
@@ -247,6 +294,7 @@ struct ClaudeClient: LLMClient {
 // MARK: - Retries (shared by every provider)
 
 enum LLMRetry {
+    /// Waits before the first and second retry.
     static let delays: [Double] = [3, 15]
 
     /// Runs `operation`, retrying temporary failures up to twice. Cancellation is passed straight through.
@@ -283,10 +331,15 @@ enum LLMRetry {
     }
 }
 
+/// A non-success HTTP reply from any provider, with a plain-English description.
 struct LLMHTTPError: LocalizedError, Equatable {
+    /// Provider name used in the message.
     var provider = "Claude"
+    /// HTTP status code.
     let status: Int
+    /// Seconds the server asked us to wait, if it said.
     let retryAfter: Double?
+    /// Start of the reply body, for diagnosis.
     let detail: String
 
     var errorDescription: String? {
@@ -304,18 +357,27 @@ struct LLMHTTPError: LocalizedError, Equatable {
 /// parsers and the cost tracker work unchanged. Text from every text block is joined (a mid-stream
 /// model fallback can split the reply into several blocks); thinking and other blocks are skipped.
 struct StreamAssembler {
+    /// An error event in the stream, or a stream that ended before `message_stop`. Treated as retryable.
     struct StreamError: LocalizedError {
         let message: String
         var errorDescription: String? { "Claude stream error: \(message)" }
     }
 
+    /// Content block type by index ("text", "thinking", "fallback"…).
     private var blockTypes: [Int: String] = [:]
+    /// Text collected per block index.
     private var texts: [Int: String] = [:]
+    /// Why the reply ended (e.g. "end_turn", "max_tokens", "refusal").
     private(set) var stopReason: String?
+    /// Token counts, largest value seen per field.
     private var usage: [String: Int] = [:]
+    /// Set by `message_start`; usage is only known after it.
     private(set) var started = false
+    /// Set by `message_stop`; a reply without it is incomplete.
     private(set) var finished = false
 
+    /// Processes one line of the event stream. Non-data lines and unknown events are ignored.
+    /// - Throws: `StreamError` if the stream reports an error.
     mutating func consume(_ line: String) throws {
         guard line.hasPrefix("data:") else { return }
         let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
@@ -355,6 +417,8 @@ struct StreamAssembler {
         for (key, raw) in dict { if let n = raw as? Int { usage[key] = max(usage[key] ?? 0, n) } }
     }
 
+    /// The finished reply in normal Messages API shape.
+    /// - Throws: `StreamError` if the stream didn't start and finish.
     func response() throws -> Data {
         guard started, finished else { throw StreamError(message: "the reply ended early") }
         let text = blockTypes.keys.sorted().filter { blockTypes[$0] == "text" }.compactMap { texts[$0] }.joined()
@@ -363,6 +427,7 @@ struct StreamAssembler {
         return try JSONSerialization.data(withJSONObject: object)
     }
 
+    /// Just the usage seen so far, so a failed stream's input tokens can still be recorded; `nil` if it never started.
     func usageOnlyResponse() -> Data? {
         guard started else { return nil }
         return try? JSONSerialization.data(withJSONObject: ["usage": usage])
