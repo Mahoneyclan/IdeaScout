@@ -56,9 +56,8 @@ final class DigestService: ObservableObject {
         let (fetched, warnings) = await fetchAll(since: since, painSince: painSince, topics: topics)
         if Task.isCancelled { return }
 
-        let enabledSources = SourceKind.allCases.filter(AppSettings.isEnabled).count
-        let perSource = Self.perSourceLimit(maxItems: AppSettings.claudeMaxItems, sources: enabledSources)
-        let items = Self.select(fetched.filter(ProductFilter.isProductShaped), perSource: perSource)
+        let useful = fetched.filter { $0.source == .fieldNotes || ProductFilter.isProductShaped($0) }
+        let items = Self.selectBySignal(useful, maxItems: AppSettings.claudeMaxItems)
         guard !items.isEmpty else {
             lastError = warnings.isEmpty ? "No new projects found. Try again later." : warnings.joined(separator: "\n")
             return
@@ -76,13 +75,16 @@ final class DigestService: ObservableObject {
         }
 
         var drafts: [ThemeDraft]
+        var noise = Set<Int>()
         // Claude translates non-English items; without it, leave out items that clearly aren't English.
         let candidates = summarizer is ClaudeSummarizer ? items : items.filter(LanguageFilter.isEnglishOrUnclear)
         var batch = Array(candidates.prefix(summarizer.maxItems))
         do {
-            let (themeDrafts, translations) = try await summarizer.themesWithTranslations(for: batch)
-            drafts = themeDrafts
-            batch = Translations.apply(translations, to: batch)
+            let analysis = try await summarizer.analyse(batch)
+            drafts = analysis.drafts
+            // Never treat the owner's own field notes as noise.
+            noise = analysis.noise.filter { batch.indices.contains($0 - 1) && batch[$0 - 1].source != .fieldNotes }
+            batch = Translations.apply(analysis.translations, to: batch)
         } catch {
             if Self.isCancellation(error) || Task.isCancelled { return }  // don't save a half-finished digest
             allWarnings.append("\(summarizer.name) summary failed (\(error.localizedDescription)); grouped by keyword instead.")
@@ -104,7 +106,7 @@ final class DigestService: ObservableObject {
         }
 
         // Save the trends straight away, so a later failure (or iOS stopping the app) can't lose them.
-        let builtThemes = ThemeBuilder.assemble(drafts, items: batch)
+        let builtThemes = ThemeBuilder.assemble(drafts, items: batch, noise: noise)
         existing.forEach(context.delete)
         let digest = Digest(day: today, summarizer: summarizer.name, warnings: allWarnings)
         context.insert(digest)
@@ -112,6 +114,8 @@ final class DigestService: ObservableObject {
             let theme = Theme(title: built.title, summary: built.summary, order: order, opportunities: built.opportunities)
             theme.apply(built.scores, built.reasons)
             theme.isCatchAll = built.isCatchAll
+            theme.isPainCluster = built.isPainCluster
+            theme.buyer = built.buyer; theme.workaround = built.workaround; theme.paySignals = built.paySignals
             context.insert(theme)
             theme.digest = digest
             for fetchedItem in built.items {
@@ -131,7 +135,10 @@ final class DigestService: ObservableObject {
                     let leaderboard = topKillerIdeas(context: context, limit: 10).map { "\($0.title): \($0.pitch)" }
                     let results = try await KillerEngine(claude: claude).run(
                         .init(themes: builtThemes, items: batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard,
-                              focusIndustry: AppSettings.focusIndustry))
+                              focusIndustry: AppSettings.focusIndustry,
+                              painClusters: builtThemes.filter(\.isPainCluster).map {
+                                  "\($0.title) (buyer: \($0.buyer); today: \($0.workaround); pays: \($0.paySignals); \($0.items.count) items)"
+                              }))
                     mergeKillerIdeas(results, items: batch, context: context)
                     if results.isEmpty {
                         digest.warnings.append("The devil's advocate rejected every idea today.")
@@ -177,14 +184,13 @@ final class DigestService: ObservableObject {
         now.addingTimeInterval(-Double(days) * 24 * 60 * 60)
     }
 
-    /// Enough items per source to fill Claude's limit, but never fewer than 25.
-    nonisolated static func perSourceLimit(maxItems: Int, sources: Int) -> Int {
-        max(25, Int((Double(maxItems) / Double(max(sources, 1))).rounded(.up)))
-    }
-
     private func fetchAll(since: Date, painSince: Date, topics: [String]) async -> ([FetchedItem], [String]) {
         // Vibe-code and games first so an item they share with Show HN keeps the more specific label.
         var fetchers: [any ItemFetcher] = []
+        if AppSettings.isEnabled(.fieldNotes) { fetchers.append(FieldNotesFetcher(notes: AppSettings.fieldNotes)) }
+        if AppSettings.isEnabled(.appReviews) { fetchers.append(AppReviewsFetcher()) }
+        if AppSettings.isEnabled(.ausTender) { fetchers.append(AusTenderFetcher()) }
+        if AppSettings.isEnabled(.atlassian) { fetchers.append(AtlassianFetcher()) }
         if AppSettings.isEnabled(.vibeCode) { fetchers.append(VibeCodeFetcher()) }
         if AppSettings.isEnabled(.games) { fetchers.append(GamesFetcher()) }
         if AppSettings.isEnabled(.painPoints) { fetchers.append(PainPointsFetcher()) }
@@ -201,7 +207,7 @@ final class DigestService: ObservableObject {
         let results = await withTaskGroup(of: (Int, Result<[FetchedItem], Error>).self) { group in
             for (index, fetcher) in fetchers.enumerated() {
                 group.addTask {
-                    let start = fetcher.kind == .painPoints ? painSince : since
+                    let start = [.painPoints, .appReviews].contains(fetcher.kind) ? painSince : since
                     do { return (index, .success(try await fetcher.fetch(since: start, topics: topics))) }
                     catch { return (index, .failure(error)) }
                 }
@@ -226,6 +232,35 @@ final class DigestService: ObservableObject {
     nonisolated static func dedupe(_ items: [FetchedItem]) -> [FetchedItem] {
         var seenKeys = Set<String>(), seenURLs = Set<String>()
         return items.filter { seenKeys.insert($0.key).inserted && seenURLs.insert($0.url.absoluteString.lowercased()).inserted }
+    }
+
+    /// Fills Claude's quota by signal: field notes first, then 40% demand, 40% supply and 20% timing,
+    /// each shared fairly between its sources. Unused share rolls over. The result interleaves the
+    /// signals so a summariser that reads only the first few items still sees each kind.
+    nonisolated static func selectBySignal(_ items: [FetchedItem], maxItems: Int) -> [FetchedItem] {
+        let notes = items.filter { $0.source == .fieldNotes }
+        let rest = items.filter { $0.source != .fieldNotes }
+        let budget = max(maxItems - notes.count, 0)
+        // Each signal's items in fair per-source order (best of each source first).
+        let ordered = Dictionary(uniqueKeysWithValues: Signal.allCases.map { signal in
+            (signal, select(rest.filter { $0.source.signal == signal }, perSource: budget))
+        })
+        var taken: [Signal: Int] = [:]
+        for signal in Signal.allCases {
+            taken[signal] = min(ordered[signal]!.count, Int((Double(budget) * signal.share).rounded()))
+        }
+        var spare = budget - taken.values.reduce(0, +)
+        for signal in Signal.allCases where spare > 0 {
+            let extra = min(spare, ordered[signal]!.count - taken[signal]!)
+            taken[signal]! += extra
+            spare -= extra
+        }
+        let lists = Signal.allCases.map { Array(ordered[$0]!.prefix(taken[$0]!)) }
+        var result = notes
+        for i in 0..<(lists.map(\.count).max() ?? 0) {
+            for list in lists where i < list.count { result.append(list[i]) }
+        }
+        return result
     }
 
     /// Takes the highest-scoring items from each source so no single source dominates.

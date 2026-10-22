@@ -4,6 +4,7 @@ import SwiftData
 /// Where an item came from.
 enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case github, hackerNews, productHunt, vibeCode, huggingFace, devTo, games, painPoints, ycombinator, appStore, research, lobsters
+    case fieldNotes, appReviews, atlassian, ausTender
 
     var id: String { rawValue }
 
@@ -21,6 +22,10 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .appStore: "App Store top paid"
         case .research: "AI research"
         case .lobsters: "Lobsters"
+        case .fieldNotes: "My business challenges"
+        case .appReviews: "App Store complaints"
+        case .atlassian: "Atlassian Marketplace"
+        case .ausTender: "AusTender"
         }
     }
 
@@ -38,6 +43,20 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .appStore: "bag"
         case .research: "doc.text.magnifyingglass"
         case .lobsters: "ladybug"
+        case .fieldNotes: "note.text"
+        case .appReviews: "star.slash"
+        case .atlassian: "puzzlepiece.extension"
+        case .ausTender: "building.2"
+        }
+    }
+
+    /// What kind of evidence the source gives. Each kind gets a share of the items Claude reads,
+    /// so builder-heavy sources can't crowd out evidence of demand.
+    var signal: Signal {
+        switch self {
+        case .painPoints, .fieldNotes, .appReviews, .ausTender: .demand
+        case .ycombinator, .research: .timing
+        default: .supply
         }
     }
 
@@ -47,6 +66,21 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .games, .devTo, .lobsters, .huggingFace: false
         default: true
+        }
+    }
+}
+
+enum Signal: String, CaseIterable, Sendable {
+    case demand, supply, timing
+
+    var label: String { rawValue.capitalized }
+
+    /// Share of the items Claude reads. Unused share rolls over to the other kinds.
+    var share: Double {
+        switch self {
+        case .demand: 0.4
+        case .supply: 0.4
+        case .timing: 0.2
         }
     }
 }
@@ -133,6 +167,11 @@ struct RankWeights: Equatable, Sendable {
     var gapReason = ""
     /// The "Other new projects" bucket, always listed last.
     var isCatchAll = false
+    /// A cluster of complaints (one problem, one buyer) rather than a trend of things being built.
+    var isPainCluster = false
+    var buyer = ""
+    var workaround = ""
+    var paySignals = ""
     var digest: Digest?
     @Relationship(deleteRule: .cascade, inverse: \Item.theme) var items: [Item] = []
 

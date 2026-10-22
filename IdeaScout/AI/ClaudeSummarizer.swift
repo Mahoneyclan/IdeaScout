@@ -11,20 +11,34 @@ struct ClaudeSummarizer: Summarizer {
     static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
 
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft] {
-        try await themesWithTranslations(for: items).0
+        try await analyse(items).drafts
     }
 
     static let translationInstruction = "\nSome projects are not in English. For every project whose title or description "
         + "is not in English, add an entry to translations with its number and an English title and description. "
         + "Leave English projects out of translations."
 
-    func themesWithTranslations(for items: [FetchedItem]) async throws -> ([ThemeDraft], [Int: Translation]) {
+    static let clusterInstruction = """
+
+    Items are tagged Demand (complaints, requests, spending), Supply (things being built) or Timing (new startups \
+    and capabilities). Build the themes above from Supply and Timing items. Separately, group Demand items into 3 to 6 \
+    pain_clusters: each is one problem felt by one type of buyer. Give: title (the problem in the buyer's words), \
+    buyer (a specific role and type of business), workaround (what they do today), pay_signals (any sign they pay or \
+    would pay, e.g. prices mentioned, paid tools they're leaving, or "none seen"), summary (one sentence), and item \
+    numbers. A cluster needs at least 2 items unless one item is from "My business challenges". Those are the user's own \
+    observations from work: treat them as strong evidence. List in noise_numbers any items that are spam, \
+    off-topic or useless as product evidence.
+    """
+
+    func analyse(_ items: [FetchedItem]) async throws -> Analysis {
         let prompt = "Window: the last \(AppSettings.trendWindowDays) days (pain points: \(AppSettings.painWindowDays) days).\n\n"
             + "Projects:\n" + Prompts.itemList(items, detailLimit: 200)
-        let data = try await send(Self.requestBody(system: Prompts.themeInstructions + Self.translationInstruction,
+        let data = try await send(Self.requestBody(system: Prompts.themeInstructions + Self.translationInstruction
+                                                       + Self.clusterInstruction,
                                                    prompt: prompt, schema: Self.themeSchema),
                                   feature: "Trends")
-        return (try Self.parseThemes(data), try Self.parseTranslations(data))
+        return Analysis(drafts: try Self.parseThemes(data) + (try Self.parseClusters(data)),
+                        translations: try Self.parseTranslations(data), noise: try Self.parseNoise(data))
     }
 
     func extensions(for idea: IdeaBrief) async throws -> [String] {
@@ -159,8 +173,22 @@ struct ClaudeSummarizer: Summarizer {
                     "additionalProperties": false,
                 ],
             ],
+            "pain_clusters": [
+                "type": "array",
+                "items": [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string"], "buyer": ["type": "string"], "workaround": ["type": "string"],
+                        "pay_signals": ["type": "string"], "summary": ["type": "string"],
+                        "item_numbers": ["type": "array", "items": ["type": "integer"]],
+                    ],
+                    "required": ["title", "buyer", "workaround", "pay_signals", "summary", "item_numbers"],
+                    "additionalProperties": false,
+                ],
+            ],
+            "noise_numbers": ["type": "array", "items": ["type": "integer"]],
         ],
-        "required": ["themes", "translations"],
+        "required": ["themes", "translations", "pain_clusters", "noise_numbers"],
         "additionalProperties": false,
     ]
 
@@ -195,6 +223,25 @@ struct ClaudeSummarizer: Summarizer {
         let out = try JSONDecoder().decode(Out.self, from: try extractJSON(data))
         return Dictionary((out.translations ?? []).map { ($0.number, Translation(title: $0.title, detail: $0.description)) },
                           uniquingKeysWith: { first, _ in first })
+    }
+
+    static func parseClusters(_ data: Data) throws -> [ThemeDraft] {
+        struct Out: Decodable {
+            struct C: Decodable {
+                let title, buyer, workaround, pay_signals, summary: String
+                let item_numbers: [Int]
+            }
+            let pain_clusters: [C]?
+        }
+        return (try JSONDecoder().decode(Out.self, from: try extractJSON(data)).pain_clusters ?? []).map {
+            ThemeDraft(title: $0.title, summary: $0.summary, opportunities: [], itemNumbers: $0.item_numbers,
+                       isPainCluster: true, buyer: $0.buyer, workaround: $0.workaround, paySignals: $0.pay_signals)
+        }
+    }
+
+    static func parseNoise(_ data: Data) throws -> Set<Int> {
+        struct Out: Decodable { let noise_numbers: [Int]? }
+        return Set(try JSONDecoder().decode(Out.self, from: try extractJSON(data)).noise_numbers ?? [])
     }
 
     static func parseThemes(_ data: Data) throws -> [ThemeDraft] {

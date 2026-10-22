@@ -46,6 +46,7 @@ struct KillerEngine {
         var aboutMe: String
         var leaderboard: [String]
         var focusIndustry = ""
+        var painClusters: [String] = []
     }
 
     /// Every idea the devil's advocate didn't kill is kept (up to 3 a day). Whether it counts as a
@@ -68,8 +69,10 @@ struct KillerEngine {
     static let generateInstructions = """
     You are a sharp B2B product strategist hunting for a "killer" business software idea: one with real pain, \
     a specific business buyer with a budget, a reason it is possible now, a clear gap, and a good fit for the person described.
-    Using the trends and numbered projects (projects tagged "Pain points" are people complaining or asking for tools \
-    that don't exist; "Y Combinator" are business startups investors just funded and "App Store top paid" are apps \
+    Using the pain clusters, trends and numbered projects (items tagged Demand show need: "Pain points" are people \
+    complaining or asking for tools that don't exist, "App Store complaints" are 1-2 star reviews of business apps \
+    people pay for, "AusTender" is government IT spending, and "My business challenges" are the user's own observations from \
+    work, which are strong evidence; "Y Combinator" are business startups investors just funded and "App Store top paid" are apps \
     people pay for, so both show what buyers already pay for; "AI research" shows new capabilities that explain why now), \
     propose 5 distinct product ideas. Rules:
     - The buyer must be a business: small and medium businesses are the main market (software they would pay \
@@ -78,7 +81,7 @@ struct KillerEngine {
     - At least 2 of the 5 must be aimed at the focus industry given below.
     - Each must replace a named manual task, spreadsheet or costly workaround that the buyer does today.
     - Each must be a concrete product someone could start building this month, not a trend summary.
-    Prefer ideas supported by several projects and by pain points. Only propose ideas you would genuinely back; \
+    Prefer ideas that solve a pain cluster and are supported by several projects. Cite at least one Demand item for each idea. Only propose ideas you would genuinely back; \
     quality matters more than variety.
     For each idea give: a short memorable title; a one-sentence pitch; the buyer (a specific role in a specific \
     type of business); pricing (model and price per customer per month); replaces (the manual task or workaround \
@@ -98,8 +101,11 @@ struct KillerEngine {
         var parts: [String] = []
         parts.append("About me: " + (context.aboutMe.isEmpty ? "(not provided)" : context.aboutMe))
         if !context.focusIndustry.isEmpty { parts.append("Focus industry: " + context.focusIndustry) }
-        let trends = context.themes.filter { !$0.isCatchAll }.map { theme in
+        let trends = context.themes.filter { !$0.isCatchAll && !$0.isPainCluster }.map { theme in
             "- \(theme.title): \(theme.summary)" + (theme.opportunities.isEmpty ? "" : " Variants: " + theme.opportunities.joined(separator: " | "))
+        }
+        if !context.painClusters.isEmpty {
+            parts.append("Pain clusters (demand):\n" + context.painClusters.map { "- \($0)" }.joined(separator: "\n"))
         }
         parts.append("Trends this week:\n" + trends.joined(separator: "\n"))
         parts.append("Projects:\n" + Prompts.itemList(context.items, detailLimit: 160))
@@ -251,13 +257,16 @@ struct KillerEngine {
         .map { $0 }
     }
 
-    /// High pain needs a pain-point item as evidence; high willingness to pay needs a pain point or proof
-    /// that people pay (a funded startup or a top paid app). Enforced here rather than trusted to the prompt.
+    /// High pain needs a complaint or field note as evidence; high willingness to pay needs a complaint or proof
+    /// that people pay (a funded startup, a top paid app, a government contract). Enforced here rather than trusted to the prompt.
+    static let painEvidence: Set<SourceKind> = [.painPoints, .appReviews, .fieldNotes]
+    static let payEvidence: Set<SourceKind> = [.painPoints, .appReviews, .ycombinator, .appStore, .ausTender]
+
     static func capped(_ review: Review, evidence: [FetchedItem]) -> Review {
         var r = review
         let sources = Set(evidence.map(\.source))
-        if !sources.contains(.painPoints) { r.pain = min(r.pain, unprovenCap) }
-        if sources.isDisjoint(with: [.painPoints, .ycombinator, .appStore]) { r.willingToPay = min(r.willingToPay, unprovenCap) }
+        if sources.isDisjoint(with: painEvidence) { r.pain = min(r.pain, unprovenCap) }
+        if sources.isDisjoint(with: payEvidence) { r.willingToPay = min(r.willingToPay, unprovenCap) }
         return r
     }
 

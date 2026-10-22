@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 struct SettingsView: View {
     @AppStorage(AppSettings.Keys.topics) private var topics = AppSettings.defaultTopics
@@ -15,6 +16,8 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Keys.trendWindowDays) private var trendWindow = AppSettings.defaultTrendWindowDays
     @AppStorage(AppSettings.Keys.painWindowDays) private var painWindow = AppSettings.defaultPainWindowDays
     @AppStorage(AppSettings.Keys.claudeMaxItems) private var maxItems = AppSettings.defaultClaudeMaxItems
+    @AppStorage(AppSettings.Keys.fieldNotes) private var fieldNotes = ""
+    @Query(sort: \Digest.createdAt, order: .reverse) private var digests: [Digest]
     @State private var usage = UsageTracker.summary()
 
     @State private var notificationsAllowed: Bool?
@@ -53,6 +56,16 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    TextField("e.g. Contractor timesheets are re-keyed into SAP every Friday", text: $fieldNotes, axis: .vertical)
+                        .lineLimit(3...10)
+                        .focused($keyboardOpen)
+                } header: {
+                    Text("My Business Challenges")
+                } footer: {
+                    Text("One business challenge per line: things you see people struggle with, re-key, chase or pay too much for. Each line is treated as strong evidence of demand. Tap Done to close the keyboard.")
+                }
+
+                Section {
                     TextField("e.g. energy, utilities and enterprise IT", text: $focusIndustry)
                         .focused($keyboardOpen)
                 } header: {
@@ -80,10 +93,17 @@ struct SettingsView: View {
                     Text("How far back to look, and how many items Claude reads per refresh (with rough cost per refresh). Longer windows favour older, already-popular posts; pain points are rarer, so they get their own window. More items cost more and take longer.")
                 }
 
-                Section("Sources") {
-                    ForEach(SourceKind.allCases) { kind in
-                        SourceToggle(kind: kind)
+                Section {
+                    let counts = Dictionary(grouping: digests.first?.themes.flatMap(\.items) ?? [], by: \.source).mapValues(\.count)
+                    ForEach(Signal.allCases, id: \.self) { signal in
+                        ForEach(SourceKind.allCases.filter { $0.signal == signal }) { kind in
+                            SourceToggle(kind: kind, count: counts[kind])
+                        }
                     }
+                } header: {
+                    Text("Sources")
+                } footer: {
+                    Text("Grouped as demand (complaints and spending), supply (things being built) and timing (new startups and research). Claude reads about 40% demand, 40% supply and 20% timing; the number is how many items each source gave in the last digest.")
                 }
 
                 Section {
@@ -254,14 +274,26 @@ private struct WeightSlider: View {
 
 private struct SourceToggle: View {
     let kind: SourceKind
+    var count: Int?
     @AppStorage private var isOn: Bool
 
-    init(kind: SourceKind) {
+    init(kind: SourceKind, count: Int? = nil) {
         self.kind = kind
+        self.count = count
         _isOn = AppStorage(wrappedValue: kind.enabledByDefault, AppSettings.Keys.sourceEnabled(kind))
     }
 
     var body: some View {
-        Toggle(isOn: $isOn) { Label(kind.label, systemImage: kind.symbol) }
+        Toggle(isOn: $isOn) {
+            Label {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(kind.label)
+                    Text(kind.signal.label + (count.map { " · \($0) in last digest" } ?? ""))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: kind.symbol)
+            }
+        }
     }
 }

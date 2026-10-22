@@ -18,6 +18,7 @@ enum AppSettings {
         static let trendWindowDays = "trendWindowDays"
         static let painWindowDays = "painWindowDays"
         static let claudeMaxItems = "claudeMaxItems"
+        static let fieldNotes = "fieldNotes"
         static func sourceEnabled(_ kind: SourceKind) -> String { "source.\(kind.rawValue)" }
     }
 
@@ -63,6 +64,9 @@ enum AppSettings {
         return value ?? defaultFocusIndustry
     }
     static let defaultFocusIndustry = "energy, utilities and enterprise IT"
+
+    /// Work problems the owner has seen, one per line. Each becomes a demand item.
+    static var fieldNotes: String { UserDefaults.standard.string(forKey: Keys.fieldNotes) ?? "" }
 
     /// How far back sources are searched for trends, and (separately) for pain points, which are rarer.
     static var trendWindowDays: Int { UserDefaults.standard.object(forKey: Keys.trendWindowDays) as? Int ?? defaultTrendWindowDays }

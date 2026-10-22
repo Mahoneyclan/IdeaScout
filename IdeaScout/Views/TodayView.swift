@@ -64,7 +64,8 @@ struct DigestContentView: View {
 
     var body: some View {
         let starred = Set(ideas.map(\.key))
-        let withItems = Theme.ranked(digest.themes, weights: weights).filter { !visibleItems($0).isEmpty }
+        let clusters = gamesOnly ? [] : digest.sortedThemes.filter(\.isPainCluster)
+        let withItems = Theme.ranked(digest.themes.filter { !$0.isPainCluster }, weights: weights).filter { !visibleItems($0).isEmpty }
         let themes = showBelowBar ? withItems : withItems.filter { $0.clears(qualityBar, weights: weights) }
         let hiddenCount = withItems.count - themes.count
         let best = KillerIdea.bestToShow(killerIdeas)
@@ -78,6 +79,35 @@ struct DigestContentView: View {
                     Label(best.contains(where: \.isFromToday) ? "Best ideas today" : "Best idea this week", systemImage: "flame")
                 } footer: {
                     Text("Survived a devil's-advocate check. \"Killer\" ideas score at least \(qualityBar.formatted()) / 5; near-misses are just below. See all in Top Ideas.")
+                }
+            }
+            if !clusters.isEmpty {
+                Section {
+                    ForEach(clusters) { cluster in
+                        DisclosureGroup {
+                            if !cluster.workaround.isEmpty {
+                                LabeledContent("Today they", value: cluster.workaround).font(.subheadline)
+                            }
+                            if !cluster.paySignals.isEmpty {
+                                LabeledContent("Pay signals", value: cluster.paySignals).font(.subheadline)
+                            }
+                            ForEach(cluster.sortedItems) { item in
+                                ItemRow(item: item, isStarred: starred.contains(item.key)) {
+                                    service.toggleStar(item, ideas: ideas, context: context)
+                                }
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(cluster.title).font(.subheadline.bold())
+                                Text("\(cluster.buyer) · \(cluster.items.count) item\(cluster.items.count == 1 ? "" : "s")")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Label("Pain clusters", systemImage: "exclamationmark.bubble")
+                } footer: {
+                    Text("Problems businesses complain about or pay to work around, from complaints, App Store reviews, government spending and your business challenges.")
                 }
             }
             ForEach(themes) { theme in
@@ -204,7 +234,7 @@ struct ItemRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            if let url = item.url {
+            if let url = item.url, url.scheme?.hasPrefix("http") == true {
                 Link(destination: url) { content }.buttonStyle(.plain)
             } else {
                 content

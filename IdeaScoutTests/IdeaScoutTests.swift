@@ -234,7 +234,7 @@ struct NewSourceTests {
         let fresh = FetchedItem(key: "n", source: .devTo, title: "Fresh", detail: "", url: URL(string: "https://x.dev")!,
                                 score: 12, postedAt: .now)
         let list = Prompts.itemList([fresh], detailLimit: 50)
-        #expect(list == "1. [DEV #showdev, score 12, new] Fresh")
+        #expect(list == "1. [Supply · DEV #showdev, score 12, new] Fresh")
     }
 
     @Test func momentumRewardsFreshness() {
@@ -371,7 +371,7 @@ struct EnglishOnlyTests {
 
     @Test func schemaRequiresTranslations() {
         let required = ClaudeSummarizer.themeSchema["required"] as? [String]
-        #expect(required == ["themes", "translations"])
+        #expect(required?.contains("translations") == true)
     }
 }
 
@@ -615,12 +615,6 @@ struct BusinessFocusTests {
 }
 
 struct ScanSettingsTests {
-    @Test func perSourceLimitFillsClaudesQuota() {
-        #expect(DigestService.perSourceLimit(maxItems: 150, sources: 8) == 25)
-        #expect(DigestService.perSourceLimit(maxItems: 300, sources: 8) == 38)
-        #expect(DigestService.perSourceLimit(maxItems: 100, sources: 0) == 100)
-    }
-
     @Test func windowsAndDefaults() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         #expect(DigestService.windowStart(days: 14, now: now) == now.addingTimeInterval(-14 * 86400))
@@ -628,5 +622,118 @@ struct ScanSettingsTests {
         #expect(AppSettings.defaultPainWindowDays == 14)
         #expect(AppSettings.defaultClaudeMaxItems == 300)
         #expect(AppSettings.estimatedRefreshCost(items: 300).lowerBound < AppSettings.estimatedRefreshCost(items: 500).lowerBound)
+    }
+}
+
+struct DemandSourceTests {
+    @Test func fieldNotesBecomeDemandItems() {
+        let items = FieldNotesFetcher.items(from: "Timesheets re-keyed into SAP\n\n  Meter data chased by email  ", postedAt: .now)
+        #expect(items.map(\.title) == ["Timesheets re-keyed into SAP", "Meter data chased by email"])
+        #expect(items.allSatisfy { $0.source == .fieldNotes && $0.source.signal == .demand })
+        #expect(Set(items.map(\.key)).count == 2)
+    }
+
+    @Test func parsesTopGrossingChartAndRotatesApps() throws {
+        let chart = """
+        {"feed":{"entry":[{"im:name":{"label":"LinkedIn"},"id":{"label":"x","attributes":{"im:id":"1"}}},
+                          {"im:name":{"label":"Xero"},"id":{"label":"x","attributes":{"im:id":"2"}}}]}}
+        """
+        let apps = try AppReviewsFetcher.parseChart(Data(chart.utf8), country: "au", genre: "Business")
+        #expect(apps.map(\.name) == ["LinkedIn", "Xero"])
+        #expect(apps[1].rank == 2)
+        let many = (1...25).map { AppReviewsFetcher.App(id: "\($0)", name: "A\($0)", country: "au", genre: "Business", rank: $0) }
+        let today = AppReviewsFetcher.todaysApps(many + many, day: 3)
+        #expect(today.count == AppReviewsFetcher.appsPerDay)
+        #expect(today.allSatisfy { $0.rank > 5 })
+    }
+
+    @Test func keepsOnlyRecentLowStarReviews() throws {
+        let json = """
+        {"feed":{"entry":[
+          {"id":{"label":"1"},"title":{"label":"Too expensive now"},"content":{"label":"Price doubled, moving to a spreadsheet"},"im:rating":{"label":"1"},"updated":{"label":"2026-10-20T10:00:00-07:00"}},
+          {"id":{"label":"2"},"title":{"label":"Great"},"content":{"label":"Love it"},"im:rating":{"label":"5"},"updated":{"label":"2026-10-20T10:00:00-07:00"}},
+          {"id":{"label":"3"},"title":{"label":"Old moan"},"content":{"label":"Bad"},"im:rating":{"label":"2"},"updated":{"label":"2025-01-01T10:00:00-07:00"}}]}}
+        """
+        let app = AppReviewsFetcher.App(id: "9", name: "Xero", country: "au", genre: "Business", rank: 7)
+        let since = ISO8601DateFormatter().date(from: "2026-10-01T00:00:00Z")!
+        let items = try AppReviewsFetcher.parseReviews(Data(json.utf8), app: app, since: since)
+        #expect(items.count == 1)
+        #expect(items[0].title == "Xero: Too expensive now")
+        #expect(items[0].detail.hasPrefix("★1 review (#7 top-grossing Business, AU): Price doubled"))
+    }
+
+    @Test func parsesAtlassianAddons() throws {
+        let json = """
+        {"_embedded":{"addons":[{"id":"5","name":"Daily Worklog","tagLine":"Log time fast","_links":{"alternate":{"href":"/apps/5/daily-worklog"}},
+          "_embedded":{"categories":[{"name":"Time tracking"}],"distribution":{"totalInstalls":12}}}]}}
+        """
+        let items = try AtlassianFetcher.parse(Data(json.utf8), label: "new", postedAt: .now)
+        #expect(items.first?.title == "Daily Worklog")
+        #expect(items.first?.detail == "Log time fast (new Jira/Confluence app, 12 installs; Time tracking)")
+        #expect(items.first?.url.absoluteString == "https://marketplace.atlassian.com/apps/5/daily-worklog")
+    }
+
+    @Test func keepsOnlyITContractsFromAusTender() throws {
+        let json = """
+        {"releases":[
+          {"parties":[{"name":"Hays","roles":["supplier"]},{"name":"MDBA","roles":["procuringEntity"]}],
+           "contracts":[{"id":"CN1","description":"Temporary personnel","items":[{"classification":{"id":"80111600"}}],"value":{"amount":"473917.25"}}]},
+          {"parties":[{"name":"Acme IT","roles":["supplier"]},{"name":"Dept of Energy","roles":["procuringEntity"]}],
+           "contracts":[{"id":"CN2","description":"Asset management software licences","dateSigned":"2026-10-21T23:23:09Z","items":[{"classification":{"id":"43231500"}}],"value":{"amount":"250000"}}]}],
+         "links":{"next":"https://api.tenders.gov.au/next"}}
+        """
+        let page = try AusTenderFetcher.parse(Data(json.utf8))
+        #expect(page.items.map(\.title) == ["Asset management software licences"])
+        #expect(page.items[0].detail == "Dept of Energy paid AUD \(250000.formatted()) to Acme IT")
+        #expect(page.items[0].score == 250)
+        #expect(page.next?.absoluteString == "https://api.tenders.gov.au/next")
+    }
+
+    @Test func selectionReservesSharesBySignal() {
+        let supply = (0..<200).map { item("s\($0)", .github) }
+        let demand = (0..<50).map { item("d\($0)", .painPoints) }
+        let timing = (0..<10).map { item("t\($0)", .ycombinator) }
+        let notes = [item("n1", .fieldNotes)]
+        let out = DigestService.selectBySignal(supply + demand + timing + notes, maxItems: 101)
+        #expect(out.count == 101)
+        #expect(out.first?.source == .fieldNotes)
+        let bySignal = Dictionary(grouping: out.dropFirst(), by: \.source.signal).mapValues(\.count)
+        // 100 slots: demand 40, supply 40, timing 20; timing has only 10, so the spare goes to demand first.
+        #expect(bySignal[.demand] == 50)
+        #expect(bySignal[.timing] == 10)
+        #expect(bySignal[.supply] == 40)
+    }
+
+    @Test func clustersAndNoiseAreAssembled() throws {
+        let inner = #"{"themes":[],"translations":[],"pain_clusters":[{"title":"Re-keying timesheets","buyer":"Payroll officer at a contractor firm","workaround":"Excel every Friday","pay_signals":"none seen","summary":"s","item_numbers":[1,2]}],"noise_numbers":[3]}"#
+        let data = try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": inner]], "stop_reason": "end_turn"])
+        let clusters = try ClaudeSummarizer.parseClusters(data)
+        #expect(clusters.first?.isPainCluster == true)
+        let built = ThemeBuilder.assemble(clusters, items: [item("a", .painPoints), item("b", .fieldNotes), item("c"), item("d")],
+                                          noise: try ClaudeSummarizer.parseNoise(data))
+        #expect(built.first?.isPainCluster == true && built.first?.buyer == "Payroll officer at a contractor firm")
+        #expect(built.first?.scores == ThemeScores())
+        #expect(built.last?.isCatchAll == true && built.last?.items.map(\.key) == ["d"])
+        let required = ClaudeSummarizer.themeSchema["required"] as? [String]
+        #expect(required == ["themes", "translations", "pain_clusters", "noise_numbers"])
+    }
+
+    @Test func complaintsUnlockPainAndPayScores() {
+        let review = KillerEngine.Review(title: "A", survives: true, objection: "", competitors: "", verdict: "",
+                                         pain: 5, willingToPay: 5, timing: 4, gap: 4, fit: 4)
+        let capped = KillerEngine.capped(review, evidence: [item("r", .appReviews)])
+        #expect(capped.pain == 5 && capped.willingToPay == 5)
+        let tender = KillerEngine.capped(review, evidence: [item("t", .ausTender)])
+        #expect(tender.pain == 3 && tender.willingToPay == 5)
+    }
+
+    @Test func demandItemsKeepMoreText() {
+        let long = String(repeating: "x", count: 400)
+        let d = FetchedItem(key: "d", source: .appReviews, title: "T", detail: long, url: URL(string: "https://x.dev")!, score: 0, postedAt: .distantPast)
+        let s = FetchedItem(key: "s", source: .github, title: "T", detail: long, url: URL(string: "https://y.dev")!, score: 0, postedAt: .distantPast)
+        let lines = Prompts.itemList([d, s], detailLimit: 200).split(separator: "\n")
+        #expect(lines[0].hasPrefix("1. [Demand · App Store complaints] T"))
+        #expect(lines[0].filter { $0 == "x" }.count == 300)
+        #expect(lines[1].filter { $0 == "x" }.count == 140)
     }
 }

@@ -12,6 +12,19 @@ struct ThemeDraft: Equatable, Sendable {
     var viability = 0
     var gap = 0
     var reasons = ScoreReasons()
+    // Pain clusters (Claude only): one problem, one buyer, built from demand items.
+    var isPainCluster = false
+    var buyer = ""
+    var workaround = ""
+    var paySignals = ""
+}
+
+/// Everything a summariser returns for one refresh.
+struct Analysis: Sendable {
+    var drafts: [ThemeDraft]
+    var translations: [Int: Translation] = [:]
+    /// 1-based numbers of items the AI judged to be noise; they're left out of "Other projects".
+    var noise: Set<Int> = []
 }
 
 /// What the summariser needs to suggest extensions for a saved idea.
@@ -26,8 +39,8 @@ protocol Summarizer: Sendable {
     /// How many items this summariser can handle in one go.
     var maxItems: Int { get }
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft]
-    /// Themes plus English translations of non-English items, keyed by 1-based item number.
-    func themesWithTranslations(for items: [FetchedItem]) async throws -> ([ThemeDraft], [Int: Translation])
+    /// Themes plus, where supported, pain clusters, English translations and noise.
+    func analyse(_ items: [FetchedItem]) async throws -> Analysis
     func extensions(for idea: IdeaBrief) async throws -> [String]
 }
 
@@ -37,9 +50,9 @@ struct Translation: Equatable, Sendable {
 }
 
 extension Summarizer {
-    /// Summarisers that can't translate return no translations.
-    func themesWithTranslations(for items: [FetchedItem]) async throws -> ([ThemeDraft], [Int: Translation]) {
-        (try await themes(for: items), [:])
+    /// Summarisers that can't translate or cluster return themes only.
+    func analyse(_ items: [FetchedItem]) async throws -> Analysis {
+        Analysis(drafts: try await themes(for: items))
     }
 }
 
@@ -80,7 +93,9 @@ enum Prompts {
     static let themeInstructions = """
     You are an analyst who spots new business software opportunities in recent launches, startups and complaints.
     The numbered projects were launched or gained traction recently; "new" marks the last 24 hours. \
-    Items tagged "Pain points" are people complaining or asking for tools that don't exist: use them as evidence of demand \
+    Items tagged "Pain points" are people complaining or asking for tools that don't exist, "App Store complaints" \
+    are 1-2 star reviews of business apps people pay for, "AusTender" is Australian government IT spending and \
+    "My business challenges" are the user's own observations from work: use them as evidence of demand \
     inside related themes rather than as themes of their own. Items tagged "Y Combinator" are business startups investors \
     just funded and "App Store top paid" are apps people pay for: treat both as evidence that a market pays. \
     Favour trends that businesses would pay for over developer tools and consumer novelties. \
@@ -149,10 +164,17 @@ enum Prompts {
         return lines.joined(separator: "\n")
     }
 
+    /// One line per item, tagged with its signal and source. Demand items (complaints) keep more text,
+    /// since the useful part is often deep in the comment; supply items keep less.
     static func itemList(_ items: [FetchedItem], detailLimit: Int, now: Date = .now) -> String {
         items.enumerated().map { index, item in
-            let detail = item.detail.isEmpty ? "" : " — " + String(item.detail.prefix(detailLimit))
-            var tags = [item.source.label]
+            let limit = switch item.source.signal {
+            case .demand: max(detailLimit, 300)
+            case .supply: min(detailLimit, 140)
+            case .timing: detailLimit
+            }
+            let detail = item.detail.isEmpty ? "" : " — " + String(item.detail.prefix(limit))
+            var tags = ["\(item.source.signal.label) · \(item.source.label)"]
             if item.score > 0 { tags.append("score \(item.score)") }
             if item.isNew(now: now) { tags.append("new") }
             return "\(index + 1). [\(tags.joined(separator: ", "))] \(item.title)\(detail)"
@@ -178,15 +200,26 @@ enum ThemeBuilder {
         var scores = ThemeScores()
         var reasons = ScoreReasons()
         var isCatchAll = false
+        var isPainCluster = false
+        var buyer = ""
+        var workaround = ""
+        var paySignals = ""
     }
 
-    static func assemble(_ drafts: [ThemeDraft], items: [FetchedItem]) -> [Built] {
+    /// `noise`: 1-based item numbers to leave out of "Other projects" (they can still be in a theme).
+    static func assemble(_ drafts: [ThemeDraft], items: [FetchedItem], noise: Set<Int> = []) -> [Built] {
         var used = Set<Int>()
         var built: [Built] = []
         for draft in drafts {
             let indices = draft.itemNumbers.map { $0 - 1 }.filter { items.indices.contains($0) && used.insert($0).inserted }
             guard !indices.isEmpty else { continue }
             let members = indices.map { items[$0] }
+            if draft.isPainCluster {
+                built.append(Built(title: draft.title, summary: draft.summary, opportunities: [], items: members,
+                                   isPainCluster: true, buyer: draft.buyer, workaround: draft.workaround,
+                                   paySignals: draft.paySignals))
+                continue
+            }
             let momentum = Ranking.momentum(of: members, among: items)
             var reasons = draft.reasons
             reasons.momentum = momentum.reason
@@ -196,7 +229,7 @@ enum ThemeBuilder {
                                                    viability: Ranking.clamp(draft.viability), gap: Ranking.clamp(draft.gap)),
                                reasons: reasons))
         }
-        let leftovers = items.indices.filter { !used.contains($0) }.map { items[$0] }
+        let leftovers = items.indices.filter { !used.contains($0) && !noise.contains($0 + 1) }.map { items[$0] }
         if !leftovers.isEmpty {
             built.append(Built(title: "Other projects", summary: "Projects that didn't fit a trend this week.",
                                opportunities: [], items: leftovers, isCatchAll: true))

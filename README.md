@@ -19,6 +19,10 @@ All output is in English. Non-English items are translated by Claude, or filtere
 
 | Source | What it gives |
 |---|---|
+| My business challenges | Problems you type in Settings, one per line; treated as strong demand evidence |
+| App Store complaints | 1–2 star reviews (last 60 days) of 12 top-grossing business, finance and productivity apps a day, AU and US stores |
+| AusTender | The 15 largest Australian government IT contracts in the window |
+| Atlassian Marketplace | Trending and new Jira/Confluence add-ons |
 | Pain points | HN comments such as "I wish there was…", "too expensive", "alternative to", plus Ask HN (own window, default 14 days) |
 | Y Combinator | B2B companies from the newest batch with 30+ of them, plus Launch HN posts |
 | App Store | Top paid iPhone apps |
@@ -33,6 +37,8 @@ All output is in English. Non-English items are translated by Claude, or filtere
 | Lobsters *(off by default)* | "Show" posts |
 
 Developer and game sources start switched off so ideas lean towards business buyers; turn any of them back on in Settings.
+
+Sources are grouped as **demand** (complaints, your challenges, government spending), **supply** (things being built) and **timing** (new startups and research). Claude reads about 40% demand, 40% supply and 20% timing, with unused share going to demand first. Claude also groups demand items into **pain clusters** (one problem, one buyer) that the idea step must draw on, and flags noise so it's left out of "Other projects".
 
 ## AI summarisers
 
@@ -64,7 +70,7 @@ Set your own signing team in `project.yml` (`DEVELOPMENT_TEAM`) if you aren't th
 
 ## Tests
 
-57 Swift Testing tests in `IdeaScoutTests/`, covering source parsing, theme building, ranking, Claude request, streaming and retry handling, the killer-idea filter and evidence caps, the cost tracker and daily limit, digest replacement rules, the English filter, scan settings and the business-focus rules. Run them in Xcode with ⌘U, or:
+65 Swift Testing tests in `IdeaScoutTests/`, covering source parsing, theme building, ranking, Claude request, streaming and retry handling, the killer-idea filter and evidence caps, the cost tracker and daily limit, digest replacement rules, the English filter, scan settings, the business-focus rules, the demand sources, signal-based selection and pain clusters. Run them in Xcode with ⌘U, or:
 
 ```sh
 xcodebuild test -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'platform=iOS,id=<device-id>'
