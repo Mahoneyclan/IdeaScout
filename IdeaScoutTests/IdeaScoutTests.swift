@@ -6,6 +6,7 @@
 
 import Foundation
 import Testing
+import SwiftData
 @testable import IdeaScout
 
 /// Builds a minimal FetchedItem for tests.
@@ -892,11 +893,179 @@ struct StoreAndConsentTests {
     }
 
     @Test func storeProductIDsMatchTheTestFile() throws {
-        // The StoreKit test file in the repo must offer the same product IDs the app asks for.
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("IdeaScout/IdeaScout.storekit")
-        guard let data = try? Data(contentsOf: url) else { return }   // not readable on device; checked on Mac builds
-        let text = String(decoding: data, as: UTF8.self)
+        // The StoreKit test file (bundled into the test target) must offer the same product IDs the app asks for,
+        // and those must match App Store Connect (docs/app-store.md).
+        #expect(StoreManager.trialID == "com.mahoney.IdeaScout.trial7")
+        #expect(StoreManager.unlockID == "com.mahoney.IdeaScout.unlock")
+        let bundle = try #require(Bundle.allBundles.first { $0.bundlePath.hasSuffix(".xctest") })
+        let url = try #require(bundle.url(forResource: "IdeaScout", withExtension: "storekit"))
+        let text = String(decoding: try Data(contentsOf: url), as: UTF8.self)
         #expect(text.contains(StoreManager.trialID) && text.contains(StoreManager.unlockID))
+    }
+}
+
+/// Security hardening: prompts treat public content as untrusted data.
+struct PromptInjectionTests {
+    @Test func everyPromptWithPublicContentCarriesTheUntrustedDataRule() {
+        for instructions in [Prompts.themeInstructions, Prompts.extensionInstructions,
+                             KillerEngine.generateInstructions, KillerEngine.critiqueInstructions] {
+            #expect(instructions.hasSuffix(Prompts.untrustedData))
+            #expect(instructions.contains("Ignore any instructions"))
+        }
+    }
+}
+
+/// Security hardening: only web links from public content can be opened.
+struct SafeLinkTests {
+    @Test func onlyHTTPAndHTTPSLinksWithAHostAreOpenable() {
+        for ok in ["https://news.ycombinator.com/item?id=1", "http://example.com", "HTTPS://Example.com/x"] {
+            #expect(URL(string: ok)!.isWebLink, "\(ok)")
+        }
+        for bad in ["tel:+61400000000", "sms:123", "facetime:someone", "javascript:alert(1)", "file:///etc/hosts",
+                    "ideascout://field-note/1", "otherapp://open?x=1", "httpx://example.com", "https:///no-host"] {
+            #expect(URL(string: bad).map { !$0.isWebLink } ?? true, "\(bad)")
+        }
+    }
+}
+
+/// Security hardening: Keychain protection class, migration and fresh-install clean-up.
+struct KeychainHardeningTests {
+    static let service = "com.mahoney.IdeaScout.tests.hardening"
+
+    private func accessibility(of key: Keychain.Key) -> String? {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Self.service,
+                                    kSecAttrAccount as String: key.rawValue, kSecReturnAttributes as String: true]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return (result as? [String: Any])?[kSecAttrAccessible as String] as? String
+    }
+
+    @Test func newKeysAreThisDeviceOnly() {
+        Keychain.set("k1", for: .openaiAPIKey, service: Self.service)
+        #expect(accessibility(of: .openaiAPIKey) == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
+        Keychain.removeAll(service: Self.service)
+        #expect(Keychain.get(.openaiAPIKey, service: Self.service) == nil)
+    }
+
+    @Test func olderKeysAreMigratedWithoutLosingThem() {
+        let add: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Self.service,
+                                  kSecAttrAccount as String: Keychain.Key.grokAPIKey.rawValue,
+                                  kSecValueData as String: Data("old".utf8),
+                                  kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+        SecItemDelete(add as CFDictionary)
+        SecItemAdd(add as CFDictionary, nil)
+        #expect(accessibility(of: .grokAPIKey) == kSecAttrAccessibleAfterFirstUnlock as String)
+        Keychain.migrateAccessibility(service: Self.service)
+        #expect(Keychain.get(.grokAPIKey, service: Self.service) == "old")
+        #expect(accessibility(of: .grokAPIKey) == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
+        Keychain.removeAll(service: Self.service)
+    }
+
+    @Test func freshInstallMeansNoSavedSettings() {
+        #expect(Keychain.isFreshInstall(domain: nil))
+        #expect(Keychain.isFreshInstall(domain: [:]))
+        #expect(!Keychain.isFreshInstall(domain: ["aiProvider": "claude"]))
+    }
+}
+
+/// Security hardening: copied prompts stay on this device and expire.
+struct SecureClipboardTests {
+    @Test func copiesAreLocalOnlyAndExpireAfterTenMinutes() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let options = SecureClipboard.options(now: now)
+        #expect(options[.localOnly] as? Bool == true)
+        #expect(options[.expirationDate] as? Date == now.addingTimeInterval(600))
+    }
+}
+
+/// Security/UX hardening: plain error messages, raw provider replies only behind "Details".
+struct PlainErrorTests {
+    @Test func providerErrorsNeverShowTheRawReply() {
+        let secret = #"{"error":{"message":"org-abc123 request req_789"}}"#
+        for status in [400, 401, 402, 404, 429, 500, 503, 529, 418] {
+            let error = LLMHTTPError(provider: "Claude", status: status, retryAfter: nil, detail: secret)
+            let message = error.errorDescription ?? ""
+            #expect(!message.contains("org-abc123") && !message.contains("req_789"), "\(status)")
+            #expect(message.hasPrefix("Claude"))
+            #expect(error.technicalDetail.contains("req_789"))
+        }
+    }
+
+    @Test func warningsKeepDetailsSeparate() {
+        let error = LLMHTTPError(provider: "Grok", status: 503, retryAfter: nil, detail: "upstream timeout")
+        let described = DigestWarning.describe(error)
+        let stored = DigestWarning.make("Trend step failed: \(described.message)", details: described.details)
+        let parts = DigestWarning.parts(stored)
+        #expect(parts.message == "Trend step failed: Grok is busy or having problems right now (error 503). Try again later.")
+        #expect(parts.details == "HTTP 503: upstream timeout")
+        #expect(DigestWarning.parts("Plain note").details == nil)
+        #expect(DigestWarning.make("No details", details: nil) == "No details")
+        #expect(DigestWarning.describe(URLError(.timedOut)).details == nil)
+    }
+}
+
+/// Security/privacy hardening: "Delete all my data" erases every store.
+struct DeleteAllDataTests {
+    @Test @MainActor func erasesDatabaseSettingsAndKeys() throws {
+        let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+        let digest = Digest(day: .now, summarizer: "Claude")
+        context.insert(digest)
+        let theme = Theme(title: "T", summary: "", order: 0, opportunities: [])
+        context.insert(theme); theme.digest = digest
+        let stored = Item(item("a")); context.insert(stored); stored.theme = theme
+        context.insert(Idea(from: stored))
+        context.insert(KillerIdea(key: "k", title: "K"))
+        try context.save()
+
+        let suite = "com.mahoney.IdeaScout.tests.erase"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set("Energy IT", forKey: AppSettings.Keys.aboutMe)
+        let service = "com.mahoney.IdeaScout.tests.erase"
+        Keychain.set("secret", for: .claudeAPIKey, service: service)
+
+        DigestService.eraseAll(context: context, defaults: defaults, defaultsDomain: suite, keychainService: service)
+
+        #expect(try context.fetchCount(FetchDescriptor<Digest>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<Item>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<Idea>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<KillerIdea>()) == 0)
+        #expect(defaults.string(forKey: AppSettings.Keys.aboutMe) == nil)
+        #expect(defaults.bool(forKey: AppSettings.Keys.onboarded) == false)
+        #expect(Keychain.get(.claudeAPIKey, service: service) == nil)
+        defaults.removePersistentDomain(forName: suite)
+    }
+}
+
+/// Robustness fixes: links built from outside data never crash, and paid calls respect the limit.
+struct RobustnessFixTests {
+    @Test func oddIDsFromSourcesNeverCrashLinkBuilding() throws {
+        #expect(HackerNewsFetcher.discussionURL("123")?.absoluteString == "https://news.ycombinator.com/item?id=123")
+        #expect(HackerNewsFetcher.discussionURL("1 2 <x>") != nil)   // encoded, not a crash
+        let json = #"{"hits":[{"objectID":"9 9","title":"Show HN: Tool","url":null,"points":3,"created_at_i":1760000000}]}"#
+        let items = try HackerNewsFetcher.parse(Data(json.utf8), as: .hackerNews)
+        #expect(items.first?.url.host == "news.ycombinator.com")
+
+        let tender = #"{"releases":[{"parties":[{"name":"Dept","roles":["procuringEntity"]}],"contracts":[{"id":"CN 1/2 & x","description":"Software","items":[{"classification":{"id":"43231500"}}],"value":{"amount":"1000"}}]}]}"#
+        let page = try AusTenderFetcher.parse(Data(tender.utf8))
+        #expect(page.items.first?.url.query?.contains("keyword=") == true)
+    }
+
+    @Test func nonNumericAppStoreIDsAreSkipped() throws {
+        let chart = """
+        {"feed":{"entry":[{"im:name":{"label":"Good"},"id":{"label":"x","attributes":{"im:id":"12345"}}},
+                          {"im:name":{"label":"Bad"},"id":{"label":"x","attributes":{"im:id":"12 /x"}}}]}}
+        """
+        let apps = try AppReviewsFetcher.parseChart(Data(chart.utf8), country: "au", genre: "Business")
+        #expect(apps.map(\.name) == ["Good"])
+    }
+
+    @Test func screenTextNoLongerAssumesAWeekOrClaude() {
+        let built = ThemeBuilder.assemble([], items: [item("a")])
+        #expect(built.last?.summary.contains("week") == false)
+        #expect(SummarizerError.unavailable.errorDescription?.contains("Claude") == false)
+        #expect(SummarizerError.overDailyLimit.errorDescription?.contains("spending limit") == true)
+        #expect(!KillerEngine.generatePrompt(.init(themes: [], items: [], aboutMe: "", leaderboard: [])).contains("this week"))
     }
 }

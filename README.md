@@ -61,6 +61,9 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 
 ## Secrets and configuration
 
+See [SECURITY.md](SECURITY.md) for what data the app holds, how it's protected and the remaining risks.
+
+
 API keys are **never** stored in source. Each AI provider's key is entered by the user in the app (Settings → Advanced → AI & costs, or the welcome screens) and saved in the iPhone Keychain.
 
 **No configuration file is required to build.** The project has no `.xcconfig` keys today. If one is ever needed (for example a signing override), put it in an untracked `*.xcconfig` file: `.gitignore` already excludes `*.xcconfig` and `.env`. Never commit key values.
@@ -109,5 +112,6 @@ IdeaScoutTests/
 docs/         Privacy policy, App Store kit, data-source terms check
 project.yml   XcodeGen project definition
 ARCHITECTURE.md  How the app fits together
+SECURITY.md   What data is held, how it's protected, remaining risks
 CLAUDE.md     Conventions for working on this repo
 ```

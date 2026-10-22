@@ -8,3 +8,6 @@ build/
 # Secrets — never commit
 *.xcconfig
 .env
+
+# Local code-quality scorecards (not published)
+docs/scorecards/

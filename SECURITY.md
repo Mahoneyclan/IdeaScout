@@ -1,0 +1,72 @@
+# IdeaScout security and privacy
+
+Last reviewed: 22 October 2026. Covers version 1.0 (build 1).
+
+## Summary
+IdeaScout has **no server, no accounts, no analytics and no third-party code**. Everything it stores stays on the user's iPhone. The only data that leaves the phone goes to **the AI provider the user chooses, using the user's own API key, after the user agrees**, plus ordinary read-only requests to public data sources.
+
+## What data the app holds, and where
+| Data | Where it's stored | Protection |
+|---|---|---|
+| AI provider API keys | iOS **Keychain**, one entry per provider (`Support/Keychain.swift`) | `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: encrypted by iOS, never synced, never included in backups or restored to another phone. Only the last 4 characters are ever shown |
+| About me, industry focus, My Business Challenges, settings, consents | UserDefaults (app container) | iOS file encryption (available after first unlock). Included in the user's own encrypted device backup. Not secrets |
+| Digests, themes, items, saved projects, killer ideas | SwiftData database (app container) | iOS file encryption, as above. Public content plus the user's notes |
+| AI cost ledger | UserDefaults (JSON) | As above. Token counts and dollar amounts only |
+| Purchases (trial, unlock) | Apple (StoreKit) | Verified, unrevoked transactions only; nothing stored by the app |
+
+Removing data: **Settings → About & privacy → Delete all my data** erases the database, settings, consents, every Keychain key, the cost ledger, cached downloads, pending notifications and the scheduled background refresh (`DigestService.deleteAllData`). Deleting the app removes everything except Keychain entries; those are cleared automatically on the next fresh install (`Keychain.prepareOnLaunch`).
+
+## What leaves the phone
+| Destination | What's sent | When |
+|---|---|---|
+| The chosen AI provider (Anthropic, OpenAI, Google, xAI, DeepSeek, Alibaba (US region), Z.ai, Moonshot, Xiaomi) | About me, industry focus, business challenges, the collected public items, and a saved project's notes when asking for variants | Only after the user agrees on the consent screen **for that provider**. HTTPS directly to the provider, with the user's key |
+| Public sources (Hacker News/Algolia, GitHub, Apple App Store feeds, AusTender, Atlassian Marketplace, yc-oss on GitHub Pages, Hugging Face; optionally DEV, Lobsters, itch.io, Steam) | Nothing personal: plain GET requests with an "IdeaScout" User-Agent | Each refresh |
+| Apple | Purchases (StoreKit) and notifications (local only) | As used |
+
+## How it's protected
+**Secrets**
+- No keys or tokens in source, tests, Info.plist, docs or git history. The full history was scanned on 22 Oct 2026 and was clean, so nothing needs rotating.
+- Keys are stored "this device only". Keys saved by older versions were migrated automatically. Keys left from a previous install are removed on a fresh install.
+- Keys are sent only to their own provider's HTTPS address (Claude in the `x-api-key` header, others as a Bearer token).
+
+**Consent and data minimisation**
+- A per-provider consent screen (Apple Guideline 5.1.2) names the company and its country, and lists exactly what's sent. Consent is withdrawable in Settings. Without consent, the app uses Apple's on-device AI instead.
+- Users are warned not to enter confidential company or personal information, on the consent screen and in Settings.
+- The app never falls back to a different **paid** provider.
+
+**Network**
+- HTTPS only. No App Transport Security exceptions; certificate validation is the system default.
+- Timeouts: 30 s for sources, 300 s for AI. Only temporary failures are retried (twice).
+
+**Untrusted content**
+- All public content and AI replies are treated as untrusted. AI replies are decoded strictly against expected fields; item numbers are bounds-checked; scores are clamped; text is rendered as plain text.
+- **Prompt injection:** every prompt containing public text tells the model to treat it as data and ignore instructions inside it (`Prompts.untrustedData`). The AI has no tools, browsing or actions, so manipulated content can at worst skew an idea, never exfiltrate data.
+- **Links:** only `http`/`https` links with a host can be opened (`URL.isWebLink`). Phone, message, script, file and other-app links show as text.
+- Links built from source data use safe construction (encoded query values, numeric App Store IDs); malformed items are skipped rather than crashing.
+
+**Clipboard, errors and logging**
+- Copied prompts are local-only (no Universal Clipboard) and expire after 10 minutes (`SecureClipboard`).
+- Users see plain error messages. Providers' raw replies appear only behind a "Details" disclosure.
+- No `print`, `NSLog` or logging of any kind.
+
+**Money**
+- A daily AI spending limit (default $1.00) is checked before the trend and idea steps and before variant suggestions. A second refresh on the same day asks first and shows the cost.
+- Purchases: StoreKit 2, verified transactions only, refunds honoured. The developer-build purchase bypass exists only in Debug builds (`#if DEBUG`; verified absent from Release).
+
+**Platform**
+- Privacy manifest (`PrivacyInfo.xcprivacy`): no tracking; "Other user content" for app functionality, not linked to identity; UserDefaults required-reason `CA92.1`.
+- Permissions: notifications only, requested when the user taps a button. Background fetch is used for the daily refresh. No entitlements file, no URL schemes, no web views.
+- Export compliance: standard HTTPS only (`ITSAppUsesNonExemptEncryption = NO`).
+
+## Known remaining risks
+| Risk | Severity | Why it's accepted or what's next |
+|---|---|---|
+| User text and public content are processed by the chosen AI provider under **its** retention policy; five providers are China-based | Medium (user choice) | Disclosed per provider with consent and a confidential-data warning; users can choose a US provider or Apple on-device |
+| Prompt injection can still skew an individual idea | Low | Mitigated by the untrusted-data rule, the devil's-advocate pass and evidence caps; no data exposure possible |
+| About me and business challenges are in UserDefaults, included in the user's own (encrypted) backups | Low | Not secrets; "Delete all my data" removes them |
+| Trial and unlock are checked on the device only | Low | A server check isn't justified for a $0.99 app; a jailbroken phone could bypass it |
+| Apple App Store review feeds and yc-oss data have no explicit commercial-use terms | Low–Medium (legal) | See `docs/source-terms.md`; consider switching off Y Combinator data for the paid release |
+| One compiler concurrency warning (`DigestService`, Swift 5 language mode) | Low | Moving to Swift 6 strict concurrency is on the quality backlog |
+
+## Reporting a problem
+Contact the developer at the support address listed in the app (Settings → About & privacy) and on the App Store page.

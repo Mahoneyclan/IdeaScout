@@ -105,6 +105,50 @@ enum Signal: String, CaseIterable, Sendable {
     }
 }
 
+// MARK: - Warnings
+
+/// A digest warning is stored as one string: a plain message, optionally followed by technical details
+/// that the screen shows only behind a "Details" disclosure. Kept as a single string so the stored
+/// `Digest.warnings` format doesn't change.
+enum DigestWarning {
+    /// Separates the message from the details inside the stored string.
+    static let marker = "\n[details] "
+
+    /// Builds a stored warning.
+    /// - Parameters:
+    ///   - message: Plain text for the user.
+    ///   - details: Technical detail for diagnosis, or `nil`.
+    static func make(_ message: String, details: String? = nil) -> String {
+        guard let details, !details.isEmpty else { return message }
+        return message + marker + details
+    }
+
+    /// Splits a stored warning into its message and (if any) details.
+    static func parts(_ warning: String) -> (message: String, details: String?) {
+        guard let range = warning.range(of: marker) else { return (warning, nil) }
+        return (String(warning[..<range.lowerBound]), String(warning[range.upperBound...]))
+    }
+
+    /// A plain message for an error, plus its technical detail when it has one.
+    static func describe(_ error: Error) -> (message: String, details: String?) {
+        if let http = error as? LLMHTTPError { return (http.errorDescription ?? "", http.technicalDetail) }
+        return (error.localizedDescription, nil)
+    }
+}
+
+// MARK: - Safe links
+
+extension URL {
+    /// Security: links shown in the app come from public posts and APIs, so anyone could plant a
+    /// `tel:`, `sms:`, `facetime:` or another app's custom link. Only plain web links may be opened;
+    /// anything else is shown as text.
+    /// - Returns: `true` for `http` and `https` links that have a host.
+    var isWebLink: Bool {
+        guard let scheme = scheme?.lowercased(), scheme == "http" || scheme == "https" else { return false }
+        return host?.isEmpty == false
+    }
+}
+
 // MARK: - Values used while building a digest
 
 /// One post, listing, review or contract returned by a source fetcher, before it is stored.

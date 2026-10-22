@@ -14,6 +14,7 @@
 import Foundation
 import SwiftData
 import BackgroundTasks
+import UserNotifications
 
 /// Fetches sources, asks the AI for themes and ideas, and saves the day's digest. Runs on the main thread
 /// (`@MainActor`) because it drives the UI and uses the main SwiftData context; network and AI calls are
@@ -145,7 +146,9 @@ final class DigestService: ObservableObject {
             batch = Translations.apply(analysis.translations, to: batch)
         } catch {
             if Self.isCancellation(error) || Task.isCancelled { return }  // don't save a half-finished digest
-            allWarnings.append("\(summarizer.name) summary failed (\(error.localizedDescription)); grouped by keyword instead.")
+            let failure = DigestWarning.describe(error)
+            allWarnings.append(DigestWarning.make("\(summarizer.name) summary failed: \(failure.message) Grouped by keyword instead.",
+                                                  details: failure.details))
             if summarizer is LLMSummarizer { killerNote = "Killer ideas skipped because the \(summarizer.name) summary failed." }
             summarizer = KeywordSummarizer(topics: topics)
             batch = batch.filter(LanguageFilter.isEnglishOrUnclear)
@@ -156,7 +159,8 @@ final class DigestService: ObservableObject {
         if let kept = existing.max(by: { Self.quality($0.summarizer) < Self.quality($1.summarizer) }),
            !Self.shouldReplace(existing: kept.summarizer, with: summarizer.name) {
             let time = Date.now.formatted(date: .omitted, time: .shortened)
-            let note = "Refresh at \(time) didn't work (\(allWarnings.last ?? "unknown error")). Kept the earlier \(kept.summarizer) digest."
+            let reason = allWarnings.last.map { DigestWarning.parts($0).message } ?? "unknown error"
+            let note = "Refresh at \(time) didn't work (\(reason)). Kept the earlier \(kept.summarizer) digest."
             kept.warnings.append(note)
             try? context.save()
             lastError = note
@@ -208,7 +212,8 @@ final class DigestService: ObservableObject {
                     }
                 } catch {
                     if !(Self.isCancellation(error) || Task.isCancelled) {
-                        digest.warnings.append("Killer ideas failed: \(error.localizedDescription)")
+                        let failure = DigestWarning.describe(error)
+                        digest.warnings.append(DigestWarning.make("Killer ideas failed: \(failure.message)", details: failure.details))
                     }
                 }
             }
@@ -352,6 +357,50 @@ final class DigestService: ObservableObject {
         return result
     }
 
+    // MARK: - Delete all my data
+
+    /// Security/privacy: erases everything IdeaScout keeps about the user on this iPhone: history, ideas,
+    /// saved projects, settings and consents, API keys, the cost ledger, cached downloads, pending
+    /// notifications and the scheduled background refresh. Purchases aren't touched (Apple holds them;
+    /// "Restore purchases" brings them back). The welcome screens show again afterwards.
+    /// - Returns: `false` if a refresh is running (nothing is deleted).
+    @discardableResult
+    func deleteAllData() -> Bool {
+        guard !isRefreshing, let context = container?.mainContext else { return false }
+        Self.eraseAll(context: context, defaults: .standard, defaultsDomain: Bundle.main.bundleIdentifier ?? "",
+                      keychainService: Keychain.service)
+        URLCache.shared.removeAllCachedResponses()
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        BGTaskScheduler.shared.cancelAllTaskRequests()
+        lastError = nil
+        return true
+    }
+
+    /// The erasing itself, with every store passed in so tests can use throwaway ones.
+    /// - Parameters:
+    ///   - context: Database to empty (digests, themes and items cascade; ideas and killer ideas too).
+    ///   - defaults: Settings store to clear.
+    ///   - defaultsDomain: Its domain name (the bundle ID for the real app).
+    ///   - keychainService: Keychain service whose secrets are removed.
+    nonisolated static func eraseAll(context: ModelContext, defaults: UserDefaults, defaultsDomain: String,
+                                     keychainService: String) {
+        try? context.delete(model: Digest.self)
+        try? context.delete(model: Theme.self)
+        try? context.delete(model: Item.self)
+        try? context.delete(model: Idea.self)
+        try? context.delete(model: KillerIdea.self)
+        try? context.save()
+        Keychain.removeAll(service: keychainService)
+        // Remove keys one by one first so screens using @AppStorage update immediately, then the whole domain.
+        for key in (defaults.persistentDomain(forName: defaultsDomain) ?? [:]).keys { defaults.removeObject(forKey: key) }
+        defaults.removePersistentDomain(forName: defaultsDomain)
+        defaults.set(false, forKey: AppSettings.Keys.onboarded)   // shows the welcome screens again
+        // Mark the install as known, so the next launch doesn't treat it as a fresh install of a used phone.
+        defaults.set(true, forKey: "keychain.installMarker")
+        defaults.set(true, forKey: "keychain.thisDeviceOnly")
+    }
+
     // MARK: - Retired sources
 
     /// Product Hunt was removed (its API terms don't allow this use). Deletes its stored items and the
@@ -428,6 +477,8 @@ final class DigestService: ObservableObject {
     /// - Throws: `SummarizerError.unavailable` in keyword mode, or AI errors.
     func suggestExtensions(for idea: Idea) async throws {
         let summarizer = AppSettings.makeSummarizer()
+        // Paid AI calls respect the daily spending limit, like refreshes do.
+        if summarizer is LLMSummarizer && AppSettings.isOverDailyCap { throw SummarizerError.overDailyLimit }
         idea.extensions = try await summarizer.extensions(for: IdeaBrief(title: idea.title, detail: idea.detail, note: idea.note))
         try? container?.mainContext.save()
     }

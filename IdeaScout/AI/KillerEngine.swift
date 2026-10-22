@@ -121,7 +121,7 @@ struct KillerEngine {
     test (the cheapest way to check demand in 7 days, with a pass mark); the numbers of the projects that are \
     evidence for it; and same_as: if the idea is essentially the same as one on the existing leaderboard, copy \
     that title exactly, otherwise an empty string. Write everything in English.
-    """
+    """ + Prompts.untrustedData
 
     /// Pass 1: asks for 5 candidate ideas (feature "Killer ideas", medium effort).
     /// - Throws: Errors from the AI call or the parser.
@@ -143,7 +143,7 @@ struct KillerEngine {
         if !context.painClusters.isEmpty {
             parts.append("Pain clusters (demand):\n" + context.painClusters.map { "- \($0)" }.joined(separator: "\n"))
         }
-        parts.append("Trends this week:\n" + trends.joined(separator: "\n"))
+        parts.append("Trends in this scan:\n" + trends.joined(separator: "\n"))
         parts.append("Projects:\n" + Prompts.itemList(context.items, detailLimit: 160))
         parts.append("Existing leaderboard:\n" + (context.leaderboard.isEmpty ? "(empty)" : context.leaderboard.map { "- \($0)" }.joined(separator: "\n")))
         return parts.joined(separator: "\n\n")
@@ -209,7 +209,7 @@ struct KillerEngine {
     a one-week test after your objections. Give the single strongest objection, the main competitors (or "none found"), \
     a one-sentence verdict, and evidence_needed: the one fact that would most raise the score. Copy each title exactly. \
     Write everything in English.
-    """
+    """ + Prompts.untrustedData
 
     /// Pass 2: the devil's advocate (feature "Devil's advocate"). Uses high effort because judging is where
     /// quality matters most.

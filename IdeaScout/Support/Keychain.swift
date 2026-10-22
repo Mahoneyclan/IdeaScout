@@ -13,7 +13,7 @@ enum Keychain {
 
     /// One entry per secret. The raw value is the Keychain account name, so renaming a case would
     /// lose the saved key for existing users.
-    enum Key: String {
+    enum Key: String, CaseIterable {
         case claudeAPIKey
         case openaiAPIKey, geminiAPIKey, grokAPIKey, deepseekAPIKey, qwenAPIKey, glmAPIKey, kimiAPIKey, mimoAPIKey
     }
@@ -46,8 +46,49 @@ enum Keychain {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return true }
         var query = baseQuery(key, service: service)
         query[kSecValueData as String] = Data(value.utf8)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock  // readable during background refresh (which can run while the phone is locked, after the first unlock)
+        // Security: "after first unlock" so background refresh can read keys while the phone is locked;
+        // "this device only" so keys never leave the phone, not even inside encrypted backups or on a
+        // new iPhone restored from one (the user re-enters them there).
+        query[kSecAttrAccessible as String] = accessibility
         return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    /// The protection class used for every saved secret.
+    static let accessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+
+    /// Security: run once at launch, before any key is read.
+    /// - A fresh install has empty UserDefaults, but iOS keeps Keychain entries after an app is deleted, so
+    ///   keys from a previous install (possibly a previous owner of the phone) would reappear. They're removed.
+    /// - Keys saved by older versions used a class that could travel in backups; they're re-saved with
+    ///   `accessibility`, so existing users keep their keys without re-entering them.
+    /// - Parameter defaults: The app's settings store (tests pass their own).
+    static func prepareOnLaunch(defaults: UserDefaults = .standard, service: String = Keychain.service) {
+        let installKey = "keychain.installMarker"
+        if defaults.object(forKey: installKey) == nil {
+            let domain = Bundle.main.bundleIdentifier.flatMap { defaults.persistentDomain(forName: $0) }
+            if isFreshInstall(domain: domain) { removeAll(service: service) }
+            defaults.set(true, forKey: installKey)
+        }
+        let migratedKey = "keychain.thisDeviceOnly"
+        if !defaults.bool(forKey: migratedKey) {
+            migrateAccessibility(service: service)
+            defaults.set(true, forKey: migratedKey)
+        }
+    }
+
+    /// A fresh install has no saved settings at all; an existing install always has some.
+    static func isFreshInstall(domain: [String: Any]?) -> Bool { (domain ?? [:]).isEmpty }
+
+    /// Deletes every IdeaScout secret, including keys the app no longer uses.
+    static func removeAll(service: String = Keychain.service) {
+        for account in Key.allCases.map(\.rawValue) + ["productHuntToken"] { delete(account: account, service: service) }
+    }
+
+    /// Re-saves every existing secret so it uses the current `accessibility` class.
+    static func migrateAccessibility(service: String = Keychain.service) {
+        for key in Key.allCases {
+            if let value = get(key, service: service) { set(value, for: key, service: service) }
+        }
     }
 
     /// Removes an entry by its raw name (used for keys the app no longer has, e.g. the old Product Hunt token).

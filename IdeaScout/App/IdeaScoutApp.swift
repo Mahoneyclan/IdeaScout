@@ -21,6 +21,8 @@ struct IdeaScoutApp: App {
         } catch {
             fatalError("Could not open the IdeaScout database: \(error)")
         }
+        // Security: clear keys left by a previous install and upgrade older keys to "this device only".
+        Keychain.prepareOnLaunch()
         DigestService.shared.container = container
         DigestService.shared.removeRetiredSources()
     }

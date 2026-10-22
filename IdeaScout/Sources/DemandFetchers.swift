@@ -75,7 +75,9 @@ struct AppReviewsFetcher: ItemFetcher {
         var results: [FetchedItem] = []
         let reviewsSince = min(since, Date.now.addingTimeInterval(-Self.windowDays * 86_400))
         for app in Self.todaysApps(apps, day: day) {
-            let url = URL(string: "https://itunes.apple.com/\(app.country)/rss/customerreviews/page=1/id=\(app.id)/sortby=mostrecent/json")!
+            // Robustness: the app ID comes from Apple's chart; skip it if it can't form a valid link.
+            guard let url = URL(string: "https://itunes.apple.com/\(app.country)/rss/customerreviews/page=1/id=\(app.id)/sortby=mostrecent/json")
+            else { continue }
             do { results += try Self.parseReviews(try await HTTP.get(url), app: app, since: reviewsSince) }
             catch { firstError = firstError ?? error }
         }
@@ -100,7 +102,10 @@ struct AppReviewsFetcher: ItemFetcher {
 
     /// - Returns: The chart's apps with their rank (1-based).
     static func parseChart(_ data: Data, country: String, genre: String) throws -> [App] {
-        (try JSONDecoder().decode(Chart.self, from: data).feed.entry ?? []).enumerated().map { index, entry in
+        // Robustness: App Store IDs are numeric; anything else is skipped rather than used to build links.
+        (try JSONDecoder().decode(Chart.self, from: data).feed.entry ?? []).enumerated()
+            .filter { _, entry in !entry.id.attributes.id.isEmpty && entry.id.attributes.id.allSatisfy(\.isNumber) }
+            .map { index, entry in
             App(id: entry.id.attributes.id, name: entry.name.label, country: country, genre: genre, rank: index + 1)
         }
     }
@@ -133,7 +138,7 @@ struct AppReviewsFetcher: ItemFetcher {
     /// 1 for two, so the angriest come first.
     static func parseReviews(_ data: Data, app: App, since: Date) throws -> [FetchedItem] {
         let entries = try JSONDecoder().decode(Reviews.self, from: data).feed.entry ?? []
-        let url = URL(string: "https://apps.apple.com/\(app.country)/app/id\(app.id)")!
+        guard let url = URL(string: "https://apps.apple.com/\(app.country)/app/id\(app.id)") else { return [] }
         return entries.compactMap { entry -> FetchedItem? in
             guard let stars = entry.rating.flatMap({ Int($0.label) }), stars <= 2,
                   let date = ISODates.parse(entry.updated.label), date >= since else { return nil }
@@ -266,7 +271,10 @@ struct AusTenderFetcher: ItemFetcher {
                 let amount = Double(contract.value?.amount ?? "") ?? 0
                 var detail = "\(agency) paid AUD \(Int(amount).formatted())"
                 if let supplier { detail += " to \(supplier)" }
-                let url = URL(string: "https://www.tenders.gov.au/Search/CnAdvancedSearch?keyword=\(contract.id)")!
+                // Robustness: the contract ID comes from the API, so it's encoded as a query value, never force-built.
+                var link = URLComponents(string: "https://www.tenders.gov.au/Search/CnAdvancedSearch")
+                link?.queryItems = [URLQueryItem(name: "keyword", value: contract.id)]
+                guard let url = link?.url else { continue }
                 items.append(FetchedItem(key: "aus-\(contract.id)", source: .ausTender, title: TextCleaner.clean(description, max: 160),
                                          detail: detail, url: url, score: Int(amount / 1000),
                                          postedAt: contract.dateSigned.flatMap(ISODates.parse) ?? .now))

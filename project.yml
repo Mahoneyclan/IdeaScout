@@ -39,6 +39,9 @@ targets:
     platform: iOS
     sources:
       - IdeaScoutTests
+      # Lets the tests check the StoreKit test file's product IDs on the device.
+      - path: IdeaScout/IdeaScout.storekit
+        buildPhase: resources
     dependencies:
       - target: IdeaScout
     settings:

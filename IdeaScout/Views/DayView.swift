@@ -142,7 +142,7 @@ struct DigestContentView: View {
             }
             Section {
                 Text("Summarised by \(digest.summarizer) · \(digest.itemCount) projects")
-                ForEach(digest.warnings, id: \.self) { Label($0, systemImage: "exclamationmark.triangle") }
+                ForEach(digest.warnings, id: \.self) { WarningRow(warning: $0) }
             }
             .font(.footnote)
             .foregroundStyle(.secondary)
@@ -163,6 +163,25 @@ struct DigestContentView: View {
                 }
                 .pickerStyle(.menu)
             }
+            }
+        }
+    }
+}
+
+/// One refresh note: the plain message, with any technical detail tucked behind "Details".
+struct WarningRow: View {
+    /// The stored warning (see DigestWarning).
+    let warning: String
+
+    var body: some View {
+        let parts = DigestWarning.parts(warning)
+        VStack(alignment: .leading, spacing: 4) {
+            Label(parts.message, systemImage: "exclamationmark.triangle")
+            if let details = parts.details {
+                DisclosureGroup("Details") {
+                    Text(details).font(.caption.monospaced()).textSelection(.enabled)
+                }
+                .font(.caption)
             }
         }
     }
@@ -232,7 +251,7 @@ struct ItemRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            if let url = item.url, url.scheme?.hasPrefix("http") == true {
+            if let url = item.url, url.isWebLink {   // Security: web links only; others (e.g. field notes) show as text
                 Link(destination: url) { content }.buttonStyle(.plain)
             } else {
                 content

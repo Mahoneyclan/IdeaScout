@@ -134,6 +134,13 @@ struct HackerNewsFetcher: ItemFetcher {
         let hits: [Hit]
     }
 
+    /// The Hacker News discussion page for an item ID, or `nil` if the ID can't form a valid link.
+    static func discussionURL(_ objectID: String) -> URL? {
+        var c = URLComponents(string: "https://news.ycombinator.com/item")
+        c?.queryItems = [URLQueryItem(name: "id", value: objectID)]
+        return c?.url
+    }
+
     /// Turns Algolia hits into items. Stories use their title (minus "Show HN:"); comments have no title, so
     /// the comment text becomes the title and "In thread: …" the detail.
     /// - Parameters:
@@ -142,20 +149,21 @@ struct HackerNewsFetcher: ItemFetcher {
     ///   - phrases: For comments, phrases to centre the title on (so a long comment keeps the complaint).
     static func parse(_ data: Data, as kind: SourceKind, around phrases: [String] = []) throws -> [FetchedItem] {
         try JSONDecoder().decode(Response.self, from: data).hits.compactMap { hit in
+            // Robustness: the discussion link is built from data the API supplies; skip the hit if it's malformed.
+            guard let discussion = Self.discussionURL(hit.objectID) else { return nil }
             // Comments have no title: use the part of the comment around the phrase, with the thread as detail.
             if hit.title == nil, let comment = hit.comment_text {
                 let text = TextCleaner.snippet(TextCleaner.clean(comment, max: 5000), around: phrases, max: 220)
                 guard !text.isEmpty else { return nil }
                 return FetchedItem(key: "hn-\(hit.objectID)", source: kind, title: text,
                                    detail: hit.story_title.map { "In thread: \($0)" } ?? "",
-                                   url: URL(string: "https://news.ycombinator.com/item?id=\(hit.objectID)")!,
+                                   url: discussion,
                                    score: hit.points ?? 0,
                                    postedAt: Date(timeIntervalSince1970: TimeInterval(hit.created_at_i)))
             }
             guard let rawTitle = hit.title, !rawTitle.isEmpty else { return nil }
             let title = rawTitle.replacingOccurrences(of: "^Show HN:\\s*", with: "", options: .regularExpression)
-            let url = hit.url.flatMap(URL.init(string:))
-                ?? URL(string: "https://news.ycombinator.com/item?id=\(hit.objectID)")!
+            let url = hit.url.flatMap(URL.init(string:)) ?? discussion
             return FetchedItem(key: "hn-\(hit.objectID)", source: kind, title: title,
                                detail: TextCleaner.clean(hit.story_text), url: url, score: hit.points ?? 0,
                                postedAt: Date(timeIntervalSince1970: TimeInterval(hit.created_at_i)))

@@ -184,7 +184,7 @@ struct KillerIdeaDetailView: View {
             if !idea.evidence.isEmpty {
                 Section("Evidence") {
                     ForEach(Array(idea.evidence.enumerated()), id: \.offset) { _, item in
-                        if let url = item.url {
+                        if let url = item.url, url.isWebLink {   // Security: web links only
                             Link(item.title, destination: url).lineLimit(2)
                         } else {
                             Text(item.title)
@@ -197,7 +197,7 @@ struct KillerIdeaDetailView: View {
             let prompt = Prompts.fleshOut(idea)
             HStack(spacing: 12) {
                 Button {
-                    UIPasteboard.general.string = prompt
+                    SecureClipboard.copy(prompt)   // Security: this device only, expires after 10 minutes
                     copied = true
                 } label: {
                     Label(copied ? "Copied" : "Copy plan prompt", systemImage: copied ? "checkmark" : "doc.on.doc")
@@ -338,7 +338,7 @@ struct TodayStatus: View {
                           systemImage: "checkmark.circle")
                         .font(.subheadline)
                     // Show the reason inline (e.g. limit reached, every idea rejected) rather than a count.
-                    if let note = service.lastError ?? today.warnings.last {
+                    if let note = service.lastError ?? today.warnings.last.map({ DigestWarning.parts($0).message }) {
                         Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                     }
                 }
@@ -389,7 +389,8 @@ struct RefreshBar: View {
         .sheet(isPresented: $showPaywall) { PaywallView() }
         .sheet(isPresented: $showConsent) {
             ConsentView(provider: AppSettings.provider) { agreed in
-                if agreed { Task { await service.refresh(force: !hasToday) } }
+                // Continue what the user asked for: refresh now, or confirm first if today already ran (it costs money).
+                if agreed { if hasToday { confirm = true } else { Task { await service.refresh(force: true) } } }
             }
         }
         .buttonStyle(.borderedProminent)

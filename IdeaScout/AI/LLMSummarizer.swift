@@ -342,15 +342,22 @@ struct LLMHTTPError: LocalizedError, Equatable {
     /// Start of the reply body, for diagnosis.
     let detail: String
 
+    /// A plain message for the user. Security/UX: never includes the provider's raw reply, which can
+    /// contain internal details (request IDs, organisation names); that goes in `technicalDetail`.
     var errorDescription: String? {
         switch status {
-        case 401, 403: "\(provider) rejected the API key (HTTP \(status)). Check it in Settings."
-        case 404: "\(provider) doesn't recognise the model (HTTP 404). Check the model name in Settings."
-        case 429: "\(provider) is rate-limiting requests (HTTP 429)."
-        case 529: "\(provider) is overloaded right now (HTTP 529)."
-        default: "\(provider) returned HTTP \(status) \(detail)"
+        case 401, 403: "\(provider) rejected the API key (error \(status)). Check it in Settings."
+        case 404: "\(provider) doesn't recognise the model (error 404). Check the model name in Settings."
+        case 400: "\(provider) couldn't accept the request (error 400). Check the model name, or try again later."
+        case 402: "\(provider) says the account needs credit or billing set up (error 402)."
+        case 429: "\(provider) is limiting requests right now (error 429). Try again in a few minutes."
+        case 500...599: "\(provider) is busy or having problems right now (error \(status)). Try again later."
+        default: "\(provider) couldn't complete the request (error \(status)). Try again later."
         }
     }
+
+    /// The raw status and start of the reply, shown only behind "Details" for diagnosis.
+    var technicalDetail: String { "HTTP \(status): \(detail)" }
 }
 
 /// Rebuilds a normal (non-streamed) Messages API reply from server-sent events, so the existing

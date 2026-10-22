@@ -18,6 +18,12 @@ enum AppInfo {
 
 /// Version, privacy, support and credits for the data sources IdeaScout reads.
 struct AboutView: View {
+    @EnvironmentObject private var service: DigestService
+    /// Shows the "Delete all my data?" confirmation.
+    @State private var confirmDelete = false
+    /// Set if deletion couldn't run (a refresh was in progress).
+    @State private var deleteBlocked = false
+
     /// One data source and how it's used or licensed.
     private struct Credit: Identifiable {
         let name: String
@@ -63,7 +69,21 @@ struct AboutView: View {
             } footer: {
                 Text("Trademarks belong to their owners. IdeaScout isn't affiliated with or endorsed by these services.")
             }
+            Section {
+                Button("Delete all my data", role: .destructive) { confirmDelete = true }
+                    .frame(minHeight: 44)
+                if deleteBlocked {
+                    Text("A refresh is running. Try again when it finishes.").font(.caption).foregroundStyle(.red)
+                }
+            } footer: {
+                Text("Removes your history, ideas, saved projects, settings, API keys and cost records from this iPhone. Purchases are kept.")
+            }
         }
         .navigationTitle("About")
+        .confirmationDialog("Delete all your IdeaScout data?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete everything", role: .destructive) { deleteBlocked = !service.deleteAllData() }
+        } message: {
+            Text("This can't be undone. Your API keys will need to be entered again. Purchases are kept and can be restored.")
+        }
     }
 }

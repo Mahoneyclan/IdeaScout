@@ -108,7 +108,7 @@ struct IdeaDetailView: View {
             Section {
                 Text(idea.title).font(.headline)
                 if !idea.detail.isEmpty { Text(idea.detail) }
-                if let url = idea.url { Link("Open project", destination: url) }
+                if let url = idea.url, url.isWebLink { Link("Open project", destination: url) }   // Security: web links only
                 Label(idea.source.label, systemImage: idea.source.symbol).foregroundStyle(.secondary)
             }
             if idea.scores != ThemeScores() {
@@ -146,7 +146,7 @@ struct IdeaDetailView: View {
                     Text(prompt).font(.caption.monospaced()).textSelection(.enabled)
                 }
                 Button {
-                    UIPasteboard.general.string = prompt
+                    SecureClipboard.copy(prompt)   // Security: this device only, expires after 10 minutes
                     copied = true
                 } label: {
                     Label(copied ? "Copied" : "Copy prompt", systemImage: copied ? "checkmark" : "doc.on.doc")
