@@ -44,7 +44,7 @@ struct WelcomeView: View {
             Image(systemName: "lightbulb.max.fill").font(.system(size: 64)).foregroundStyle(.indigo)
                 .accessibilityHidden(true)
             Text("Welcome to IdeaScout").font(.largeTitle.bold()).multilineTextAlignment(.center)
-            Text("Every day IdeaScout reads what businesses complain about, pay for and build, groups it into pain clusters and trends, and proposes business ideas that survive a devil's-advocate check.")
+            Text("Every day IdeaScout reads what businesses complain about and pay for, and proposes software ideas you could build on your own with AI coding tools and sell through a marketplace or community. Each one survives a devil's-advocate check and comes with a build brief.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
             Spacer()
             primary("Continue") { page = 1 }
@@ -80,6 +80,7 @@ struct WelcomeView: View {
                     ForEach(AIProvider.allCases) { Text($0.label).tag($0.rawValue) }
                 }
                 if chosen.isCloud {
+                    // Safe to unwrap: every cloud provider (`isCloud`) has a Keychain key.
                     SecretField(title: "\(chosen.shortName) API key", key: chosen.keychainKey!).id(chosen)
                 }
             } header: {

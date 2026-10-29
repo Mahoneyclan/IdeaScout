@@ -28,6 +28,8 @@ extension ModelContext {
     }
 
     /// The message shown when saving fails.
+    /// - Parameter action: What was being saved, in plain words.
+    /// - Returns: A plain message with what to try next.
     static func failureMessage(for action: String) -> String {
         "IdeaScout couldn't save \(action). Please try again; if it keeps happening, restart the app or free up storage."
     }

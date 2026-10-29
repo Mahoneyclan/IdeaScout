@@ -14,7 +14,9 @@ enum Keychain {
     /// One entry per secret. The raw value is the Keychain account name, so renaming a case would
     /// lose the saved key for existing users.
     enum Key: String, CaseIterable {
+        /// The Anthropic (Claude) key.
         case claudeAPIKey
+        /// One key per other cloud provider, matching `AIProvider.keychainKey`.
         case openaiAPIKey, geminiAPIKey, grokAPIKey, deepseekAPIKey, qwenAPIKey, glmAPIKey, kimiAPIKey, mimoAPIKey
     }
 
@@ -79,6 +81,8 @@ enum Keychain {
     }
 
     /// A fresh install has no saved settings at all; an existing install always has some.
+    /// - Parameter domain: The app's UserDefaults domain, or `nil` if it has none.
+    /// - Returns: `true` if there are no saved settings.
     static func isFreshInstall(domain: [String: Any]?) -> Bool { (domain ?? [:]).isEmpty }
 
     /// Deletes every IdeaScout secret, including keys the app no longer uses.
@@ -94,6 +98,10 @@ enum Keychain {
     }
 
     /// Removes an entry by its raw name (used for keys the app no longer has, e.g. the old Product Hunt token).
+    /// - Parameters:
+    ///   - account: The entry's account name.
+    ///   - service: The Keychain service; tests pass their own.
+    /// - Note: Deleting an entry that doesn't exist is not an error.
     static func delete(account: String, service: String = Keychain.service) {
         SecItemDelete([kSecClass as String: kSecClassGenericPassword,
                        kSecAttrService as String: service,

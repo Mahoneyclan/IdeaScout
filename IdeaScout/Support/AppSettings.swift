@@ -17,10 +17,13 @@ enum AppSettings {
         static let aiProvider = "aiProvider"
         /// Hour (5–11) around which the daily background refresh is requested.
         static let notifyHour = "notifyHour"
-        /// Trend ranking weights (0–2) for novelty, momentum, viability and opportunity gap.
+        /// Trend ranking weight (0–2) for novelty.
         static let weightNovelty = "weight.novelty"
+        /// Trend ranking weight (0–2) for momentum.
         static let weightMomentum = "weight.momentum"
+        /// Trend ranking weight (0–2) for viability.
         static let weightViability = "weight.viability"
+        /// Trend ranking weight (0–2) for opportunity gap.
         static let weightGap = "weight.gap"
         /// Free text about the user, sent to the cloud AI to score "fit".
         static let aboutMe = "aboutMe"
@@ -41,12 +44,22 @@ enum AppSettings {
         /// Set once the welcome screens are finished.
         static let onboarded = "onboarded"
         /// Whether the user agreed to share data with this provider.
+        /// - Parameter provider: The cloud provider.
+        /// - Returns: The key name, e.g. "consent.claude".
         static func consent(_ provider: AIProvider) -> String { "consent.\(provider.rawValue)" }
         /// The model chosen for this provider (empty = recommended).
+        /// - Parameter provider: The provider.
+        /// - Returns: The key name, e.g. "model.claude".
         static func model(_ provider: AIProvider) -> String { "model.\(provider.rawValue)" }
         /// Price per million tokens typed in for an "Other…" model; `side` is "input" or "output".
+        /// - Parameters:
+        ///   - provider: The provider.
+        ///   - side: "input" or "output".
+        /// - Returns: The key name, e.g. "price.claude.input".
         static func customPrice(_ provider: AIProvider, _ side: String) -> String { "price.\(provider.rawValue).\(side)" }
         /// Whether a source is switched on. Unset means the source's own default (`enabledByDefault`).
+        /// - Parameter kind: The source.
+        /// - Returns: The key name, e.g. "source.github".
         static func sourceEnabled(_ kind: SourceKind) -> String { "source.\(kind.rawValue)" }
     }
 
@@ -63,6 +76,8 @@ enum AppSettings {
     }
 
     /// Whether a source should be fetched: the user's toggle if set, otherwise the source's default.
+    /// - Parameter kind: The source.
+    /// - Returns: `true` if it should be fetched.
     static func isEnabled(_ kind: SourceKind) -> Bool {
         defaults.object(forKey: Keys.sourceEnabled(kind)) as? Bool ?? kind.enabledByDefault
     }
@@ -90,12 +105,17 @@ enum AppSettings {
     static var dailyCap: Double {
         defaults.object(forKey: Keys.dailyCap) as? Double ?? defaultDailyCap
     }
-    /// About two refreshes a day with Claude Sonnet at 300 items.
+    /// Room for about four refreshes a day with Claude Sonnet at 300 items, or about two with Opus (measured
+    /// costs in README; the in-app estimate, `estimatedRefreshCost`, is deliberately higher).
     static let defaultDailyCap = 1.00
 
     /// Whether today's recorded spending has reached the limit.
     static var isOverDailyCap: Bool { overCap(spent: UsageTracker.summary().today.cost, cap: dailyCap) }
 
+    /// The spending-limit rule, separate from storage so it can be unit tested.
+    /// - Parameters:
+    ///   - spent: Dollars recorded today.
+    ///   - cap: The daily limit (0 = no limit).
     /// - Returns: `true` if a limit is set (`cap` > 0) and `spent` has reached it.
     static func overCap(spent: Double, cap: Double) -> Bool { cap > 0 && spent >= cap }
 
@@ -131,9 +151,37 @@ enum AppSettings {
     /// Rough cost range of one full refresh (trends, ideas, devil's advocate), in US dollars, shown in Settings and on
     /// the refresh button. Fitted to measured Claude costs (about $0.29 at 150 items, $0.44 at 300 with Opus);
     /// cheaper models cost less, so treat it as an upper guide.
+    /// - Parameter items: Items the AI reads per refresh.
+    /// - Returns: Low and high estimates; the high end is 1.5× the low.
     static func estimatedRefreshCost(items: Int) -> ClosedRange<Double> {
         let base = 0.10 + Double(items) * 0.0006
         return base...(base * 1.5)
+    }
+
+    /// Rough cost of one "Suggest variants" request, in US dollars. Assumes 1,500 input tokens (instructions,
+    /// the project and the user's notes) and 1,500 output tokens (4–6 suggestions plus any reasoning), which
+    /// is generous for a typical project, so treat it as an upper guide.
+    /// - Parameter price: The chosen model's price.
+    /// - Returns: The estimated cost.
+    static func estimatedSuggestionCost(price: ModelPrice) -> Double {
+        price.cost(input: 1_500, output: 1_500)
+    }
+
+    /// The estimated cost of "Suggest variants" with the current settings.
+    /// - Returns: The cost when the request would go to a paid cloud provider (chosen, agreed to and with a
+    ///   key, the same test `makeSummarizer` uses), or `nil` when it would be free (Apple on-device or keywords).
+    /// - Note: Reads the Keychain, so call it on demand rather than in every view update.
+    static func suggestionCost() -> Double? {
+        guard provider.isCloud, hasConsent(provider), provider.keychainKey.flatMap({ Keychain.get($0) }) != nil
+        else { return nil }
+        return estimatedSuggestionCost(price: price(for: provider, model: model(for: provider)))
+    }
+
+    /// A cost for buttons and confirmations: "~$0.02", or "<$0.01" when it would round to nothing.
+    /// - Parameter cost: US dollars.
+    /// - Returns: The text to show.
+    static func approximateCostText(_ cost: Double) -> String {
+        cost < 0.01 ? "<$0.01" : "~" + cost.formatted(.currency(code: "USD"))
     }
 
     /// Hour for the daily refresh request (default 7 am).
@@ -146,11 +194,16 @@ enum AppSettings {
 
     /// Whether the user agreed to send their data to this cloud provider (Apple's rules require consent
     /// before personal data goes to a third-party AI). Asked again for each provider.
+    /// - Parameter provider: The provider to check.
+    /// - Returns: `true` for Apple (on-device), or if the user agreed for this cloud provider.
     static func hasConsent(_ provider: AIProvider) -> Bool {
         !provider.isCloud || defaults.bool(forKey: Keys.consent(provider))
     }
 
     /// Records the user's answer on the consent screen (or a withdrawal in Settings).
+    /// - Parameters:
+    ///   - provider: The cloud provider.
+    ///   - value: `true` to agree, `false` to withdraw.
     static func setConsent(_ provider: AIProvider, _ value: Bool) {
         defaults.set(value, forKey: Keys.consent(provider))
     }
@@ -163,6 +216,7 @@ enum AppSettings {
     /// The chosen AI if it can run and the user agreed to share data with it, otherwise Apple's
     /// on-device model, otherwise keyword grouping. Never falls back to a different paid provider,
     /// so spending only happens where the user chose.
+    /// - Returns: The summariser to use for this refresh or suggestion.
     static func makeSummarizer() -> any Summarizer {
         if hasConsent(provider), let client = makeClient(for: provider) { return LLMSummarizer(client: client) }
         if AppleSummarizer.isAvailable { return AppleSummarizer() }
@@ -180,6 +234,8 @@ enum AppSettings {
     }
 
     /// The model chosen for a provider (the recommended one unless the user picked another).
+    /// - Parameter provider: The provider.
+    /// - Returns: The API model ID.
     static func model(for provider: AIProvider) -> String {
         let value = defaults.string(forKey: Keys.model(provider))?.trimmingCharacters(in: .whitespaces) ?? ""
         return value.isEmpty ? provider.recommendedModel : value
@@ -187,12 +243,24 @@ enum AppSettings {
 
     /// Known models use their list price; any other model uses the price typed in Settings
     /// (defaulting to the recommended model's price).
+    /// - Parameters:
+    ///   - provider: The provider.
+    ///   - model: The API model ID.
+    /// - Returns: The price used by the cost tracker and the spending limit.
     static func price(for provider: AIProvider, model: String) -> ModelPrice {
         if let known = provider.models.first(where: { $0.id == model }) { return known.price }
         let fallback = provider.models.first?.price ?? ModelPrice(input: 0, output: 0)
         let input = defaults.object(forKey: Keys.customPrice(provider, "input")) as? Double ?? fallback.input
         let output = defaults.object(forKey: Keys.customPrice(provider, "output")) as? Double ?? fallback.output
-        return ModelPrice(input: input, output: output)
+        return ModelPrice(input: sanitizedPrice(input), output: sanitizedPrice(output))
+    }
+
+    /// Money: a typed-in price below zero (or not a number) would make recorded spending negative and switch
+    /// off the daily limit, so it counts as $0. Settings warns about $0 prices.
+    /// - Parameter value: Dollars per million tokens, as typed.
+    /// - Returns: The value, or 0 if it's negative or not a finite number.
+    static func sanitizedPrice(_ value: Double) -> Double {
+        value.isFinite ? max(0, value) : 0
     }
 }
 
@@ -205,6 +273,10 @@ enum Notifier {
     }
 
     /// Posts "Today's ideas are ready" immediately. Contains counts only, no idea text.
+    /// - Parameters:
+    ///   - themes: Number of themes in the digest.
+    ///   - items: Number of projects in the digest.
+    /// - Note: Failures (for example, notifications are off) are ignored.
     static func digestReady(themes: Int, items: Int) async {
         let content = UNMutableNotificationContent()
         content.title = "Today's ideas are ready"

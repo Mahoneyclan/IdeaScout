@@ -287,6 +287,13 @@ struct KillerEngineTests {
         let r = try KillerEngine.parseReviews(wrap(#"{"reviews":[{"title":"Shift Meals","survives":true,"objection":"o","competitors":"none found","verdict":"v","pain":4,"willing_to_pay":9,"timing":3,"gap":4,"fit":0}]}"#))
         #expect(r.first?.willingToPay == 5)
         #expect(r.first?.fit == 0)
+        // An older-shaped reply has no buildability or channel score: they become 0, a weak spot.
+        #expect(r.first?.buildability == 0 && r.first?.channelScore == 0)
+        let full = try KillerEngine.parseReviews(wrap(#"{"reviews":[{"title":"A","survives":true,"objection":"o","competitors":"c","verdict":"v","pain":4,"willing_to_pay":4,"timing":3,"gap":4,"fit":3,"buildability":7,"channel_score":4,"evidence_needed":"e"}]}"#))
+        #expect(full.first?.buildability == 5 && full.first?.channelScore == 4)
+        let withChannel = try KillerEngine.parseCandidates(wrap(#"{"ideas":[{"title":"T","pitch":"p","buyer":"b","pricing":"$9","why_now":"w","one_week_test":"t","replaces":"r","channel":"Shopify App Store","evidence_numbers":[],"same_as":""}]}"#))
+        #expect(withChannel.first?.channel == "Shopify App Store")
+        #expect(c.first?.channel == "")
     }
 
     @Test func keepsSurvivorsBestFirstMaxThree() {
@@ -295,7 +302,7 @@ struct KillerEngineTests {
         }
         func rev(_ t: String, _ s: Bool, _ score: Int) -> KillerEngine.Review {
             .init(title: t, survives: s, objection: "", competitors: "", verdict: "", pain: score, willingToPay: score,
-                  timing: score, gap: score, fit: score)
+                  timing: score, gap: score, fit: score, buildability: score, channelScore: score)
         }
         let out = KillerEngine.survivors(candidates: [cand("A"), cand("B"), cand("C"), cand("D"), cand("E"), cand("F")],
                                          reviews: [rev("a", true, 3), rev("B", false, 5), rev("C", true, 3), rev("D", true, 2),
@@ -387,11 +394,14 @@ struct QualityBarTests {
 
     @Test func keepsNearMissesButDropsWeakSpots() {
         let strong = KillerEngine.Review(title: "Strong", survives: true, objection: "", competitors: "", verdict: "",
-                                         pain: 4, willingToPay: 4, timing: 4, gap: 4, fit: 4)
+                                         pain: 4, willingToPay: 4, timing: 4, gap: 4, fit: 4,
+                                         buildability: 4, channelScore: 4)
         let average = KillerEngine.Review(title: "Average", survives: true, objection: "", competitors: "", verdict: "",
-                                          pain: 3, willingToPay: 3, timing: 3, gap: 3, fit: 3)
+                                          pain: 3, willingToPay: 3, timing: 3, gap: 3, fit: 3,
+                                          buildability: 3, channelScore: 3)
         let weakSpot = KillerEngine.Review(title: "Weak spot", survives: true, objection: "", competitors: "", verdict: "",
-                                           pain: 5, willingToPay: 1, timing: 5, gap: 5, fit: 5)
+                                           pain: 5, willingToPay: 1, timing: 5, gap: 5, fit: 5,
+                                           buildability: 5, channelScore: 5)
         let out = KillerEngine.survivors(candidates: [cand("Strong"), cand("Average"), cand("Weak spot")],
                                          reviews: [strong, average, weakSpot])
         // Without pain-point evidence, pain and willingness to pay are capped at 3.
@@ -516,6 +526,34 @@ struct ReliabilityTests {
         #expect(LLMRetry.isRetryable(StreamAssembler.StreamError(message: "x")))
     }
 
+    /// Money: a server-side fallback is charged at the price of the model that actually answered.
+    @Test func fallbackIsPricedAtTheServingModel() throws {
+        var stream = StreamAssembler()
+        for line in [#"data: {"type":"message_start","message":{"model":"claude-sonnet-5-5","usage":{"input_tokens":10}}}"#,
+                     #"data: {"type":"content_block_start","index":0,"content_block":{"type":"fallback","from":{"model":"claude-sonnet-5-5"},"to":{"model":"claude-opus-4-8"}}}"#,
+                     #"data: {"type":"message_stop"}"#] {
+            try stream.consume(line)
+        }
+        #expect(stream.model == "claude-opus-4-8")
+        let chosen = ModelPrice(input: 2, output: 10, cachedInput: 0.2)
+        #expect(ClaudeClient.price(servedBy: stream.model, chosen: "claude-sonnet-5-5", chosenPrice: chosen) == ModelPrice(input: 5, output: 25))
+        #expect(ClaudeClient.price(servedBy: "claude-sonnet-5-5", chosen: "claude-sonnet-5-5", chosenPrice: chosen) == chosen)
+        #expect(ClaudeClient.price(servedBy: nil, chosen: "claude-sonnet-5-5", chosenPrice: chosen) == chosen)
+        #expect(ClaudeClient.price(servedBy: "claude-unknown-9", chosen: "claude-sonnet-5-5", chosenPrice: chosen) == chosen)
+    }
+
+    /// Security: stored error details never keep key-like text.
+    @Test func errorDetailsHideKeys() {
+        let raw = #"{"error":{"message":"Incorrect API key provided: sk-proj-abc123XYZ789secret. Header Bearer eyJhbGciOiJIUzI1NiJ9.payload","code":"invalid_api_key"}}"#
+        let shown = LLMHTTPError(status: 401, retryAfter: nil, detail: raw).technicalDetail
+        #expect(!shown.contains("abc123XYZ789secret"))
+        #expect(!shown.contains("eyJhbGciOiJIUzI1NiJ9"))
+        #expect(shown.contains("HTTP 401"))
+        #expect(shown.contains("invalid_api_key"))
+        #expect(LLMHTTPError.redacted("key AIzaSyA1234567890abcdefXYZ here").contains("[hidden]"))
+        #expect(LLMHTTPError.redacted("plain message") == "plain message")
+    }
+
     @Test func retriesOnlyTemporaryProblems() {
         #expect(LLMRetry.isRetryable(URLError(.networkConnectionLost)))
         #expect(LLMRetry.isRetryable(URLError(.timedOut)))
@@ -544,6 +582,39 @@ struct ReliabilityTests {
         #expect(!AppSettings.overCap(spent: 5, cap: 0))   // 0 = no limit
     }
 
+    /// Money: "Suggest variants" shows an honest price before the paid request.
+    @Test func suggestionCostEstimate() {
+        // Claude Sonnet 5.5 ($2 in / $10 out per million): 1,500 × 2 + 1,500 × 10 = $0.018.
+        let sonnet = AppSettings.estimatedSuggestionCost(price: ModelPrice(input: 2, output: 10))
+        #expect(abs(sonnet - 0.018) < 0.000_001)
+        #expect(AppSettings.approximateCostText(sonnet).contains("0.02"))
+        #expect(AppSettings.approximateCostText(sonnet).hasPrefix("~"))
+        // Very cheap models don't show a misleading "$0.00".
+        #expect(AppSettings.approximateCostText(AppSettings.estimatedSuggestionCost(price: ModelPrice(input: 0.3, output: 1.2))) == "<$0.01")
+        #expect(AppSettings.estimatedSuggestionCost(price: ModelPrice(input: 0, output: 0)) == 0)
+    }
+
+    /// Money: typed-in prices can't switch off the daily limit by going negative.
+    @Test func customPricesCannotBeNegative() {
+        #expect(AppSettings.sanitizedPrice(-3) == 0)
+        #expect(AppSettings.sanitizedPrice(.nan) == 0)
+        #expect(AppSettings.sanitizedPrice(.infinity) == 0)
+        #expect(AppSettings.sanitizedPrice(1.25) == 1.25)
+    }
+
+    /// Accuracy: Claude prices match Anthropic's list (Oct 2026), and labels compare with the default (Sonnet).
+    @Test func claudePricesMatchAnthropicList() throws {
+        let models = AIProvider.claude.models
+        let sonnet = try #require(models.first { $0.id == "claude-sonnet-5-5" })
+        let opus = try #require(models.first { $0.id == "claude-opus-5-5" })
+        let fable = try #require(models.first { $0.id == "claude-fable-5-1" })
+        #expect(sonnet.price == ModelPrice(input: 2, output: 10, cachedInput: 0.2))
+        #expect(opus.price == ModelPrice(input: 4, output: 20, cachedInput: 0.2))
+        #expect(fable.price == ModelPrice(input: 10, output: 50, cachedInput: 0.25))
+        #expect(opus.label.contains("\(Int(opus.price.input / sonnet.price.input))× cost"))
+        #expect(fable.label.contains("\(Int(fable.price.input / sonnet.price.input))× cost"))
+    }
+
     @Test func requestsAllowLongReplies() {
         let body = ClaudeClient.requestBody(system: "s", prompt: "p", schema: [:])
         #expect(body["max_tokens"] as? Int == 32000)
@@ -558,7 +629,8 @@ struct BestIdeaTests {
 
     @Test func evidenceUnlocksHighPainAndPayScores() {
         let review = KillerEngine.Review(title: "A", survives: true, objection: "", competitors: "", verdict: "",
-                                         pain: 5, willingToPay: 5, timing: 4, gap: 4, fit: 4)
+                                         pain: 5, willingToPay: 5, timing: 4, gap: 4, fit: 4,
+                                         buildability: 4, channelScore: 4)
         let items = [item("p", .painPoints), item("y", .ycombinator), item("g", .github)]
         let withPain = KillerEngine.survivors(candidates: [cand("A", evidence: [1])], reviews: [review], items: items)
         #expect(withPain.first?.review.pain == 5 && withPain.first?.review.willingToPay == 5)
@@ -621,6 +693,11 @@ struct BusinessFocusTests {
         #expect(!SourceKind.lobsters.enabledByDefault)
         #expect(!SourceKind.huggingFace.enabledByDefault)
         #expect(SourceKind.painPoints.enabledByDefault && SourceKind.ycombinator.enabledByDefault)
+        // Builder-side sources and out-of-reach government contracts start off for a solo builder.
+        #expect(!SourceKind.github.enabledByDefault && !SourceKind.hackerNews.enabledByDefault)
+        #expect(!SourceKind.research.enabledByDefault && !SourceKind.ausTender.enabledByDefault)
+        #expect(SourceKind.appReviews.enabledByDefault && SourceKind.atlassian.enabledByDefault)
+        #expect(SourceKind.vibeCode.enabledByDefault && SourceKind.fieldNotes.enabledByDefault)
     }
 
     @Test func promptsAimAtBusinessBuyers() {
@@ -742,7 +819,8 @@ struct DemandSourceTests {
 
     @Test func complaintsUnlockPainAndPayScores() {
         let review = KillerEngine.Review(title: "A", survives: true, objection: "", competitors: "", verdict: "",
-                                         pain: 5, willingToPay: 5, timing: 4, gap: 4, fit: 4)
+                                         pain: 5, willingToPay: 5, timing: 4, gap: 4, fit: 4,
+                                         buildability: 4, channelScore: 4)
         let capped = KillerEngine.capped(review, evidence: [item("r", .appReviews)])
         #expect(capped.pain == 5 && capped.willingToPay == 5)
         let tender = KillerEngine.capped(review, evidence: [item("t", .ausTender)])
@@ -1025,9 +1103,11 @@ struct DeleteAllDataTests {
         let service = "com.mahoney.IdeaScout.tests.erase"
         Keychain.set("secret", for: .claudeAPIKey, service: service)
 
-        DigestService.eraseAll(context: context, defaults: defaults, defaultsDomain: suite, keychainService: service)
+        let complete = DigestService.eraseAll(context: context, defaults: defaults, defaultsDomain: suite, keychainService: service)
 
+        #expect(complete)
         #expect(try context.fetchCount(FetchDescriptor<Digest>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<Theme>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<Item>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<Idea>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<KillerIdea>()) == 0)
@@ -1035,6 +1115,13 @@ struct DeleteAllDataTests {
         #expect(defaults.bool(forKey: AppSettings.Keys.onboarded) == false)
         #expect(Keychain.get(.claudeAPIKey, service: service) == nil)
         defaults.removePersistentDomain(forName: suite)
+    }
+
+    /// The message for a partial deletion must tell the user that data remains and how to retry.
+    @Test func incompleteDeletionMessageSaysWhatToDo() {
+        let message = DigestService.incompleteDeletionMessage
+        #expect(message.contains("couldn't be deleted"))
+        #expect(message.contains("Delete all my data"))
     }
 }
 
@@ -1100,8 +1187,8 @@ private struct ScriptedLLM: LLMClient {
 struct RefreshRoutineTests {
     // Items reach the AI as: 1 = pain point (demand comes first), 2 and 3 = GitHub.
     static let trends = #"{"themes":[{"title":"Invoice automation","summary":"s","opportunities":["o"],"item_numbers":[2,3],"novelty":4,"novelty_reason":"r","viability":4,"viability_reason":"r","opportunity_gap":4,"opportunity_gap_reason":"r"}],"translations":[],"pain_clusters":[{"title":"Chasing invoices","buyer":"Bookkeeper","workaround":"Email","pay_signals":"none seen","summary":"s","item_numbers":[1]}],"noise_numbers":[]}"#
-    static let ideas = #"{"ideas":[{"title":"InvoiceChaser","pitch":"p","buyer":"b","pricing":"$49/mo","why_now":"w","one_week_test":"t","replaces":"r","evidence_numbers":[1],"same_as":""}]}"#
-    static let reviews = #"{"reviews":[{"title":"InvoiceChaser","survives":true,"objection":"o","competitors":"none found","verdict":"v","pain":4,"willing_to_pay":4,"timing":4,"gap":4,"fit":4,"evidence_needed":"e"}]}"#
+    static let ideas = #"{"ideas":[{"title":"InvoiceChaser","pitch":"p","buyer":"b","pricing":"$49/mo","why_now":"w","one_week_test":"t","replaces":"r","channel":"Xero App Store","evidence_numbers":[1],"same_as":""}]}"#
+    static let reviews = #"{"reviews":[{"title":"InvoiceChaser","survives":true,"objection":"o","competitors":"none found","verdict":"v","pain":4,"willing_to_pay":4,"timing":4,"gap":4,"fit":4,"buildability":4,"channel_score":4,"evidence_needed":"e"}]}"#
 
     struct Harness {
         let service: DigestService
@@ -1146,6 +1233,7 @@ struct RefreshRoutineTests {
         let ideas = try h.context.fetch(FetchDescriptor<KillerIdea>())
         #expect(ideas.map(\.title) == ["InvoiceChaser"])
         #expect(ideas.first?.pain == 4)   // pain-point evidence allows a pain score above 3
+        #expect(ideas.first?.channel == "Xero App Store" && ideas.first?.buildability == 4 && ideas.first?.channelScore == 4)
         #expect(h.notified.count == 1)
         #expect(h.service.lastError == nil && !h.service.isRefreshing)
     }
@@ -1223,5 +1311,76 @@ struct PersistenceTests {
         let message = ModelContext.failureMessage(for: "today's ideas")
         #expect(message.contains("couldn't save today's ideas"))
         #expect(!message.contains("Error Domain"))
+    }
+}
+
+/// Rules for a solo builder who vibe-codes: buildability, sales channel, scoring and the build brief.
+struct SoloBuilderTests {
+    private func review(build: Int, channel: Int) -> KillerEngine.Review {
+        .init(title: "A", survives: true, objection: "", competitors: "", verdict: "", pain: 4, willingToPay: 4,
+              timing: 4, gap: 4, fit: 4, buildability: build, channelScore: channel)
+    }
+    private let candidate = KillerEngine.Candidate(title: "A", pitch: "", buyer: "", pricing: "", whyNow: "",
+                                                   oneWeekTest: "", evidenceNumbers: [1], sameAs: "")
+
+    @Test func weakBuildabilityOrChannelIsDropped() {
+        let items = [item("r", .appReviews)]
+        #expect(KillerEngine.survivors(candidates: [candidate], reviews: [review(build: 1, channel: 4)], items: items).isEmpty)
+        #expect(KillerEngine.survivors(candidates: [candidate], reviews: [review(build: 4, channel: 1)], items: items).isEmpty)
+        #expect(KillerEngine.survivors(candidates: [candidate], reviews: [review(build: 4, channel: 4)], items: items).count == 1)
+    }
+
+    @Test func whyNowCountsHalfAndOlderIdeasKeepTheirScore() {
+        // New ideas: six full-weight scores plus timing at half weight.
+        let lowTiming = KillerIdea.killerScore(pain: 4, willingToPay: 4, timing: 1, gap: 4, fit: 4, buildability: 4, channel: 4)
+        #expect(abs(lowTiming - 24.5 / 6.5) < 0.0001)
+        let lowBuild = KillerIdea.killerScore(pain: 4, willingToPay: 4, timing: 4, gap: 4, fit: 4, buildability: 1, channel: 4)
+        #expect(lowBuild < lowTiming)
+        // Older ideas without the two new scores keep the plain average of five.
+        #expect(KillerIdea.killerScore(pain: 5, willingToPay: 4, timing: 3, gap: 4, fit: 4, buildability: 0, channel: 0) == 4)
+        let idea = KillerIdea(key: "a", title: "A")
+        idea.pain = 4; idea.willingToPay = 4; idea.timing = 4; idea.gap = 4; idea.fit = 4
+        #expect(idea.killerScore == 4)
+        #expect(KillerEngine.score(review(build: 4, channel: 4)) == 4)
+    }
+
+    @Test func unscoredMeasuresAreLeftOutOfTheWeakestScore() {
+        let idea = KillerIdea(key: "a", title: "A")
+        idea.pain = 3; idea.willingToPay = 4; idea.timing = 4; idea.gap = 4; idea.fit = 4
+        #expect(KillerScoreMetrics.weakest(idea).name == "Pain")
+        #expect(KillerScoreMetrics.scored(idea).count == 5)
+        idea.buildability = 2; idea.channelScore = 5
+        let weakest = KillerScoreMetrics.weakest(idea)
+        #expect(weakest.name == "Buildable solo" && weakest.value == 2)
+        #expect(KillerScoreMetrics.scored(idea).count == 7)
+    }
+
+    @Test func promptsAskForBuildableIdeasWithAChannel() {
+        #expect(KillerEngine.generateInstructions.contains("vibe-code"))
+        #expect(KillerEngine.generateInstructions.contains("named sales channel"))
+        #expect(KillerEngine.generateInstructions.contains("treat them as competition"))
+        #expect(KillerEngine.critiqueInstructions.contains("- buildability:"))
+        #expect(KillerEngine.critiqueInstructions.contains("- channel_score:"))
+        let required = (KillerEngine.reviewSchema["properties"] as? [String: Any])
+            .flatMap { $0["reviews"] as? [String: Any] }.flatMap { $0["items"] as? [String: Any] }
+            .flatMap { $0["required"] as? [String] } ?? []
+        #expect(required.contains("buildability") && required.contains("channel_score"))
+        var c = candidate
+        c.channel = "Shopify App Store"
+        #expect(KillerEngine.critiquePrompt([c], items: [], aboutMe: "").contains("Sales channel: Shopify App Store"))
+    }
+
+    @Test func buildBriefPlansASoloFirstVersion() {
+        let idea = KillerIdea(key: "a", title: "InvoiceChaser")
+        idea.pitch = "Chases unpaid invoices"; idea.buyer = "Trades businesses"; idea.pricing = "$49/month"
+        idea.channel = "Xero App Store"; idea.replaces = "Manual reminder emails"
+        let brief = Prompts.buildBrief(idea)
+        #expect(brief.contains("Idea: InvoiceChaser"))
+        #expect(brief.contains("Sales channel: Xero App Store"))
+        #expect(brief.contains("Replaces: Manual reminder emails"))
+        #expect(brief.contains("What not to build yet"))
+        #expect(brief.contains("first prompt I should give my AI coding tool"))
+        let older = KillerIdea(key: "b", title: "Old")
+        #expect(!Prompts.buildBrief(older).contains("Sales channel:"))
     }
 }

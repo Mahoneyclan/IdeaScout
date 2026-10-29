@@ -8,6 +8,8 @@ import Foundation
 // MARK: - Shared fetcher plumbing
 
 /// One source of items.
+/// Threading: fetchers are `Sendable` values; `DigestService` runs all of them at once in a task group,
+/// off the main actor. They make network calls only and never touch the database.
 protocol ItemFetcher: Sendable {
     /// Which source this is (used in warnings and to pick the window).
     var kind: SourceKind { get }
@@ -22,7 +24,9 @@ protocol ItemFetcher: Sendable {
 
 /// Errors from source requests, worded for the user.
 enum FetchError: LocalizedError {
+    /// The server answered with this non-2xx status code.
     case http(Int)
+    /// A source needs a credential the user hasn't added. Currently unused: no remaining source needs one.
     case missingCredential(String)
 
     /// Plain-English message shown in warnings.
@@ -52,6 +56,10 @@ enum HTTP {
     }
 
     /// GET with optional extra headers.
+    /// - Parameters:
+    ///   - url: The address to fetch.
+    ///   - headers: Extra headers by name, e.g. `Accept`.
+    /// - Returns: The body.
     /// - Throws: As `data(for:)`.
     static func get(_ url: URL, headers: [String: String] = [:]) async throws -> Data {
         var request = URLRequest(url: url)
@@ -63,6 +71,10 @@ enum HTTP {
 /// Turns HTML or long text from sources into short plain text for prompts and the UI.
 enum TextCleaner {
     /// Strips HTML tags, decodes common entities, collapses whitespace and trims to `max` characters (with "…").
+    /// - Parameters:
+    ///   - html: Source text; `nil` or empty gives "".
+    ///   - max: Longest result in characters, including the "…".
+    /// - Returns: Plain text for prompts and the UI.
     static func clean(_ html: String?, max: Int = 220) -> String {
         guard var s = html, !s.isEmpty else { return "" }
         s = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
@@ -76,6 +88,12 @@ enum TextCleaner {
 
     /// Up to `max` characters of already-clean text, starting a little before the first matching phrase
     /// (case-insensitive). Falls back to the start of the text when no phrase is found.
+    /// - Parameters:
+    ///   - text: Already-clean text.
+    ///   - phrases: Phrases to centre on; the earliest match wins.
+    ///   - max: Longest result in characters, including any "…".
+    ///   - lead: Characters of context kept before the match.
+    /// - Returns: The text unchanged if it fits, otherwise the excerpt with "…" where text was cut.
     static func snippet(_ text: String, around phrases: [String], max: Int = 220, lead: Int = 60) -> String {
         guard text.count > max else { return text }
         let lower = text.lowercased()
@@ -98,6 +116,8 @@ enum ProductFilter {
                         "cheat sheet", "interview questions", "leetcode", ".github.io", "my portfolio", "hall of fame",
                         "weekly digest", "uncensored", "nsfw", "hentai", "lewd", "18+", "porn"]
 
+    /// Checks an item's title and description against `noise`.
+    /// - Parameter item: The item to check.
     /// - Returns: `false` if the item contains any noise word.
     static func isProductShaped(_ item: FetchedItem) -> Bool {
         let text = "\(item.title) \(item.detail)".lowercased()
@@ -110,6 +130,8 @@ enum ProductFilter {
 /// Date parsing shared by sources whose dates vary in format.
 enum ISODates {
     /// Parses ISO 8601 dates with or without fractional seconds and with any time-zone offset.
+    /// - Parameter text: The date text from a feed.
+    /// - Returns: The date, or `nil` if neither format matches.
     static func parse(_ text: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -117,6 +139,7 @@ enum ISODates {
     }
 
     /// A JSON decoder that reads ISO 8601 dates in any of the formats above.
+    /// - Returns: A new decoder; an unreadable date makes decoding throw `DecodingError.dataCorrupted`.
     static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in

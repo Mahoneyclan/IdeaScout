@@ -59,6 +59,7 @@ struct SettingsView: View {
                 Section {
                     Picker("Daily digest around", selection: $notifyHour) {
                         ForEach(5..<12) { hour in
+                            // Safe to unwrap: hours 5–11 exist on every day in every calendar.
                             Text(Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: .now)!
                                 .formatted(date: .omitted, time: .shortened)).tag(hour)
                         }
@@ -103,7 +104,9 @@ struct SettingsView: View {
 
 /// Lets the user drag the form to close the keyboard, and adds a Done button above it.
 extension View {
+    /// Adds interactive keyboard dismissal and a Done button to a form with text fields.
     /// - Parameter focus: The screen's focus state; Done sets it to `false`.
+    /// - Returns: The view with both behaviours added.
     func keyboardDone(_ focus: FocusState<Bool>.Binding) -> some View {
         scrollDismissesKeyboard(.interactively)
             .toolbar {

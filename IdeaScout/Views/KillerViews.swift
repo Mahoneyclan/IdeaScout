@@ -1,6 +1,6 @@
 // KillerViews.swift
 // Everything about killer ideas on screen: the Ideas tab (leaderboard with today's status and the refresh
-// button), idea cards, badges and the idea detail screen with its plan prompt.
+// button), idea cards, badges and the idea detail screen with its build brief.
 
 import SwiftUI
 import SwiftData
@@ -8,20 +8,34 @@ import UIKit
 
 // MARK: - Scores, badges and cards
 
-/// The five review scores: names, symbols and fields, used by the detail screen and the weakest-score summary.
+/// The review scores: names, symbols and fields, used by the detail screen and the weakest-score summary.
 enum KillerScoreMetrics {
-    /// Name, symbol and field of each score, in display order.
-    static let metrics: [(name: String, symbol: String, value: KeyPath<KillerIdea, Int>)] = [
-        ("Pain", "bandage", \.pain),
-        ("Willing to pay", "dollarsign.circle", \.willingToPay),
-        ("Why now", "clock", \.timing),
-        ("Gap", "arrow.triangle.branch", \.gap),
-        ("Fit for me", "person.crop.circle.badge.checkmark", \.fit),
+    /// Name, symbol and field of each score, in display order. `canBeUnscored` marks scores that older
+    /// ideas don't have (stored as 0), which are shown as "Not scored" and left out of the weakest score.
+    static let metrics: [(name: String, symbol: String, value: KeyPath<KillerIdea, Int>, canBeUnscored: Bool)] = [
+        ("Pain", "bandage", \.pain, false),
+        ("Willing to pay", "dollarsign.circle", \.willingToPay, false),
+        ("Buildable solo", "hammer", \.buildability, true),
+        ("Sales channel", "storefront", \.channelScore, true),
+        ("Gap", "arrow.triangle.branch", \.gap, false),
+        ("Fit for me", "person.crop.circle.badge.checkmark", \.fit, false),
+        ("Why now", "clock", \.timing, false),
     ]
 
-    /// The lowest of the five scores: an idea is only as strong as its weakest point.
+    /// The scores this idea was actually given: older ideas leave out buildability and sales channel.
+    /// - Parameter idea: The idea to check.
+    /// - Returns: Name, symbol and value of each scored measure, in display order.
+    static func scored(_ idea: KillerIdea) -> [(name: String, symbol: String, value: Int)] {
+        metrics.map { ($0.name, $0.symbol, idea[keyPath: $0.value], $0.canBeUnscored) }
+            .filter { !($0.3 && $0.2 == 0) }
+            .map { ($0.0, $0.1, $0.2) }
+    }
+
+    /// The lowest score the idea was given: an idea is only as strong as its weakest point.
+    /// - Parameter idea: The idea to check.
+    /// - Returns: The measure's label and score; ("", 0) only if no measure was scored.
     static func weakest(_ idea: KillerIdea) -> (name: String, value: Int) {
-        metrics.map { ($0.name, idea[keyPath: $0.value]) }.min { $0.1 < $1.1 } ?? ("", 0)
+        scored(idea).map { ($0.name, $0.value) }.min { $0.1 < $1.1 } ?? ("", 0)
     }
 
 }
@@ -97,7 +111,7 @@ struct KillerIdeaCard: View {
 }
 
 /// Everything about one idea: the opportunity, one-week test, devil's advocate, scores, evidence links,
-/// and a pinned "Copy plan prompt" button. The bookmark in the toolbar saves it.
+/// and a pinned "Copy build brief" button. The bookmark in the toolbar saves it.
 struct KillerIdeaDetailView: View {
     /// The idea shown; bindable so saving updates the screen.
     @Bindable var idea: KillerIdea
@@ -136,6 +150,12 @@ struct KillerIdeaDetailView: View {
                         Text(idea.replaces)
                     }
                 }
+                if !idea.channel.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Where to find buyers").font(.subheadline.bold())
+                        Text(idea.channel)
+                    }
+                }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Why now").font(.subheadline.bold())
                     Text(idea.whyNow)
@@ -160,8 +180,9 @@ struct KillerIdeaDetailView: View {
             }
             Section {
                 ForEach(KillerScoreMetrics.metrics, id: \.name) { metric in
+                    let value = idea[keyPath: metric.value]
                     LabeledContent {
-                        Text("\(idea[keyPath: metric.value])/5").monospacedDigit()
+                        Text(metric.canBeUnscored && value == 0 ? "Not scored" : "\(value)/5").monospacedDigit()
                     } label: {
                         Label(metric.name, systemImage: metric.symbol)
                     }
@@ -169,7 +190,7 @@ struct KillerIdeaDetailView: View {
             } header: {
                 Text("Scores")
             } footer: {
-                Text("Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"): \(seenDays). Fit for me uses your About me in Settings.")
+                Text("Buildable solo: could one person ship it with AI coding tools in about 4 weeks. Sales channel: can buyers be reached without a sales team. Why now counts half. Fit for me uses your About me in Settings. Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"): \(seenDays).")
             }
             if !idea.evidence.isEmpty {
                 Section("Evidence") {
@@ -184,13 +205,13 @@ struct KillerIdeaDetailView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            let prompt = Prompts.fleshOut(idea)
+            let prompt = Prompts.buildBrief(idea)
             HStack(spacing: 12) {
                 Button {
                     SecureClipboard.copy(prompt)   // Security: this device only, expires after 10 minutes
                     copied = true
                 } label: {
-                    Label(copied ? "Copied" : "Copy plan prompt", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    Label(copied ? "Copied" : "Copy build brief", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
@@ -198,7 +219,7 @@ struct KillerIdeaDetailView: View {
                     Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
                 }
                 .buttonStyle(.bordered)
-                .accessibilityLabel("Share plan prompt")
+                .accessibilityLabel("Share build brief")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -298,7 +319,6 @@ struct LeaderboardView: View {
     }
 }
 
-/// One line at the top of the Ideas tab: whether today's refresh has run and what it found.
 /// The first row of the Ideas tab: refresh progress, or when today's digest was made, how many ideas it
 /// produced and the latest note (e.g. limit reached). Tapping it opens today's full digest.
 struct TodayStatus: View {

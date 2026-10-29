@@ -101,6 +101,11 @@ struct IdeaDetailView: View {
     @State private var isSuggesting = false
     /// The last suggestion error, shown under the button.
     @State private var error: String?
+    /// Estimated cost of one suggestion request; `nil` when it's free. Read when the screen appears.
+    @State private var suggestionCost: Double?
+    /// Shows the "Suggest again?" confirmation before a repeat paid request.
+    @State private var confirmRepeat = false
+    @AppStorage(AppSettings.Keys.dailyCap) private var dailyCap = AppSettings.defaultDailyCap
     @State private var copied = false
 
     var body: some View {
@@ -123,16 +128,26 @@ struct IdeaDetailView: View {
             Section {
                 ForEach(idea.extensions, id: \.self) { Label($0, systemImage: "lightbulb") }
                 Button {
-                    Task { await suggest() }
+                    // Money: a repeat paid request asks first, like a second refresh does.
+                    if !idea.extensions.isEmpty && suggestionCost != nil { confirmRepeat = true }
+                    else { Task { await suggest() } }
                 } label: {
                     if isSuggesting {
                         HStack { ProgressView(); Text("Thinking…") }
                     } else {
-                        Label(idea.extensions.isEmpty ? "Suggest money-making variants" : "Suggest again",
+                        Label((idea.extensions.isEmpty ? "Suggest money-making variants" : "Suggest again") + costSuffix,
                               systemImage: "sparkles")
                     }
                 }
+                .frame(minHeight: 44)
                 .disabled(isSuggesting)
+                .confirmationDialog("Suggest again?", isPresented: $confirmRepeat, titleVisibility: .visible) {
+                    Button("Suggest again (\(suggestionCost.map(AppSettings.approximateCostText) ?? ""))") {
+                        Task { await suggest() }
+                    }
+                } message: {
+                    Text(repeatMessage)
+                }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
             } header: {
                 Text("Monetisable extensions & variants")
@@ -161,8 +176,24 @@ struct IdeaDetailView: View {
             }
         }
         .onChange(of: idea.note) { copied = false }
+        .onAppear { suggestionCost = AppSettings.suggestionCost() }
         .navigationTitle("Idea")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The price shown on the suggest button: the estimate for a paid AI, "free" for Apple's on-device model,
+    /// nothing in keyword mode (where suggestions aren't available).
+    private var costSuffix: String {
+        if let suggestionCost { return " · " + AppSettings.approximateCostText(suggestionCost) }
+        return AppleSummarizer.isAvailable ? " · free" : ""
+    }
+
+    /// Explains the repeat request's cost and today's spending against the daily limit.
+    private var repeatMessage: String {
+        let cost = suggestionCost.map(AppSettings.approximateCostText) ?? ""
+        let spent = UsageTracker.summary().today.cost.formatted(.currency(code: "USD"))
+        let limit = dailyCap > 0 ? " of \(dailyCap.formatted(.currency(code: "USD")))" : ""
+        return "This makes another paid AI request (\(cost)). Spent today: \(spent)\(limit)."
     }
 
     /// Asks the current AI for variants and shows any error.

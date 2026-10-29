@@ -10,7 +10,9 @@ import Foundation
 /// Where an item came from. The raw value is stored in the database (`Item.sourceRaw`), so cases
 /// must not be renamed; a removed case makes old items fall back to `.github` for display.
 enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    /// The first eleven sources. Each one's display name and signal are in `label` and `signal`.
     case github, hackerNews, vibeCode, huggingFace, devTo, games, painPoints, ycombinator, appStore, research, lobsters
+    /// Business sources added later: My Business Challenges, App Store complaints, Atlassian Marketplace and AusTender.
     case fieldNotes, appReviews, atlassian, ausTender
 
     /// Identity for SwiftUI lists.
@@ -70,10 +72,12 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     /// Developer- and game-focused sources start switched off, so ideas lean towards business buyers.
+    /// GitHub, Show HN and AI research show what builders make rather than what buyers need, and AusTender's
+    /// government contracts are out of reach for a solo builder, so they start off too.
     /// A toggle the user has set in Settings always wins.
     var enabledByDefault: Bool {
         switch self {
-        case .games, .devTo, .lobsters, .huggingFace: false
+        case .games, .devTo, .lobsters, .huggingFace, .github, .hackerNews, .research, .ausTender: false
         default: true
         }
     }
@@ -82,6 +86,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
 /// The three kinds of evidence. Demand is what buyers need or pay for (complaints, the user's own
 /// challenges, government spending); supply is what's being built; timing is what's newly possible.
 enum Signal: String, CaseIterable, Sendable {
+    /// The three kinds, as described above.
     case demand, supply, timing
 
     /// "Demand", "Supply" or "Timing", used in prompts and Settings.
@@ -115,10 +120,14 @@ struct FetchedItem: Equatable, Sendable {
     var url: URL
     /// Stars / points / votes (or rank, value in $k): higher = more traction; compared only within a source.
     var score: Int
-    /// When it was posted. Sources without dates use the start of the window, so they never look "new".
+    /// When it was posted. Sources with no dates at all (charts, Y Combinator, Atlassian, business challenges)
+    /// use the start of the window, so they never look "new". Steam games, and items whose date is missing
+    /// from itch.io, Hugging Face papers or AusTender, are dated at fetch time instead.
     var postedAt: Date
 
     /// Whether it was posted in the last 24 hours (shown as NEW, and boosts momentum).
+    /// - Parameter now: The reference time; tests pass a fixed date.
+    /// - Returns: `true` if posted less than 24 hours before `now`.
     func isNew(now: Date = .now) -> Bool { postedAt > now.addingTimeInterval(-24 * 60 * 60) }
 }
 
@@ -182,18 +191,23 @@ enum DigestWarning {
     /// - Parameters:
     ///   - message: Plain text for the user.
     ///   - details: Technical detail for diagnosis, or `nil`.
+    /// - Returns: The message, followed by `marker` and the details when there are any.
     static func make(_ message: String, details: String? = nil) -> String {
         guard let details, !details.isEmpty else { return message }
         return message + marker + details
     }
 
     /// Splits a stored warning into its message and (if any) details.
+    /// - Parameter warning: A string built by `make`, or a plain message.
+    /// - Returns: The message, and the details or `nil`.
     static func parts(_ warning: String) -> (message: String, details: String?) {
         guard let range = warning.range(of: marker) else { return (warning, nil) }
         return (String(warning[..<range.lowerBound]), String(warning[range.upperBound...]))
     }
 
     /// A plain message for an error, plus its technical detail when it has one.
+    /// - Parameter error: Any error from a refresh step.
+    /// - Returns: The user-facing message, and the provider's raw status and reply start for HTTP errors.
     static func describe(_ error: Error) -> (message: String, details: String?) {
         if let http = error as? LLMHTTPError { return (http.errorDescription ?? "", http.technicalDetail) }
         return (error.localizedDescription, nil)

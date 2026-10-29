@@ -15,7 +15,7 @@ There is **no server**. Everything runs on the iPhone; AI calls go directly from
 | Tab / screen | File | What it shows |
 |---|---|---|
 | **Ideas** (first tab) | `Views/KillerViews.swift` (`LeaderboardView`) | Today's status and progress, killer ideas then near-misses, and the bottom refresh button |
-| Idea detail | `KillerViews.swift` (`KillerIdeaDetailView`) | Who pays, price, what it replaces, why now, one-week test, devil's advocate, scores, evidence, plan prompt, save |
+| Idea detail | `KillerViews.swift` (`KillerIdeaDetailView`) | Who pays, price, what it replaces, where to find buyers, why now, one-week test, devil's advocate, scores, evidence, build brief (`AI/BuildBrief.swift`), save |
 | **History** | `Views/RootView.swift` (`HistoryView`) | One row per day with its best idea and pain clusters |
 | Day view | `Views/DayView.swift` (`DigestContentView`) | That day's ideas, pain clusters, ranked trends with projects, notes |
 | **Saved** | `Views/IdeasView.swift` | Bookmarked ideas, then starred projects (notes, AI variants, prompt) |
@@ -78,7 +78,8 @@ Merge into KillerIdeas (new, or update returning ones) ─▶ screens update aut
 ## Key rules and why
 - **Signal shares (40/40/20):** stop developer-heavy sources crowding out evidence of demand.
 - **Evidence caps:** pain and willingness to pay can't score above 3 without matching evidence (models score generously).
-- **Never a paid fallback:** if the chosen provider isn't usable, the app uses Apple's free AI, never another paid provider.
+- **Built for a solo vibe coder:** ideas must be buildable by one person with AI coding tools and name a sales channel. The critic scores buildability and channel; any score below 2 drops the idea. Why now counts half in the killer score (`KillerIdea.killerScore`, the only place the weighting lives), because "AI makes it cheap" applies to almost everything. Ideas saved before these scores existed keep their original five-score average.
+- **Never a paid fallback:** if the chosen provider isn't usable, the app uses Apple's free AI, never another paid provider. (Claude requests do allow Anthropic's own server-side fallback to another Claude model; see SECURITY.md.)
 - **Consent first:** no personal data goes to a cloud provider until the user agrees for that provider.
 - **Save early:** trends are saved before the idea step, so a failure or iOS ending the app can't lose them.
 - **Daily spending limit:** checked before the trend and idea steps (default $1.00).

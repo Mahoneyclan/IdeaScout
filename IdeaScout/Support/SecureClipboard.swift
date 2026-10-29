@@ -1,6 +1,6 @@
 // SecureClipboard.swift
 // Copies prompt text (which can include the user's About me and notes) to the clipboard safely.
-// Used by "Copy plan prompt" (KillerViews) and "Copy prompt" (IdeasView).
+// Used by "Copy build brief" (KillerViews) and "Copy prompt" (IdeasView).
 
 import UIKit
 import UniformTypeIdentifiers
@@ -21,6 +21,7 @@ enum SecureClipboard {
 
     /// The pasteboard options used for every copy (separated out so tests can check them).
     /// - Parameter now: The time the copy is made.
+    /// - Returns: Local-only, expiring `lifetime` after `now`.
     static func options(now: Date = .now) -> [UIPasteboard.OptionsKey: Any] {
         [.localOnly: true, .expirationDate: now.addingTimeInterval(lifetime)]
     }

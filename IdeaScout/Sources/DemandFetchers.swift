@@ -16,11 +16,20 @@ struct FieldNotesFetcher: ItemFetcher {
     let notes: String
 
     /// Turns the saved text into items (no network).
+    /// - Parameters:
+    ///   - since: Start of the look-back window, used as every item's date.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: One item per non-empty line.
+    /// - Throws: Never; the signature comes from `ItemFetcher`.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         Self.items(from: notes, postedAt: since)
     }
 
     /// One item per non-empty line. The key comes from the text, so an edited note counts as a new one.
+    /// - Parameters:
+    ///   - notes: The text from Settings.
+    ///   - postedAt: Date given to every item.
+    /// - Returns: The items, linked to `ideascout://field-note/<line>` (an internal marker, never opened).
     static func items(from notes: String, postedAt: Date) -> [FetchedItem] {
         notes.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -29,6 +38,7 @@ struct FieldNotesFetcher: ItemFetcher {
             .map { index, line in
                 let key = KillerIdea.key(for: line).prefix(60)
                 return FetchedItem(key: "note-\(key)", source: .fieldNotes, title: line,
+                                   // Safe to unwrap: the line number is an Int, so the address is always valid.
                                    detail: "From my own work", url: URL(string: "ideascout://field-note/\(index + 1)")!,
                                    score: 0, postedAt: postedAt)
             }
@@ -56,19 +66,30 @@ struct AppReviewsFetcher: ItemFetcher {
 
     /// One app from a top-grossing chart.
     struct App: Equatable, Sendable {
+        /// Numeric App Store ID (non-numeric IDs are dropped by `parseChart`).
         var id: String
+        /// App name, used as the start of each review's title.
         var name: String
+        /// Store country code, e.g. "au".
         var country: String
+        /// Genre name, e.g. "Finance".
         var genre: String
+        /// Position in the chart, from 1.
         var rank: Int
     }
 
     /// Reads the charts, picks today's apps, then reads their recent reviews. Throws only if every chart failed.
+    /// - Parameters:
+    ///   - since: Start of the window; reviews look back at least `windowDays`.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Up to `reviewsPerApp` 1–2 star reviews for each of today's apps.
+    /// - Throws: The first error, only if every chart failed and no reviews were found.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         var apps: [App] = []
         var firstError: Error?
         for country in Self.countries {
             for (genreID, genre) in Self.genres.sorted(by: { $0.key < $1.key }) {
+                // Safe to unwrap: country and genre come from the fixed lists above, not from outside data.
                 let url = URL(string: "https://itunes.apple.com/\(country)/rss/topgrossingapplications/limit=25/genre=\(genreID)/json")!
                 do { apps += try Self.parseChart(try await HTTP.get(url), country: country, genre: genre) }
                 catch { firstError = firstError ?? error }
@@ -105,7 +126,13 @@ struct AppReviewsFetcher: ItemFetcher {
         let feed: Feed
     }
 
+    /// Reads one top-grossing chart.
+    /// - Parameters:
+    ///   - data: The chart feed.
+    ///   - country: Store country code, kept on each app.
+    ///   - genre: Genre name, kept on each app.
     /// - Returns: The chart's apps with their rank (1-based).
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parseChart(_ data: Data, country: String, genre: String) throws -> [App] {
         // Robustness: App Store IDs are numeric; anything else is skipped rather than used to build links.
         (try JSONDecoder().decode(Chart.self, from: data).feed.entry ?? []).enumerated()
@@ -117,6 +144,10 @@ struct AppReviewsFetcher: ItemFetcher {
 
     /// Skips the top 5 (giants like LinkedIn, whose complaints are too general), removes duplicates
     /// across charts, then rotates through the rest a few apps a day.
+    /// - Parameters:
+    ///   - apps: Every chart's apps, in chart order.
+    ///   - day: Day of the year, which picks today's slice.
+    /// - Returns: Up to `appsPerDay` apps.
     static func todaysApps(_ apps: [App], day: Int) -> [App] {
         var seen = Set<String>()
         let pool = apps.filter { $0.rank > 5 && seen.insert($0.id).inserted }
@@ -143,6 +174,12 @@ struct AppReviewsFetcher: ItemFetcher {
 
     /// Keeps reviews of 1–2 stars posted since `since` (at most `reviewsPerApp`). Score is 2 for one star,
     /// 1 for two, so the angriest come first.
+    /// - Parameters:
+    ///   - data: The app's review feed.
+    ///   - app: The app the reviews belong to.
+    ///   - since: Oldest review date kept.
+    /// - Returns: Up to `reviewsPerApp` items, in the feed's newest-first order.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parseReviews(_ data: Data, app: App, since: Date) throws -> [FetchedItem] {
         let entries = try JSONDecoder().decode(Reviews.self, from: data).feed.entry ?? []
         guard let url = URL(string: "https://apps.apple.com/\(app.country)/app/id\(app.id)") else { return [] }
@@ -168,10 +205,16 @@ struct AtlassianFetcher: ItemFetcher {
     let kind = SourceKind.atlassian
 
     /// Reads both lists; throws only if both fail.
+    /// - Parameters:
+    ///   - since: Start of the window, used as every item's date.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Up to 12 trending and 15 new apps.
+    /// - Throws: The first error, only if both lists failed.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         var results: [FetchedItem] = []
         var firstError: Error?
         for (filter, limit) in [("trending", 12), ("new", 15)] {
+            // Safe to unwrap: filter and limit come from the fixed list above.
             let url = URL(string: "https://marketplace.atlassian.com/rest/2/addons?filter=\(filter)&limit=\(limit)&hosting=cloud")!
             do { results += try Self.parse(try await HTTP.get(url), label: filter, postedAt: since) }
             catch { firstError = firstError ?? error }
@@ -207,6 +250,8 @@ struct AtlassianFetcher: ItemFetcher {
     ///   - data: The Marketplace reply.
     ///   - label: "trending" or "new", included in the detail.
     ///   - postedAt: Date given to every item (listings have no useful date, so the window start is used).
+    /// - Returns: One item per add-on.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data, label: String, postedAt: Date) throws -> [FetchedItem] {
         try JSONDecoder().decode(Response.self, from: data)._embedded.addons.map { addon in
             let installs = addon._embedded?.distribution?.totalInstalls ?? 0
@@ -215,6 +260,7 @@ struct AtlassianFetcher: ItemFetcher {
             detail += " (\(label) Jira/Confluence app, \(installs) installs" + (categories.isEmpty ? ")" : "; \(categories))")
             let path = addon._links?.alternate?.href ?? "/apps/\(addon.id)"
             return FetchedItem(key: "atl-\(addon.id)", source: .atlassian, title: addon.name, detail: detail,
+                               // Safe to unwrap: the fallback is a constant, valid URL.
                                url: URL(string: "https://marketplace.atlassian.com" + path) ?? URL(string: "https://marketplace.atlassian.com")!,
                                score: installs, postedAt: postedAt)
         }
@@ -235,6 +281,11 @@ struct AusTenderFetcher: ItemFetcher {
     static let itPrefixes = ["43", "8111"]
 
     /// Follows the API's "next" links up to `maxPages` pages.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Up to `maxItems` IT contracts, largest first.
+    /// - Throws: Network, HTTP or decoding errors; any failed page fails the source.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         let f = ISO8601DateFormatter()
         var next: URL? = URL(string: "https://api.tenders.gov.au/ocds/findByDates/contractPublished/\(f.string(from: since))/\(f.string(from: .now))")
@@ -272,6 +323,9 @@ struct AusTenderFetcher: ItemFetcher {
     }
 
     /// IT contracts only. Score is the value in thousands of dollars.
+    /// - Parameter data: One page of the OCDS reply.
+    /// - Returns: The page's IT contracts (dated now if the signing date is missing) and the next page's address.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data) throws -> (items: [FetchedItem], next: URL?) {
         let response = try JSONDecoder().decode(Response.self, from: data)
         var items: [FetchedItem] = []

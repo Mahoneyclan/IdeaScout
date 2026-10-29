@@ -12,6 +12,11 @@ struct GamesFetcher: ItemFetcher {
     let kind = SourceKind.games
 
     /// Collects every part; throws only if all failed.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Items from itch.io, Steam, Hacker News, GitHub and Hugging Face, in that order.
+    /// - Throws: The first error, only if every part failed and nothing was found.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         var results: [FetchedItem] = []
         var firstError: Error?
@@ -19,6 +24,7 @@ struct GamesFetcher: ItemFetcher {
         func collect(_ work: () async throws -> [FetchedItem]) async {
             do { results += try await work() } catch { firstError = firstError ?? error }
         }
+        // Safe to unwrap: a constant, valid URL.
         await collect { try ItchFeed.parse(try await HTTP.get(URL(string: "https://itch.io/games/newest.xml")!)) }
         await collect { try await SteamStore.upcoming() }
         await collect {
@@ -27,10 +33,12 @@ struct GamesFetcher: ItemFetcher {
         }
         await collect { try await GitHubFetcher.search("topic:game created:>\(GitHubFetcher.day(since)) stars:>=10", as: .games, perPage: 10) }
         await collect {
+            // Safe to unwrap: a constant, valid URL.
             var c = URLComponents(string: "https://huggingface.co/api/spaces")!
             c.queryItems = [URLQueryItem(name: "search", value: "game"), URLQueryItem(name: "sort", value: "trendingScore"),
                             URLQueryItem(name: "direction", value: "-1"), URLQueryItem(name: "limit", value: "15"),
                             URLQueryItem(name: "full", value: "true")]
+            // Safe to unwrap: a constant address with fixed query items always forms a valid URL.
             return try HuggingFaceFetcher.parse(try await HTTP.get(c.url!)).map { var item = $0; item.source = .games; return item }
         }
         if results.isEmpty, let firstError { throw firstError }
@@ -46,6 +54,9 @@ final class ItchFeed: NSObject, XMLParserDelegate {
     private var inItem = false
 
     /// Parses an itch.io RSS feed into items (no score; dated by creation date).
+    /// - Parameter data: The RSS feed.
+    /// - Returns: One item per entry with a title and valid link; an undated entry is dated now.
+    /// - Throws: The XML parser's error if the feed isn't valid XML.
     static func parse(_ data: Data) throws -> [FetchedItem] {
         let feed = ItchFeed()
         let parser = XMLParser(data: data)
@@ -62,6 +73,12 @@ final class ItchFeed: NSObject, XMLParserDelegate {
     }()
 
     /// XMLParserDelegate callbacks: collect each <item>'s fields, then build an item when it closes.
+    /// - Parameters:
+    ///   - parser: The parser (unused).
+    ///   - name: The element name.
+    ///   - namespaceURI: Unused.
+    ///   - qualifiedName: Unused.
+    ///   - attributes: Unused.
     func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?, qualifiedName: String?,
                 attributes: [String: String] = [:]) {
         if name == "item" { inItem = true; fields = [:] }
@@ -69,12 +86,23 @@ final class ItchFeed: NSObject, XMLParserDelegate {
     }
 
     /// Collects text inside the current element.
+    /// - Parameters:
+    ///   - parser: The parser (unused).
+    ///   - string: The text.
     func parser(_ parser: XMLParser, foundCharacters string: String) { current += string }
 
     /// Collects CDATA text inside the current element.
+    /// - Parameters:
+    ///   - parser: The parser (unused).
+    ///   - block: The CDATA bytes, read as UTF-8.
     func parser(_ parser: XMLParser, foundCDATA block: Data) { current += String(decoding: block, as: UTF8.self) }
 
     /// Stores a finished field, and finishes an item at </item>.
+    /// - Parameters:
+    ///   - parser: The parser (unused).
+    ///   - name: The element name.
+    ///   - namespaceURI: Unused.
+    ///   - qualifiedName: Unused.
     func parser(_ parser: XMLParser, didEndElement name: String, namespaceURI: String?, qualifiedName: String?) {
         guard inItem else { return }
         if name == "item" {
@@ -98,13 +126,18 @@ enum SteamStore {
         struct Section: Decodable { let items: [Entry] }
         /// One entry in the feed.
         struct Entry: Decodable { let id: Int; let name: String; let type: Int? }
+        /// Upcoming games.
         let coming_soon: Section?
+        /// Recently released games.
         let new_releases: Section?
     }
 
     /// Up to 20 featured "coming soon" and "new releases" games, each with its short description (one
     /// detail call per game, made in parallel; failures are skipped).
+    /// - Returns: The games, dated now (they're upcoming or just released).
+    /// - Throws: Network, HTTP or decoding errors for the featured list.
     static func upcoming() async throws -> [FetchedItem] {
+        // Safe to unwrap: a constant, valid URL.
         let data = try await HTTP.get(URL(string: "https://store.steampowered.com/api/featuredcategories?cc=us&l=english")!)
         let entries = try parseFeatured(data)
         return await withTaskGroup(of: FetchedItem?.self) { group in
@@ -118,6 +151,9 @@ enum SteamStore {
     }
 
     /// Featured entries, de-duplicated, games only (type 0).
+    /// - Parameter data: The featured-categories reply.
+    /// - Returns: Coming-soon entries first, then new releases.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parseFeatured(_ data: Data) throws -> [Featured.Entry] {
         let featured = try JSONDecoder().decode(Featured.self, from: data)
         var seen = Set<Int>()
@@ -126,6 +162,7 @@ enum SteamStore {
     }
 
     private static func details(for entry: Featured.Entry) async throws -> FetchedItem {
+        // Safe to unwrap: `entry.id` is decoded as an Int, so the address is always valid.
         let url = URL(string: "https://store.steampowered.com/api/appdetails?appids=\(entry.id)&filters=basic")!
         /// The appdetails reply for one game.
         struct Wrapper: Decodable {
@@ -136,6 +173,7 @@ enum SteamStore {
         let response = try JSONDecoder().decode([String: Wrapper].self, from: try await HTTP.get(url))
         let detail = response.values.first?.data?.short_description
         return FetchedItem(key: "steam-\(entry.id)", source: .games, title: entry.name, detail: TextCleaner.clean(detail),
+                           // Safe to unwrap: `entry.id` is decoded as an Int, so the address is always valid.
                            url: URL(string: "https://store.steampowered.com/app/\(entry.id)")!, score: 0, postedAt: .now)
     }
 }

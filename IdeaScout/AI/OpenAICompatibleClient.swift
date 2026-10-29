@@ -20,6 +20,16 @@ struct OpenAICompatibleClient: LLMClient {
 
     /// Sends one request (see LLMClient.complete). On HTTP 400 it tries once more without the optional
     /// settings, because some models reject `reasoning_effort` or the reply-length field rather than ignoring them.
+    /// That re-send is a second request, which may also be billed.
+    /// - Parameters:
+    ///   - system: Instructions.
+    ///   - prompt: The user message.
+    ///   - schema: JSON Schema the reply must follow.
+    ///   - effort: Reasoning effort, sent only where the model accepts it.
+    ///   - feature: Cost-tracker label.
+    /// - Returns: The reply converted to Claude's message format.
+    /// - Throws: `SummarizerError.unavailable` if the provider has no chat address, `LLMHTTPError`, network
+    ///   errors, `SummarizerError.badResponse` or `DecodingError` from `convert`, or `CancellationError`.
     func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
         guard let url = provider.chatURL else { throw SummarizerError.unavailable }
         let full = Self.requestBody(provider: provider, model: model, system: system, prompt: prompt, schema: schema, effort: effort)
@@ -97,6 +107,8 @@ struct OpenAICompatibleClient: LLMClient {
     /// Turns an OpenAI-style chat reply into the Claude-style shape the parsers expect: `finish_reason` "length"
     /// becomes "max_tokens", "content_filter" or a refusal becomes "refusal"; cached prompt tokens are split
     /// out of the input count so they're priced at the cache rate.
+    /// - Parameter data: The provider's raw reply.
+    /// - Returns: JSON with `content`, `stop_reason` and `usage`, as `LLMSummarizer.extractJSON` expects.
     /// - Throws: Decoding errors, or `.badResponse` if there's no reply.
     static func convert(_ data: Data) throws -> Data {
         /// The parts of an OpenAI-style chat reply needed here.
@@ -137,6 +149,8 @@ struct OpenAICompatibleClient: LLMClient {
     }
 
     /// Some models wrap JSON in ```json fences despite being asked not to.
+    /// - Parameter text: The model's reply text.
+    /// - Returns: The text without a leading fence line and trailing fence, trimmed.
     static func stripFences(_ text: String) -> String {
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard t.hasPrefix("```") else { return t }

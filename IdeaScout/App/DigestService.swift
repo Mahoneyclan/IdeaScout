@@ -62,6 +62,7 @@ final class DigestService {
     /// What this instance uses for sources, AI, trial state and notifications.
     @ObservationIgnored private let dependencies: Dependencies
 
+    /// Creates the service. The app uses one shared instance; tests create their own.
     /// - Parameter dependencies: `.live` in the app; stand-ins in tests.
     init(dependencies: Dependencies = .live) {
         self.dependencies = dependencies
@@ -76,6 +77,7 @@ final class DigestService {
 
     /// Refresh steps shown as "Step n of 4". Raw values are the step numbers.
     enum Stage: Int, CaseIterable {
+        /// Steps 1–4: fetch sources, trend step, idea step (pass 1), devil's advocate (pass 2).
         case fetching = 1, trends, ideas, critique
         /// Plain-English step name.
         var label: String {
@@ -181,6 +183,10 @@ final class DigestService {
 
     /// Whether today's digest should be (re)built without `force`: none exists yet, or it fell back to
     /// keywords and an AI is now available.
+    /// - Parameters:
+    ///   - summarizers: The summariser names of today's existing digests (empty if none).
+    ///   - aiAvailable: Whether an AI other than keywords can run now.
+    /// - Returns: `true` if an automatic refresh should build today's digest.
     nonisolated static func needsRebuild(existing summarizers: [String], aiAvailable: Bool) -> Bool {
         summarizers.isEmpty || (summarizers.contains(KeywordSummarizer(topics: []).name) && aiAvailable)
     }
@@ -301,7 +307,8 @@ final class DigestService {
         do {
             let leaderboard = topKillerIdeas(context: context, limit: 10).map { "\($0.title): \($0.pitch)" }
             stage = .ideas
-            // Capture the (main-actor, Sendable) service itself rather than a mutable `self` reference.
+            // `onCritique` is called from the engine off the main actor; it hops back to update `stage`,
+            // which drives the progress row ("Step … · Devil's advocate").
             let service = self
             let results = try await KillerEngine(llm: llm, onCritique: {
                 await MainActor.run { service.stage = .critique }
@@ -329,11 +336,15 @@ final class DigestService {
     private static var capText: String { AppSettings.dailyCap.formatted(.currency(code: "USD")) }
 
     /// Whether an error means "stopped on purpose" (task cancelled or request cancelled), which isn't reported.
+    /// - Parameter error: Any error from a refresh step.
+    /// - Returns: `true` for `CancellationError` or a cancelled `URLError`.
     nonisolated static func isCancellation(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
     /// Cloud AI digests beat Apple's, which beat keyword grouping.
+    /// - Parameter summarizer: A digest's summariser name.
+    /// - Returns: 1 (keywords), 2 (Apple) or 3 (any cloud AI).
     nonisolated static func quality(_ summarizer: String) -> Int {
         switch summarizer {
         case KeywordSummarizer(topics: []).name: 1
@@ -342,12 +353,20 @@ final class DigestService {
         }
     }
 
+    /// Decides whether a new digest replaces today's existing one.
+    /// - Parameters:
+    ///   - existing: The existing digest's summariser name.
+    ///   - new: The new digest's summariser name.
     /// - Returns: `true` if a digest from `new` is at least as good as the existing one.
     nonisolated static func shouldReplace(existing: String, with new: String) -> Bool {
         quality(new) >= quality(existing)
     }
 
     /// The start of a look-back window of `days` days before `now`.
+    /// - Parameters:
+    ///   - days: Window length in days.
+    ///   - now: The end of the window; tests pass a fixed date.
+    /// - Returns: `now` minus `days` × 24 hours.
     nonisolated static func windowStart(days: Int, now: Date = .now) -> Date {
         now.addingTimeInterval(-Double(days) * 24 * 60 * 60)
     }
@@ -392,6 +411,7 @@ final class DigestService {
     /// - Parameters:
     ///   - context: The database context.
     ///   - limit: How many to return.
+    /// - Returns: Up to `limit` ideas, highest leaderboard score first; empty if the fetch fails.
     func topKillerIdeas(context: ModelContext, limit: Int) -> [KillerIdea] {
         let all = (try? context.fetch(FetchDescriptor<KillerIdea>())) ?? []
         return Array(all.sorted { $0.leaderboardScore > $1.leaderboardScore }.prefix(limit))
@@ -413,10 +433,11 @@ final class DigestService {
                 context.insert(idea)
             }
             idea.pitch = c.pitch; idea.buyer = c.buyer; idea.pricing = c.pricing; idea.whyNow = c.whyNow
-            idea.oneWeekTest = c.oneWeekTest; idea.replaces = c.replaces
+            idea.oneWeekTest = c.oneWeekTest; idea.replaces = c.replaces; idea.channel = c.channel
             idea.objection = r.objection; idea.competitors = r.competitors
             idea.verdict = r.evidenceNeeded.isEmpty ? r.verdict : "\(r.verdict) Evidence that would raise the score: \(r.evidenceNeeded)"
             idea.pain = r.pain; idea.willingToPay = r.willingToPay; idea.timing = r.timing; idea.gap = r.gap; idea.fit = r.fit
+            idea.buildability = r.buildability; idea.channelScore = r.channelScore
             let evidence = c.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
             if !evidence.isEmpty {
                 idea.evidenceTitles = evidence.map(\.title)

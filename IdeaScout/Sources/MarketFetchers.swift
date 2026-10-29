@@ -14,6 +14,11 @@ struct YCombinatorFetcher: ItemFetcher {
     static let perDay = 25
 
     /// The newest B2B batch (rotated), plus Launch HN; throws only if both failed.
+    /// - Parameters:
+    ///   - since: Start of the window; also the date given to the companies.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: About `perDay` companies plus up to 20 Launch HN posts.
+    /// - Throws: The first error, only if both parts failed.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         var results: [FetchedItem] = []
         var firstError: Error?
@@ -29,6 +34,7 @@ struct YCombinatorFetcher: ItemFetcher {
         return results
     }
 
+    // Safe to unwrap: a constant, valid URL.
     /// yc-oss's list of every B2B company (about 5 MB), refreshed daily by that project.
     static let b2bURL = URL(string: "https://yc-oss.github.io/api/industries/b2b.json")!
     /// A batch is only used once it has this many B2B companies (future batches start nearly empty).
@@ -40,6 +46,11 @@ struct YCombinatorFetcher: ItemFetcher {
     }
 
     /// Business (B2B) companies from the newest batch that has at least `minimumBatchSize` of them.
+    /// - Parameters:
+    ///   - data: The yc-oss B2B list.
+    ///   - postedAt: Date given to every company.
+    /// - Returns: The batch's companies as items.
+    /// - Throws: `DecodingError` if the list's shape has changed, or `FetchError.http(404)` if no batch is big enough.
     static func newestBatch(in data: Data, postedAt: Date) throws -> [FetchedItem] {
         let companies = try JSONDecoder().decode([Company].self, from: data)
         let counts = Dictionary(grouping: companies.compactMap(\.batch), by: { $0 }).mapValues(\.count)
@@ -49,6 +60,8 @@ struct YCombinatorFetcher: ItemFetcher {
     }
 
     /// "Fall 2026" → 20264. YC runs Winter, Spring, Summer and Fall batches.
+    /// - Parameter batch: The batch name from yc-oss.
+    /// - Returns: A sortable number; 0 for names it can't read.
     static func batchOrder(_ batch: String) -> Int {
         let parts = batch.split(separator: " ")
         guard parts.count == 2, let year = Int(parts[1]) else { return 0 }
@@ -57,6 +70,10 @@ struct YCombinatorFetcher: ItemFetcher {
     }
 
     /// The same batch is sent every day, so rotate through it ~25 companies at a time.
+    /// - Parameters:
+    ///   - items: The batch's companies.
+    ///   - day: Day of the year, which picks today's slice.
+    /// - Returns: Up to `perDay` companies, wrapping round the batch.
     static func rotation(_ items: [FetchedItem], day: Int) -> [FetchedItem] {
         guard items.count > perDay else { return items }
         let start = (day * perDay) % items.count
@@ -74,6 +91,11 @@ struct YCombinatorFetcher: ItemFetcher {
     }
 
     /// Batches have no useful date, so items are dated at the start of the window (never "new").
+    /// - Parameters:
+    ///   - data: A yc-oss company list.
+    ///   - postedAt: Date given to every company.
+    /// - Returns: One item per company with a valid link.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data, postedAt: Date) throws -> [FetchedItem] {
         items(try JSONDecoder().decode([Company].self, from: data), postedAt: postedAt)
     }
@@ -98,7 +120,13 @@ struct AppStoreFetcher: ItemFetcher {
     let kind = SourceKind.appStore
 
     /// Reads the US top-paid chart.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: The 25 apps, dated at the start of the window.
+    /// - Throws: Network, HTTP or decoding errors.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        // Safe to unwrap: a constant, valid URL.
         let url = URL(string: "https://rss.marketingtools.apple.com/api/v2/us/apps/top-paid/25/apps.json")!
         return try Self.parse(try await HTTP.get(url), postedAt: since)
     }
@@ -119,6 +147,11 @@ struct AppStoreFetcher: ItemFetcher {
     }
 
     /// Rank becomes the score (number 1 scores highest).
+    /// - Parameters:
+    ///   - data: The chart reply.
+    ///   - postedAt: Date given to every app (charts have no useful date).
+    /// - Returns: One item per app with a valid link.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data, postedAt: Date) throws -> [FetchedItem] {
         let apps = try JSONDecoder().decode(Response.self, from: data).feed.results
         return apps.enumerated().compactMap { rank, app in

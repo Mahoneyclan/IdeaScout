@@ -1,13 +1,13 @@
 # IdeaScout
 
-An iPhone app that hunts for a **killer business software idea**. Every day it scans startup launches, funded B2B startups, top paid apps, open-source projects and places where people complain about missing or overpriced tools. It groups what it finds into trends, scores them, and proposes business product ideas that have survived a devil's-advocate review.
+An iPhone app that hunts for a **killer business software idea that one person can vibe-code and sell**. It's for someone looking for a business idea who will build it on their own with AI coding tools. Every day it scans places where businesses complain about missing or overpriced tools, what they already pay for, and what other builders have already made. It proposes ideas for business buyers that one person could ship in about four weeks and sell through a named channel (a marketplace or community), each checked by a devil's-advocate review.
 
 Native Swift / SwiftUI / SwiftData. No backend: everything runs on the phone.
 
 ## What it does
 
 - **Ideas** (opens first): a leaderboard of killer ideas and near-misses, with today's refresh status and step-by-step progress at the top. Ideas that come back on several days rank higher. Each card shows its weakest score; swipe left to dismiss (with confirmation).
-- **Killer ideas:** Claude suggests 5 business product ideas from the trends and pain clusters. Each names a business buyer, a monthly price and the manual task or costly workaround it replaces; at most 1 may be a developer tool and at least 2 target your industry focus. A second, sceptical pass (given each idea's evidence) tries to kill each one. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**. Each idea records every day it was proposed.
+- **Killer ideas:** Claude suggests 5 business product ideas from the trends and pain clusters. Each names a business buyer, a monthly price, the manual task or costly workaround it replaces, and a **sales channel** where those buyers already look for tools; at most 1 may be a developer tool and at least 2 target your industry focus. Ideas must be buildable by one person with AI coding tools and favour narrow niches. A second, sceptical pass (given each idea's evidence) tries to kill each one and scores pain, willingness to pay, **buildable solo**, **sales channel**, gap, fit and why now (why now counts half). Any score below 2 drops the idea. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**. Each idea records every day it was proposed, and its detail screen has a **build brief** to paste into an AI coding tool. Ideas found before buildability and sales channel were scored show "Not scored" for them and keep their original score.
 - **History:** one row per day with its best idea and pain clusters; tap a day for that day's ideas, pain clusters and trends.
 - **Saved:** ideas you've bookmarked (bookmark button, or swipe right in Ideas) and projects you've starred, with notes, AI-suggested monetisable variants, and a copyable "flesh out this idea" prompt.
 - **Settings:** About me, My Business Challenges, industry focus and the daily digest time up front; under **Advanced**: sources and topics, scan windows, items the AI reads, quality bar and ranking weights, and AI provider, model, key, costs and daily limit.
@@ -35,7 +35,7 @@ All output is in English. Non-English items are translated by Claude, or filtere
 | Games *(off by default)* | itch.io, Steam, HN, GitHub and Hugging Face game projects |
 | Lobsters *(off by default)* | "Show" posts |
 
-Developer and game sources start switched off so ideas lean towards business buyers; turn any of them back on in Settings.
+Developer and game sources, GitHub, Show HN, AI research and AusTender start switched off: builder-side sources show what's already made rather than what buyers need, and government contracts are out of reach for a solo builder. Turn any of them back on in Settings. Vibe-code showcases, Y Combinator and the marketplaces stay on, and the AI treats what other builders have made as competition, not inspiration.
 
 Sources are grouped as **demand** (complaints, your challenges, government spending), **supply** (things being built) and **timing** (new startups and research). Claude reads about 40% demand, 40% supply and 20% timing, with unused share going to demand first. Claude also groups demand items into **pain clusters** (one problem, one buyer) that the idea step must draw on, and flags noise so it's left out of "Other projects".
 
@@ -54,7 +54,9 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 
 ## Reliability
 
-- Claude replies are streamed, and dropped connections, timeouts and busy-server errors are retried twice (3 s, then 15 s, or the server's retry-after).
+- Claude replies are streamed, and dropped connections, timeouts and busy-server errors are retried twice (3 s, then 15 s, or the server's retry-after) for every provider.
+- Other providers: if a model rejects a request with error 400, it's sent once more without the optional settings (reasoning effort, reply length), since some models refuse them. That second request may be billed.
+- Claude requests use Anthropic's server-side fallback: if the chosen Claude model declines a request, Anthropic may answer with another Claude model. It's the same company, key and consent, never a different provider.
 - The trends are saved as soon as they're ready, before the idea step, so a later failure can't lose them.
 - A good digest is never replaced by a weaker one (Claude > Apple > keywords) on the same day; the failure is noted on the kept digest instead.
 - Background refreshes stop cleanly when iOS ends the app's background time.
@@ -86,7 +88,7 @@ Set your own signing team in `project.yml` (`DEVELOPMENT_TEAM`) if you aren't th
 
 Swift Testing tests in `IdeaScoutTests/IdeaScoutTests.swift` (no network calls; samples of each source and AI reply format). They cover source parsing, theme building and ranking, the Claude and OpenAI-style request and reply handling, streaming and retries, the killer-idea rules and evidence caps, costs and the daily limit, digest replacement rules, the English filter, scan settings, business-focus rules, demand sources, signal-based selection, pain clusters, saving ideas, and the trial and consent rules.
 
-**Screen (UI) tests** in `IdeaScoutUITests/` cover first launch with consent, a refresh (and the "ask before a second refresh" rule), the paywall after the trial, and "Delete all my data". They run the app in a sealed test mode (`IdeaScout/Support/TestMode.swift`, Debug builds only) with an in-memory database, a separate settings store and Keychain area, fake sources and a scripted AI, so they never touch real data, the network or AI costs. Keep the iPhone unlocked while they run.
+**Screen (UI) tests** in `IdeaScoutUITests/` cover first launch with consent, a refresh (and the "ask before a second refresh" rule), the paywall after the trial, and "Delete all my data". They run the app in a sealed test mode (`IdeaScout/Support/TestMode.swift`, active only in Debug builds) with an in-memory database, a separate settings store and Keychain area, fake sources and a scripted AI, so they never touch real data, the network or AI costs. Keep the iPhone unlocked while they run.
 
 Run them in Xcode with ⌘U, or on a connected iPhone:
 
@@ -110,7 +112,8 @@ IdeaScout/
   Models/     Values (sources, signals, items, scores) and StoredModels (SwiftData: Digest, Theme, Item, Idea, KillerIdea)
   Store/      StoreManager (free trial and one-off unlock)
   Support/    AppSettings, Keychain, UsageTracker (costs), Persistence (saving with error reporting),
-              TestMode (sealed UI-test mode, Debug only), notifications
+              SecureClipboard (local-only, expiring copies), TestMode (sealed UI-test mode, active only
+              in Debug builds). Notifier (the "ideas are ready" notification) is in AppSettings.swift
   Views/      SwiftUI screens: tabs, Ideas, day view, Saved, Settings, welcome/consent, paywall, About
   PrivacyInfo.xcprivacy, IdeaScout.storekit (test only, not shipped)
 IdeaScoutTests/    Unit tests (Swift Testing)

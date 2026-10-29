@@ -18,6 +18,10 @@ struct ModelPrice: Equatable, Sendable {
     var cachedInput: Double
 
     /// Creates a price. If no cache price is given, assumes the common 10% of the input price.
+    /// - Parameters:
+    ///   - input: Dollars per million uncached input tokens.
+    ///   - output: Dollars per million output tokens.
+    ///   - cachedInput: Dollars per million cached input tokens; `nil` means 10% of `input`.
     init(input: Double, output: Double, cachedInput: Double? = nil) {
         self.input = input
         self.output = output
@@ -39,9 +43,12 @@ struct ModelPrice: Equatable, Sendable {
 
 /// How a model can be asked for structured JSON.
 enum JSONMode: Sendable {
-    case schema     // the reply is forced to match the schema
-    case object     // valid JSON is promised; the schema goes in the instructions
-    case prompt     // no JSON setting at all; the schema goes in the instructions
+    /// The reply is forced to match the schema.
+    case schema
+    /// Valid JSON is promised; the schema goes in the instructions.
+    case object
+    /// No JSON setting at all; the schema goes in the instructions.
+    case prompt
 }
 
 /// What a model accepts, beyond the basics.
@@ -162,14 +169,15 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Models offered in Settings. The first is the recommended default. Prices are list prices
-    /// as checked in October 2026 (Claude's from Anthropic's pricing page); any other model can be typed in with its own price.
+    /// Models offered in Settings. The first is the recommended default. Prices are list prices as checked in
+    /// October 2026; Claude's were verified against Anthropic's model price table (dated 6 Oct 2026) on 27 Oct 2026.
+    /// Labels compare cost with the default model. Any other model can be typed in with its own price.
     var models: [ModelOption] {
         switch self {
         case .claude:
-            [ModelOption(id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", price: ModelPrice(input: 2, output: 10, cachedInput: 0.1)),
+            [ModelOption(id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", price: ModelPrice(input: 2, output: 10, cachedInput: 0.2)),
              ModelOption(id: "claude-opus-5-5", label: "Claude Opus 5.5 (sharper, 2× cost)", price: ModelPrice(input: 4, output: 20, cachedInput: 0.2)),
-             ModelOption(id: "claude-fable-5-1", label: "Claude Fable 5.1 (most capable, ~2.5× cost)",
+             ModelOption(id: "claude-fable-5-1", label: "Claude Fable 5.1 (most capable, 5× cost)",
                          price: ModelPrice(input: 10, output: 50, cachedInput: 0.25))]
         case .openai:
             [ModelOption(id: "gpt-6.1-sol", label: "GPT-6.1 Sol", price: ModelPrice(input: 2, output: 10)),
@@ -201,7 +209,10 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
 
     /// Gemini 4 Argon's price: introductory until 1 December 2026 (UTC), then doubled. Evaluated when the model
     /// list is read, so a running app picks up the new price after a relaunch.
+    /// - Parameter date: The moment to price for; tests pass dates either side of the switch.
+    /// - Returns: The introductory price before 1 December 2026 (UTC), the standard price from then on.
     static func geminiArgonPrice(on date: Date = .now) -> ModelPrice {
+        // Safe to unwrap: a fixed, valid Gregorian date in a fixed time zone always resolves.
         let end = DateComponents(calendar: Calendar(identifier: .gregorian), timeZone: TimeZone(identifier: "UTC"),
                                  year: 2026, month: 12, day: 1).date!
         return date < end ? ModelPrice(input: 2, output: 10, cachedInput: 0.1) : ModelPrice(input: 4, output: 20, cachedInput: 0.2)
@@ -238,6 +249,8 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// Capabilities for a model: its own if listed with special needs (e.g. Gemma), otherwise the provider's.
+    /// - Parameter model: The API model ID; typed-in models not in `models` get the provider's defaults.
+    /// - Returns: What may be sent to that model.
     func capabilities(for model: String) -> ModelCapabilities {
         models.first { $0.id == model }?.capabilities ?? defaultCapabilities
     }

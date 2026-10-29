@@ -12,6 +12,11 @@ struct HackerNewsFetcher: ItemFetcher {
     let kind = SourceKind.hackerNews
 
     /// 60 Show HN posts.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Up to 60 Show HN posts from the window, most upvoted first.
+    /// - Throws: Network, HTTP or decoding errors.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         let data = try await HTTP.get(Self.searchURL(tags: "show_hn", query: nil, since: since, hits: 60))
         return try Self.parse(data, as: .hackerNews)
@@ -23,7 +28,9 @@ struct HackerNewsFetcher: ItemFetcher {
     ///   - query: Optional search text.
     ///   - since: Only items created after this.
     ///   - hits: How many results.
+    /// - Returns: The search address.
     static func searchURL(tags: String, query: String?, since: Date, hits: Int) -> URL {
+        // Safe to unwrap: a constant, valid URL.
         var c = URLComponents(string: "https://hn.algolia.com/api/v1/search")!
         c.queryItems = [
             URLQueryItem(name: "tags", value: tags),
@@ -31,6 +38,7 @@ struct HackerNewsFetcher: ItemFetcher {
             URLQueryItem(name: "hitsPerPage", value: String(hits)),
         ]
         if let query { c.queryItems?.append(URLQueryItem(name: "query", value: query)) }
+        // Safe to unwrap: query items are percent-encoded by URLComponents, so the URL is always valid.
         return c.url!
     }
 
@@ -50,6 +58,8 @@ struct HackerNewsFetcher: ItemFetcher {
     }
 
     /// The Hacker News discussion page for an item ID, or `nil` if the ID can't form a valid link.
+    /// - Parameter objectID: The item ID from Algolia.
+    /// - Returns: The `news.ycombinator.com/item` link, or `nil`.
     static func discussionURL(_ objectID: String) -> URL? {
         var c = URLComponents(string: "https://news.ycombinator.com/item")
         c?.queryItems = [URLQueryItem(name: "id", value: objectID)]
@@ -62,6 +72,8 @@ struct HackerNewsFetcher: ItemFetcher {
     ///   - data: The Algolia reply.
     ///   - kind: Source label for the items (Hacker News search is shared by several sources).
     ///   - phrases: For comments, phrases to centre the title on (so a long comment keeps the complaint).
+    /// - Returns: One item per usable hit; hits without a title or comment text are skipped.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data, as kind: SourceKind, around phrases: [String] = []) throws -> [FetchedItem] {
         try JSONDecoder().decode(Response.self, from: data).hits.compactMap { hit in
             // Robustness: the discussion link is built from data the API supplies; skip the hit if it's malformed.
@@ -102,6 +114,11 @@ struct PainPointsFetcher: ItemFetcher {
     static var plainPhrases: [String] { phrases.map { $0.replacingOccurrences(of: "\"", with: "") } }
 
     /// One search per phrase, plus Ask HN; throws only if every search failed.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Up to 10 comments per phrase plus 15 Ask HN posts.
+    /// - Throws: The first error, only if every search failed and nothing was found.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         var results: [FetchedItem] = []
         var firstError: Error?
@@ -134,6 +151,11 @@ struct VibeCodeFetcher: ItemFetcher {
     static let githubQueries = ["\"vibe coded\" in:description,readme", "\"built with lovable\" in:description,readme"]
 
     /// HN searches, then GitHub searches; throws only if every search failed.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Up to 15 stories per HN term and 10 repositories per GitHub search.
+    /// - Throws: The first error, only if every search failed and nothing was found.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         var results: [FetchedItem] = []
         var firstError: Error?
@@ -161,8 +183,14 @@ struct DevToFetcher: ItemFetcher {
     let kind = SourceKind.devTo
 
     /// Reads the top #showdev posts for the window's length in days.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Up to 40 posts.
+    /// - Throws: Network, HTTP or decoding errors.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
         let days = max(1, Int(Date.now.timeIntervalSince(since) / 86_400))
+        // Safe to unwrap: `days` is an Int, so the address is always valid.
         let url = URL(string: "https://dev.to/api/articles?tag=showdev&top=\(days)&per_page=40")!
         return try Self.parse(try await HTTP.get(url))
     }
@@ -177,6 +205,9 @@ struct DevToFetcher: ItemFetcher {
     }
 
     /// Turns articles into items; reactions become the score.
+    /// - Parameter data: The articles reply.
+    /// - Returns: One item per article with a valid link.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data) throws -> [FetchedItem] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -196,7 +227,13 @@ struct LobstersFetcher: ItemFetcher {
     let kind = SourceKind.lobsters
 
     /// Reads the "show" tag and keeps posts from the window.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: The posts from the tag's front page that were created since `since`.
+    /// - Throws: Network, HTTP or decoding errors.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        // Safe to unwrap: a constant, valid URL.
         let data = try await HTTP.get(URL(string: "https://lobste.rs/t/show.json")!)
         return try Self.parse(data).filter { $0.postedAt >= since }
     }
@@ -212,6 +249,9 @@ struct LobstersFetcher: ItemFetcher {
     }
 
     /// Turns stories into items; votes become the score.
+    /// - Parameter data: The tag's JSON.
+    /// - Returns: One item per story, linking to the project or, failing that, the discussion.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data) throws -> [FetchedItem] {
         try ISODates.decoder().decode([Story].self, from: data).compactMap { s in
             let link = (s.url?.isEmpty == false ? s.url : nil) ?? s.comments_url

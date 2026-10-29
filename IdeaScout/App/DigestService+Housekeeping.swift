@@ -15,19 +15,25 @@ extension DigestService {
     /// notifications and the scheduled background refresh. Purchases aren't touched (Apple holds them;
     /// "Restore purchases" brings them back). The welcome screens show again afterwards.
     /// - Returns: `false` if a refresh is running (nothing is deleted).
+    /// - Note: If part of the database couldn't be deleted, everything else is still erased and
+    ///   `lastError` tells the user to try again (they land on the welcome screens, then the Ideas tab).
     @discardableResult
     func deleteAllData() -> Bool {
         guard !isRefreshing, let context = container?.mainContext else { return false }
-        Self.eraseAll(context: context, defaults: AppSettings.defaults,
-                      defaultsDomain: TestMode.isUITesting ? TestMode.defaultsSuite : (Bundle.main.bundleIdentifier ?? ""),
-                      keychainService: Keychain.service)
+        let complete = Self.eraseAll(context: context, defaults: AppSettings.defaults,
+                                     defaultsDomain: TestMode.isUITesting ? TestMode.defaultsSuite : (Bundle.main.bundleIdentifier ?? ""),
+                                     keychainService: Keychain.service)
         URLCache.shared.removeAllCachedResponses()
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         BGTaskScheduler.shared.cancelAllTaskRequests()
-        lastError = nil
+        lastError = complete ? nil : Self.incompleteDeletionMessage
         return true
     }
+
+    /// Shown on the Ideas tab when some stored data survived "Delete all my data".
+    nonisolated static let incompleteDeletionMessage =
+        "Some of your history couldn't be deleted. Open Settings → About & privacy and tap Delete all my data again."
 
     /// The erasing itself, with every store passed in so tests can use throwaway ones.
     /// - Parameters:
@@ -35,14 +41,22 @@ extension DigestService {
     ///   - defaults: Settings store to clear.
     ///   - defaultsDomain: Its domain name (the bundle ID for the real app).
     ///   - keychainService: Keychain service whose secrets are removed.
+    /// - Returns: `true` if the database was fully emptied and saved; `false` if any step failed.
+    @discardableResult
     nonisolated static func eraseAll(context: ModelContext, defaults: UserDefaults, defaultsDomain: String,
-                                     keychainService: String) {
-        try? context.delete(model: Digest.self)
-        try? context.delete(model: Theme.self)
-        try? context.delete(model: Item.self)
-        try? context.delete(model: Idea.self)
-        try? context.delete(model: KillerIdea.self)
-        context.saveOrReport("the deletion")
+                                     keychainService: String) -> Bool {
+        // Security/privacy: every step runs even if an earlier one fails, so a database error never
+        // leaves API keys or settings behind, and the failure is reported instead of claiming success.
+        var complete = true
+        let deleteSteps: [() throws -> Void] = [
+            { try context.delete(model: Digest.self) }, { try context.delete(model: Theme.self) },
+            { try context.delete(model: Item.self) }, { try context.delete(model: Idea.self) },
+            { try context.delete(model: KillerIdea.self) },
+        ]
+        for deleteStep in deleteSteps {
+            do { try deleteStep() } catch { complete = false }
+        }
+        if context.saveOrReport("the deletion") != nil { complete = false }
         Keychain.removeAll(service: keychainService)
         // Remove keys one by one first so screens using @AppStorage update immediately, then the whole domain.
         for key in (defaults.persistentDomain(forName: defaultsDomain) ?? [:]).keys { defaults.removeObject(forKey: key) }
@@ -51,6 +65,7 @@ extension DigestService {
         // Mark the install as known, so the next launch doesn't treat it as a fresh install of a used phone.
         defaults.set(true, forKey: "keychain.installMarker")
         defaults.set(true, forKey: "keychain.thisDeviceOnly")
+        return complete
     }
 
     // MARK: - Retired sources
@@ -72,6 +87,11 @@ extension DigestService {
     // MARK: - Saved ideas
 
     /// Stars a project (copies it into Saved projects) or unstars it, and saves.
+    /// - Parameters:
+    ///   - item: The project in a digest.
+    ///   - ideas: The current saved projects, to find an existing copy by key.
+    ///   - context: Where to insert or delete the saved copy.
+    /// - Note: A save failure is shown through `lastError`.
     func toggleStar(_ item: Item, ideas: [Idea], context: ModelContext) {
         if let idea = ideas.first(where: { $0.key == item.key }) {
             context.delete(idea)
@@ -82,6 +102,7 @@ extension DigestService {
     }
 
     /// Asks the current AI for money-making variants of a saved project and stores them on it.
+    /// - Parameter idea: The saved project; its `extensions` are replaced on success.
     /// - Throws: `SummarizerError.unavailable` in keyword mode, or AI errors.
     func suggestExtensions(for idea: Idea) async throws {
         let summarizer = AppSettings.makeSummarizer()
@@ -94,6 +115,8 @@ extension DigestService {
     // MARK: - Background refresh
 
     /// Asks iOS to wake the app around the chosen hour. iOS decides the actual time, and may skip days.
+    /// If iOS refuses the request (for example, Background App Refresh is off), the failure is ignored and
+    /// refreshing by hand still works.
     func scheduleBackgroundRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTaskID)
         request.earliestBeginDate = Self.nextOccurrence(ofHour: AppSettings.notifyHour, after: .now)
@@ -108,6 +131,10 @@ extension DigestService {
     }
 
     /// The next time the clock shows `hour`:00 after `date` (today if still ahead, otherwise tomorrow).
+    /// - Parameters:
+    ///   - hour: 0–23 in the phone's calendar and time zone.
+    ///   - date: The starting point.
+    /// - Returns: That moment, or `date` itself if the calendar can't find one.
     nonisolated static func nextOccurrence(ofHour hour: Int, after date: Date) -> Date {
         Calendar.current.nextDate(after: date, matching: DateComponents(hour: hour, minute: 0), matchingPolicy: .nextTime) ?? date
     }

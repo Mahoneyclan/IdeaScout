@@ -147,6 +147,7 @@ struct AISettings: View {
                     }
                     .id(consentVersion)
                     .frame(minHeight: 44)
+                    // Safe to unwrap: this branch is only shown for cloud providers, which all have a Keychain key.
                     SecretField(title: "\(chosen.shortName) API key", key: chosen.keychainKey!)
                         .id(chosen)   // reload the saved state when the provider changes
                         .focused($keyboardOpen)

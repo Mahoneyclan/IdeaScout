@@ -68,11 +68,17 @@ protocol Summarizer: Sendable {
     var maxItems: Int { get }
     /// Groups items into trends.
     /// - Parameter items: Candidates, in prompt order (item numbers are 1-based positions).
+    /// - Returns: Drafts whose item numbers point into `items`; not yet validated (see `ThemeBuilder`).
     /// - Throws: Network, provider or model errors.
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft]
     /// Themes plus, where supported, pain clusters, English translations and noise.
+    /// - Parameter items: Candidates, in prompt order.
+    /// - Returns: The analysis; summarisers without the extras return drafts only (see the default below).
+    /// - Throws: Network, provider or model errors.
     func analyse(_ items: [FetchedItem]) async throws -> Analysis
     /// Suggests 4–6 money-making variants of a saved project.
+    /// - Parameter idea: The saved project and the user's notes.
+    /// - Returns: The suggestions as plain sentences.
     /// - Throws: `SummarizerError.unavailable` if this summariser can't do it, or provider errors.
     func extensions(for idea: IdeaBrief) async throws -> [String]
 }
@@ -87,6 +93,9 @@ struct Translation: Equatable, Sendable {
 
 extension Summarizer {
     /// Summarisers that can't translate or cluster return themes only.
+    /// - Parameter items: Candidates, in prompt order.
+    /// - Returns: An analysis with drafts only.
+    /// - Throws: Whatever `themes(for:)` throws.
     func analyse(_ items: [FetchedItem]) async throws -> Analysis {
         Analysis(drafts: try await themes(for: items))
     }
@@ -250,6 +259,8 @@ enum Prompts {
     }
 
     /// A saved project as prompt text for "Suggest variants".
+    /// - Parameter idea: The saved project.
+    /// - Returns: Title, then description and notes when present, one per line.
     static func ideaText(_ idea: IdeaBrief) -> String {
         var text = "Project: \(idea.title)"
         if !idea.detail.isEmpty { text += "\nDescription: \(idea.detail)" }
@@ -265,18 +276,27 @@ enum Prompts {
 enum ThemeBuilder {
     /// A finished theme or pain cluster with its items, ready to save as a Theme.
     struct Built: Equatable {
+        /// Short name, as the AI gave it ("Other projects" for the catch-all).
         var title: String
+        /// One or two sentences.
         var summary: String
+        /// Money-making variants (trends only).
         var opportunities: [String]
         /// Member items, in the order the AI listed them.
         var items: [FetchedItem]
         /// Clamped AI scores plus measured momentum (all 0 for pain clusters and the catch-all).
         var scores = ThemeScores()
+        /// One-sentence reason per score, with momentum's reason filled in by `Ranking.momentum`.
         var reasons = ScoreReasons()
+        /// True for the final "Other projects" theme.
         var isCatchAll = false
+        /// True for a pain cluster rather than a trend.
         var isPainCluster = false
+        /// Pain clusters: who has the problem.
         var buyer = ""
+        /// Pain clusters: what they do today instead.
         var workaround = ""
+        /// Pain clusters: signs they pay or would pay.
         var paySignals = ""
     }
 
@@ -322,11 +342,17 @@ enum ThemeBuilder {
 /// so the ranking isn't driven purely by what sounds exciting.
 enum Ranking {
     /// Keeps AI scores in 1–5; 0 or less means "not scored". Models sometimes return 0 or 9.
+    /// - Parameter score: The AI's raw score.
+    /// - Returns: 0 for anything 0 or below, otherwise the score capped at 5.
     static func clamp(_ score: Int) -> Int { score <= 0 ? 0 : min(score, 5) }
 
     /// 1–5 from how highly the theme's projects rank within their own source (50%)
     /// (stars, points and votes aren't comparable across sources), how many projects share the theme (30%,
     /// full marks at 8) and how many appeared in the last 48 hours (20%). The weights favour proven traction.
+    /// - Parameters:
+    ///   - members: The theme's items.
+    ///   - all: Every item in the scan, to rank members within their source.
+    ///   - now: The reference time for "last 48 hours"; tests pass a fixed date.
     /// - Returns: The score and a one-sentence reason shown to the user.
     static func momentum(of members: [FetchedItem], among all: [FetchedItem], now: Date = .now) -> (score: Int, reason: String) {
         guard !members.isEmpty else { return (0, "") }
@@ -340,7 +366,11 @@ enum Ranking {
         return (score, "\(projects) in this scan, on average in the top \(top)% of their source; \(recent)% appeared in the last 2 days.")
     }
 
-    /// Where an item's score sits among items from the same source: 0 (lowest) to 1 (highest); 0.5 if alone.
+    /// Where an item's score sits among items from the same source.
+    /// - Parameters:
+    ///   - item: The item to place.
+    ///   - all: Every item in the scan; only those from the same source are compared.
+    /// - Returns: 0 (lowest) to 1 (highest); 0.5 if it's the only item from its source.
     static func percentile(of item: FetchedItem, among all: [FetchedItem]) -> Double {
         let peers = all.filter { $0.source == item.source }
         guard peers.count > 1 else { return 0.5 }
@@ -361,6 +391,9 @@ struct KeywordSummarizer: Summarizer {
     let topics: [String]
 
     /// Groups items under the first topic each one mentions; items mentioning none are left for "Other projects".
+    /// - Parameter items: The items, in prompt order.
+    /// - Returns: One draft per topic that matched at least one item, unscored.
+    /// - Throws: Never; the signature comes from `Summarizer`.
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft] {
         var drafts: [ThemeDraft] = []
         var used = Set<Int>()
@@ -377,6 +410,8 @@ struct KeywordSummarizer: Summarizer {
     }
 
     /// Keyword mode can't suggest variants.
+    /// - Parameter idea: Ignored.
+    /// - Returns: Never returns.
     /// - Throws: Always `SummarizerError.unavailable`.
     func extensions(for idea: IdeaBrief) async throws -> [String] {
         throw SummarizerError.unavailable
@@ -386,6 +421,8 @@ struct KeywordSummarizer: Summarizer {
 /// Used when no AI can translate: drops items that are clearly not in English.
 /// Short or ambiguous text (e.g. a product name) is kept.
 enum LanguageFilter {
+    /// Checks an item's title and description together.
+    /// - Parameter item: The item to check.
     /// - Returns: `false` only when the text is confidently (80%+) another language.
     static func isEnglishOrUnclear(_ item: FetchedItem) -> Bool {
         let recognizer = NLLanguageRecognizer()

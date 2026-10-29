@@ -2,7 +2,8 @@
 // A sealed mode for automated screen (UI) tests, available only in Debug builds. Started by launch
 // arguments from IdeaScoutUITests. It keeps tests away from the owner's real data and from the network:
 // an in-memory database, a separate settings store and Keychain area, fixed trial state, fake sources
-// and a scripted AI. Release builds compile `isUITesting` to `false`, so none of this can be reached.
+// and a scripted AI. Release builds compile `isUITesting` to `false` and leave out the fake sources,
+// the scripted AI and the dummy key, so none of this can be reached or found in the App Store build.
 
 import Foundation
 
@@ -25,6 +26,8 @@ enum TestMode {
     }
 
     /// Whether the app was launched with `argument`.
+    /// - Parameter argument: One of `Argument`'s values.
+    /// - Returns: `true` if it's among the launch arguments.
     static func has(_ argument: String) -> Bool { ProcessInfo.processInfo.arguments.contains(argument) }
 
     /// Separate settings store, emptied at every test launch.
@@ -39,14 +42,19 @@ enum TestMode {
         guard isUITesting else { return }
         defaults.removePersistentDomain(forName: defaultsSuite)
         Keychain.removeAll(service: keychainService)
+        #if DEBUG
+        // Security: the dummy key and the fakes below exist only in Debug builds, so none of this test-only
+        // code or text ships in the App Store build.
         if has(Argument.skipWelcome) {
             defaults.set(true, forKey: AppSettings.Keys.onboarded)
             defaults.set(AIProvider.claude.rawValue, forKey: AppSettings.Keys.aiProvider)
             AppSettings.setConsent(.claude, true)
             Keychain.set("ui-test-key-0000", for: .claudeAPIKey)
         }
+        #endif
     }
 
+    #if DEBUG
     /// Refresh dependencies for test mode: two fake sources, the scripted AI below, and a fixed trial state.
     @MainActor static var dependencies: DigestService.Dependencies {
         DigestService.Dependencies(
@@ -67,6 +75,7 @@ enum TestMode {
     }
 
     private static func sample(_ key: String, _ source: SourceKind, _ title: String) -> FetchedItem {
+        // Safe to unwrap: `key` is a short fixed test string, so the URL is always valid.
         FetchedItem(key: key, source: source, title: title, detail: "", url: URL(string: "https://example.com/\(key)")!,
                     score: 10, postedAt: .now)
     }
@@ -76,6 +85,11 @@ enum TestMode {
         let kind: SourceKind
         let items: [FetchedItem]
         /// Returns the fixed items.
+        /// - Parameters:
+        ///   - since: Ignored.
+        ///   - topics: Ignored.
+        /// - Returns: `items`.
+        /// - Throws: Never.
         func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] { items }
     }
 
@@ -85,13 +99,25 @@ enum TestMode {
         let model = "ui-test"
 
         /// Returns the scripted reply for the feature, in Claude's format.
+        /// - Parameters:
+        ///   - system: Ignored.
+        ///   - prompt: Ignored.
+        ///   - schema: Ignored.
+        ///   - effort: Ignored.
+        ///   - feature: Picks the reply: "Trends", "Killer ideas", or the review for anything else.
+        /// - Returns: The reply in Claude's message format.
+        /// - Throws: Only if the fixed reply can't be serialised, which doesn't happen.
         func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
             let json = switch feature {
             case "Trends": #"{"themes":[{"title":"Invoice automation","summary":"Tools that chase unpaid invoices.","opportunities":["Chaser for trades"],"item_numbers":[2,3],"novelty":4,"novelty_reason":"r","viability":4,"viability_reason":"r","opportunity_gap":4,"opportunity_gap_reason":"r"}],"translations":[],"pain_clusters":[{"title":"Chasing invoices","buyer":"Bookkeeper","workaround":"Email","pay_signals":"none seen","summary":"s","item_numbers":[1]}],"noise_numbers":[]}"#
-            case "Killer ideas": #"{"ideas":[{"title":"InvoiceChaser","pitch":"Chases unpaid invoices automatically.","buyer":"Small trades businesses","pricing":"$49/month","why_now":"w","one_week_test":"t","replaces":"Manual follow-up emails","evidence_numbers":[1],"same_as":""}]}"#
-            default: #"{"reviews":[{"title":"InvoiceChaser","survives":true,"objection":"o","competitors":"none found","verdict":"v","pain":4,"willing_to_pay":4,"timing":4,"gap":4,"fit":4,"evidence_needed":"e"}]}"#
+            case "Killer ideas": #"{"ideas":[{"title":"InvoiceChaser","pitch":"Chases unpaid invoices automatically.","buyer":"Small trades businesses","pricing":"$49/month","why_now":"w","one_week_test":"t","replaces":"Manual follow-up emails","channel":"Xero App Store","evidence_numbers":[1],"same_as":""}]}"#
+            default: #"{"reviews":[{"title":"InvoiceChaser","survives":true,"objection":"o","competitors":"none found","verdict":"v","pain":4,"willing_to_pay":4,"timing":4,"gap":4,"fit":4,"buildability":4,"channel_score":4,"evidence_needed":"e"}]}"#
             }
             return try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": json]], "stop_reason": "end_turn"])
         }
     }
+    #else
+    /// Release builds never run in test mode, so they always use the real sources and AI.
+    @MainActor static var dependencies: DigestService.Dependencies { .live }
+    #endif
 }

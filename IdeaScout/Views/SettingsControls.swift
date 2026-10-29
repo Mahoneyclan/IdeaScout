@@ -85,6 +85,9 @@ struct SourceToggle: View {
     @AppStorage private var isOn: Bool
 
     /// Creates the toggle, defaulting to the source's own default until the user changes it.
+    /// - Parameters:
+    ///   - kind: The source.
+    ///   - count: Items it gave in the last digest, if known.
     init(kind: SourceKind, count: Int? = nil) {
         self.kind = kind
         self.count = count
@@ -114,6 +117,7 @@ struct ModelChooser: View {
     @AppStorage private var model: String
     /// Prices typed in for an "Other…" model, per million tokens.
     @AppStorage private var customInput: Double
+    /// Output price typed in for an "Other…" model, per million tokens.
     @AppStorage private var customOutput: Double
     /// Whether "Other…" is selected, so a custom name can be typed.
     @State private var useOther = false
@@ -156,6 +160,11 @@ struct ModelChooser: View {
             }
             LabeledContent("Output $ per 1M tokens") {
                 TextField("Output", value: $customOutput, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+            }
+            if AppSettings.sanitizedPrice(customInput) == 0 || AppSettings.sanitizedPrice(customOutput) == 0 {
+                // Money: a $0 (or negative) price hides this model's spending from the daily limit.
+                Text("With a $0 price, this model's spending isn't counted towards your daily limit.")
+                    .font(.caption).foregroundStyle(.orange)
             }
             Button("Use recommended model") { useOther = false; model = provider.recommendedModel }
                 .frame(minHeight: 44)

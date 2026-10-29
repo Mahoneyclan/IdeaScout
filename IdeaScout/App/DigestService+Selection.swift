@@ -7,6 +7,7 @@ import Foundation
 extension DigestService {
     /// The enabled sources, in priority order. Business challenges and other demand sources come first, then
     /// vibe-code and games, so an item they share with Show HN keeps the more specific label.
+    /// - Returns: One fetcher per source switched on in Settings.
     static func enabledFetchers() -> [any ItemFetcher] {
         var fetchers: [any ItemFetcher] = []
         if AppSettings.isEnabled(.fieldNotes) { fetchers.append(FieldNotesFetcher(notes: AppSettings.fieldNotes)) }
@@ -28,6 +29,8 @@ extension DigestService {
     }
 
     /// Removes duplicates by id and by link, keeping the first occurrence.
+    /// - Parameter items: Items in priority order (see `enabledFetchers`).
+    /// - Returns: The items with later duplicates removed; links are compared case-insensitively.
     nonisolated static func dedupe(_ items: [FetchedItem]) -> [FetchedItem] {
         var seenKeys = Set<String>(), seenURLs = Set<String>()
         return items.filter { seenKeys.insert($0.key).inserted && seenURLs.insert($0.url.absoluteString.lowercased()).inserted }
@@ -48,6 +51,7 @@ extension DigestService {
         let ordered = Dictionary(uniqueKeysWithValues: Signal.allCases.map { signal in
             (signal, select(rest.filter { $0.source.signal == signal }, perSource: budget))
         })
+        // Safe to unwrap below: `ordered` and `taken` get an entry for every `Signal` case before they're read.
         var taken: [Signal: Int] = [:]
         for signal in Signal.allCases {
             taken[signal] = min(ordered[signal]!.count, Int((Double(budget) * signal.share).rounded()))

@@ -15,8 +15,13 @@ struct GitHubFetcher: ItemFetcher {
     static let maxTopics = 7
 
     /// One search per topic (up to `maxTopics`).
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics; the first `maxTopics` are searched.
+    /// - Returns: Up to 10 repositories per topic, most starred first within each topic.
+    /// - Throws: Network, HTTP (e.g. 403 when rate-limited) or decoding errors; one failed search fails the source.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
-        // Unauthenticated GitHub search allows 10 searches a minute; the vibe-code source uses 2.
+        // Sequential on purpose: searches share the 10-a-minute budget described at `maxTopics`.
         var results: [FetchedItem] = []
         for topic in topics.prefix(Self.maxTopics) {
             let term = topic.contains(" ") ? "\"\(topic)\"" : topic
@@ -26,6 +31,8 @@ struct GitHubFetcher: ItemFetcher {
     }
 
     /// The date as yyyy-MM-dd for GitHub's `created:>` filter.
+    /// - Parameter date: The window start.
+    /// - Returns: The date in the Gregorian calendar, POSIX format.
     static func day(_ date: Date) -> String {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
@@ -39,8 +46,10 @@ struct GitHubFetcher: ItemFetcher {
     ///   - query: GitHub search syntax.
     ///   - kind: Source label for the results (GitHub is shared by several sources).
     ///   - perPage: How many results.
+    /// - Returns: The repositories as items.
     /// - Throws: Network, HTTP (e.g. 403 when rate-limited) or decoding errors.
     static func search(_ query: String, as kind: SourceKind, perPage: Int = 10) async throws -> [FetchedItem] {
+        // Safe to unwrap: a constant, valid URL.
         var c = URLComponents(string: "https://api.github.com/search/repositories")!
         c.queryItems = [
             URLQueryItem(name: "q", value: query),
@@ -48,6 +57,7 @@ struct GitHubFetcher: ItemFetcher {
             URLQueryItem(name: "order", value: "desc"),
             URLQueryItem(name: "per_page", value: String(perPage)),
         ]
+        // Safe to unwrap: URLComponents percent-encodes the query (which includes the user's topics), so the URL is always valid.
         let data = try await HTTP.get(c.url!, headers: ["Accept": "application/vnd.github+json"])
         return try parse(data, as: kind)
     }
@@ -66,6 +76,11 @@ struct GitHubFetcher: ItemFetcher {
     }
 
     /// Turns a search reply into items; stars become the score.
+    /// - Parameters:
+    ///   - data: The search reply.
+    ///   - kind: Source label for the items.
+    /// - Returns: One item per repository with a valid link.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data, as kind: SourceKind) throws -> [FetchedItem] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -86,7 +101,13 @@ struct HuggingFaceFetcher: ItemFetcher {
     let kind = SourceKind.huggingFace
 
     /// Reads the trending Spaces.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: The 40 trending Spaces.
+    /// - Throws: Network, HTTP or decoding errors.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        // Safe to unwrap: a constant, valid URL.
         var c = URLComponents(string: "https://huggingface.co/api/spaces")!
         c.queryItems = [
             URLQueryItem(name: "sort", value: "trendingScore"),
@@ -94,6 +115,7 @@ struct HuggingFaceFetcher: ItemFetcher {
             URLQueryItem(name: "limit", value: "40"),
             URLQueryItem(name: "full", value: "true"),
         ]
+        // Safe to unwrap: a constant address with fixed query items always forms a valid URL.
         return try Self.parse(try await HTTP.get(c.url!))
     }
 
@@ -108,6 +130,9 @@ struct HuggingFaceFetcher: ItemFetcher {
     }
 
     /// Turns Spaces into items; likes become the score.
+    /// - Parameter data: The Spaces reply.
+    /// - Returns: One item per Space; the trending score is used when present, otherwise likes.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data) throws -> [FetchedItem] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -135,7 +160,13 @@ struct ResearchFetcher: ItemFetcher {
     let kind = SourceKind.research
 
     /// Reads the latest papers and keeps the window's 20 most upvoted.
+    /// - Parameters:
+    ///   - since: Start of the look-back window.
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Up to 20 papers published since `since`, most upvoted first.
+    /// - Throws: Network, HTTP or decoding errors.
     func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        // Safe to unwrap: a constant, valid URL.
         let data = try await HTTP.get(URL(string: "https://huggingface.co/api/daily_papers?limit=40")!)
         return Array(try Self.parse(data).filter { $0.postedAt >= since }.sorted { $0.score > $1.score }.prefix(20))
     }
@@ -154,6 +185,9 @@ struct ResearchFetcher: ItemFetcher {
     }
 
     /// Turns papers into items; upvotes become the score; uses the AI summary when available.
+    /// - Parameter data: The daily-papers reply.
+    /// - Returns: One item per paper; a paper without a date is dated now.
+    /// - Throws: `DecodingError` if the reply's shape has changed.
     static func parse(_ data: Data) throws -> [FetchedItem] {
         try ISODates.decoder().decode([Entry].self, from: data).compactMap { entry in
             let p = entry.paper

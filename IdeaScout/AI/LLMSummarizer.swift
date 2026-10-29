@@ -11,12 +11,16 @@ import Foundation
 /// A cloud AI that returns structured JSON. Every client returns its reply in the same shape
 /// (a Claude-style message with `content`, `stop_reason` and `usage`), so the parsers and the
 /// cost tracker work the same for every provider. API keys come from the Keychain, never from source.
+/// Threading: clients are `Sendable` value types and are called from the refresh task, off the main actor;
+/// `complete` suspends while the network call runs.
 protocol LLMClient: Sendable {
     /// Which provider this client talks to.
     var provider: AIProvider { get }
     /// The API model ID used for requests.
     var model: String { get }
-    /// Sends one request and returns the reply. Records the call's cost in UsageTracker. Retries temporary failures.
+    /// Sends one request and returns the reply. Records the call's cost in UsageTracker. Retries temporary failures
+    /// (see `LLMRetry`); `OpenAICompatibleClient` also re-sends once without optional settings after an HTTP 400.
+    /// Each attempt that reaches the provider may be billed.
     /// - Parameters:
     ///   - system: Instructions.
     ///   - prompt: The user message (usually the numbered item list).
@@ -24,7 +28,8 @@ protocol LLMClient: Sendable {
     ///   - effort: "medium" or "high": how hard the model should think, where supported.
     ///   - feature: Cost-tracker label, e.g. "Trends".
     /// - Returns: The reply in Claude's message format (`content`, `stop_reason`, `usage`).
-    /// - Throws: `LLMHTTPError`, network errors, `StreamAssembler.StreamError`, or `CancellationError`.
+    /// - Throws: `LLMHTTPError`, network errors, `StreamAssembler.StreamError`, `SummarizerError` (`.unavailable`
+    ///   when the provider has no chat address, `.badResponse` for an empty reply), `DecodingError`, or `CancellationError`.
     func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data
 }
 
@@ -38,6 +43,9 @@ struct LLMSummarizer: Summarizer {
     var maxItems: Int { AppSettings.claudeMaxItems }
 
     /// Trends and clusters only (drops translations and noise).
+    /// - Parameter items: The items to group, in prompt order.
+    /// - Returns: Trend and pain-cluster drafts with 1-based item numbers.
+    /// - Throws: Errors from `complete` or the parsers.
     func themes(for items: [FetchedItem]) async throws -> [ThemeDraft] {
         try await analyse(items).drafts
     }
@@ -61,6 +69,8 @@ struct LLMSummarizer: Summarizer {
     """
 
     /// One call that returns trends, pain clusters, translations and noise (feature "Trends").
+    /// - Parameter items: The items to analyse; numbered from 1 in this order in the prompt.
+    /// - Returns: Drafts (trends then pain clusters), translations and noise, all keyed by item number.
     /// - Throws: Errors from `complete` or the parsers.
     func analyse(_ items: [FetchedItem]) async throws -> Analysis {
         let prompt = "Window: the last \(AppSettings.trendWindowDays) days (pain points: \(AppSettings.painWindowDays) days).\n\n"
@@ -71,7 +81,9 @@ struct LLMSummarizer: Summarizer {
                         translations: try Self.parseTranslations(data), noise: try Self.parseNoise(data))
     }
 
-    /// Money-making variants for a saved project (feature "Variant suggestions").
+    /// Money-making variants for a saved project (feature "Variant suggestions"). One paid call.
+    /// - Parameter idea: The saved project, including the user's notes.
+    /// - Returns: The suggestions as plain sentences.
     /// - Throws: Errors from `complete` or the parser.
     func extensions(for idea: IdeaBrief) async throws -> [String] {
         let data = try await client.complete(system: Prompts.extensionInstructions, prompt: Prompts.ideaText(idea),
@@ -148,6 +160,8 @@ struct LLMSummarizer: Summarizer {
     ]
 
     /// Returns the JSON text the AI produced, after checking it wasn't refused or cut off.
+    /// - Parameter data: A reply in Claude's message format.
+    /// - Returns: The text of the first text block, as UTF-8 data.
     /// - Throws: `SummarizerError.refused`, or `.badResponse` if cut off at the length limit or empty.
     static func extractJSON(_ data: Data) throws -> Data {
         /// The parts of a Claude-format reply needed here.
@@ -165,7 +179,10 @@ struct LLMSummarizer: Summarizer {
         return Data(text.utf8)
     }
 
+    /// Reads one part of the trend-step reply.
+    /// - Parameter data: The raw reply body.
     /// - Returns: English title and description by 1-based item number (first entry wins on duplicates).
+    /// - Throws: `DecodingError` or `SummarizerError` if the reply is refused, cut off or malformed.
     static func parseTranslations(_ data: Data) throws -> [Int: Translation] {
         /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable {
@@ -177,7 +194,10 @@ struct LLMSummarizer: Summarizer {
                           uniquingKeysWith: { first, _ in first })
     }
 
+    /// Reads one part of the trend-step reply.
+    /// - Parameter data: The raw reply body.
     /// - Returns: Pain clusters as drafts with `isPainCluster` set (empty if the reply has none).
+    /// - Throws: `DecodingError` or `SummarizerError` if the reply is refused, cut off or malformed.
     static func parseClusters(_ data: Data) throws -> [ThemeDraft] {
         /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable {
@@ -193,14 +213,20 @@ struct LLMSummarizer: Summarizer {
         }
     }
 
+    /// Reads one part of the trend-step reply.
+    /// - Parameter data: The raw reply body.
     /// - Returns: 1-based numbers of items the AI marked as noise.
+    /// - Throws: `DecodingError` or `SummarizerError` if the reply is refused, cut off or malformed.
     static func parseNoise(_ data: Data) throws -> Set<Int> {
         /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable { let noise_numbers: [Int]? }
         return Set(try JSONDecoder().decode(Out.self, from: try extractJSON(data)).noise_numbers ?? [])
     }
 
+    /// Reads one part of the trend-step reply.
+    /// - Parameter data: The raw reply body.
     /// - Returns: Trend drafts with the AI's scores (clamped later by ThemeBuilder).
+    /// - Throws: `DecodingError` or `SummarizerError` if the reply is refused, cut off or malformed.
     static func parseThemes(_ data: Data) throws -> [ThemeDraft] {
         /// The reply's JSON shape (field names match the schema).
         struct Out: Decodable {
@@ -226,7 +252,7 @@ struct LLMSummarizer: Summarizer {
 /// Calls the Claude Messages API directly with URLSession (there is no official Swift SDK).
 /// The reply is streamed, so long requests are less likely to time out.
 struct ClaudeClient: LLMClient {
-    /// Always Claude.
+    /// Fixed: this client only talks to Anthropic.
     let provider = AIProvider.claude
     /// The user's Anthropic key, from the Keychain. Only ever sent to Anthropic in the `x-api-key` header.
     let apiKey: String
@@ -235,10 +261,19 @@ struct ClaudeClient: LLMClient {
     /// Price used for cost tracking.
     var price = AIProvider.claude.models[0].price
 
+    // Safe to unwrap: a constant, valid URL.
     /// Anthropic's Messages API.
     static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
 
     /// Streams one request, with retries. See LLMClient.complete.
+    /// - Parameters:
+    ///   - system: Instructions.
+    ///   - prompt: The user message.
+    ///   - schema: JSON Schema the reply must follow.
+    ///   - effort: "medium" or "high".
+    ///   - feature: Cost-tracker label.
+    /// - Returns: The rebuilt reply in Messages API shape.
+    /// - Throws: `LLMHTTPError`, `StreamAssembler.StreamError`, network errors or `CancellationError`.
     func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
         var body = Self.requestBody(system: system, prompt: prompt, schema: schema, effort: effort, model: model)
         body["stream"] = true
@@ -271,16 +306,48 @@ struct ClaudeClient: LLMClient {
             for try await line in bytes.lines { try stream.consume(line) }
         } catch {
             // Input tokens are billed even if the reply is lost part-way, so record what we know.
-            if let partial = stream.usageOnlyResponse() { UsageTracker.record(response: partial, feature: feature, price: price) }
+            if let partial = stream.usageOnlyResponse() {
+                UsageTracker.record(response: partial, feature: feature,
+                                    price: Self.price(servedBy: stream.model, chosen: model, chosenPrice: price))
+            }
             throw error
         }
         let data = try stream.response()
-        UsageTracker.record(response: data, feature: feature, price: price)
+        UsageTracker.record(response: data, feature: feature, price: Self.price(servedBy: stream.model, chosen: model, chosenPrice: price))
         return data
     }
 
+    /// Prices of the models Anthropic's server-side fallback can answer with, beyond those in
+    /// `AIProvider.claude.models`. Input and output from Anthropic's price table (6 Oct 2026); the table gives
+    /// no cache-read price for these, so `ModelPrice`'s usual 10% of input is assumed (no caching is requested).
+    static let fallbackPrices: [String: ModelPrice] = [
+        "claude-opus-4-8": ModelPrice(input: 5, output: 25),
+        "claude-opus-5": ModelPrice(input: 5, output: 25),
+    ]
+
+    /// Money: the price to record a call at, for the model that actually answered (a server-side fallback can
+    /// answer with another Claude model).
+    /// - Parameters:
+    ///   - served: The model named in the reply, or `nil` if the stream didn't say.
+    ///   - chosen: The model that was requested.
+    ///   - chosenPrice: The requested model's price, which may be a typed-in custom price.
+    /// - Returns: The served model's list price when it differs from the requested one and is known,
+    ///   otherwise `chosenPrice`.
+    static func price(servedBy served: String?, chosen: String, chosenPrice: ModelPrice) -> ModelPrice {
+        guard let served, served != chosen else { return chosenPrice }
+        return AIProvider.claude.models.first { $0.id == served }?.price ?? fallbackPrices[served] ?? chosenPrice
+    }
+
     /// The Messages API request: structured output via `output_config.format`, effort level, a 32,000-token
-    /// reply limit (enough for 300-item trend replies), and `fallbacks: "default"` (server-side model fallback).
+    /// reply limit (enough for 300-item trend replies), and `fallbacks: "default"` (server-side model fallback:
+    /// Anthropic may answer a declined request with another Claude model; never a different provider).
+    /// - Parameters:
+    ///   - system: Instructions.
+    ///   - prompt: The user message.
+    ///   - schema: JSON Schema the reply must follow.
+    ///   - effort: "medium" or "high".
+    ///   - model: API model ID.
+    /// - Returns: The JSON body, without `stream` (the caller adds it).
     static func requestBody(system: String, prompt: String, schema: [String: Any], effort: String = "medium",
                             model: String = AIProvider.claude.recommendedModel) -> [String: Any] {
         [
@@ -305,6 +372,10 @@ enum LLMRetry {
     static let delays: [Double] = [3, 15]
 
     /// Runs `operation`, retrying temporary failures up to twice. Cancellation is passed straight through.
+    /// - Parameter operation: One attempt; it must be safe to repeat (each repeat is another, billed request).
+    /// - Returns: The first successful result.
+    /// - Throws: `CancellationError` if cancelled, otherwise the last attempt's error once retries run out
+    ///   or the error isn't temporary.
     static func run(_ operation: () async throws -> Data) async throws -> Data {
         var attempt = 0
         while true {
@@ -321,6 +392,8 @@ enum LLMRetry {
     }
 
     /// Only temporary problems are retried; a bad key or a malformed request fails straight away.
+    /// - Parameter error: The failed attempt's error.
+    /// - Returns: `true` for timeouts, rate limits (429), overload (529), server errors, stream errors and dropped connections.
     static func isRetryable(_ error: Error) -> Bool {
         if let http = error as? LLMHTTPError { return [408, 429, 529].contains(http.status) || (500...599).contains(http.status) }
         if error is StreamAssembler.StreamError { return true }
@@ -332,6 +405,11 @@ enum LLMRetry {
     }
 
     /// The server's retry-after if it gave one (capped at 30 s), otherwise 3 s then 15 s, with a little jitter.
+    /// - Parameters:
+    ///   - attempt: 0 for the first retry.
+    ///   - retryAfter: Seconds from the server's `retry-after` header, if any.
+    ///   - jitter: Up to 1 s added so many clients don't retry in step; tests pass 0.
+    /// - Returns: Seconds to wait.
     static func retryDelay(attempt: Int, retryAfter: Double?, jitter: Double = Double.random(in: 0...1)) -> Double {
         if let retryAfter { return min(max(retryAfter, 1), 30) }
         return delays[min(attempt, delays.count - 1)] + jitter
@@ -363,8 +441,19 @@ struct LLMHTTPError: LocalizedError, Equatable {
         }
     }
 
-    /// The raw status and start of the reply, shown only behind "Details" for diagnosis.
-    var technicalDetail: String { "HTTP \(status): \(detail)" }
+    /// The raw status and start of the reply, shown only behind "Details" for diagnosis. This text is
+    /// stored with the day's digest, so anything that looks like a key or token is hidden first.
+    var technicalDetail: String { "HTTP \(status): \(Self.redacted(detail))" }
+
+    /// Security: some providers echo part of the API key, a bearer token or other secrets in error replies.
+    /// Hides `Bearer …`, `sk-…` and `AIza…` keys and any run of 24+ letters, digits, `_` or `-` (which also
+    /// hides long request IDs, an acceptable loss for diagnosis).
+    /// - Parameter text: The start of a provider's error reply.
+    /// - Returns: The text with each such run replaced by "[hidden]".
+    static func redacted(_ text: String) -> String {
+        [#"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"#, #"sk-[A-Za-z0-9_-]{8,}"#, #"AIza[A-Za-z0-9_-]{10,}"#, #"[A-Za-z0-9_-]{24,}"#]
+            .reduce(text) { $0.replacingOccurrences(of: $1, with: "[hidden]", options: .regularExpression) }
+    }
 }
 
 /// Rebuilds a normal (non-streamed) Messages API reply from server-sent events, so the existing
@@ -373,7 +462,9 @@ struct LLMHTTPError: LocalizedError, Equatable {
 struct StreamAssembler {
     /// An error event in the stream, or a stream that ended before `message_stop`. Treated as retryable.
     struct StreamError: LocalizedError {
+        /// The provider's error message or type, or a description of how the stream ended early.
         let message: String
+        /// A plain message for the user.
         var errorDescription: String? { "Claude stream error: \(message)" }
     }
 
@@ -387,6 +478,9 @@ struct StreamAssembler {
     private var usage: [String: Int] = [:]
     /// Set by `message_start`; usage is only known after it.
     private(set) var started = false
+    /// The model that answered: named by `message_start`, and replaced by a `fallback` block's target
+    /// when Anthropic switches models part-way.
+    private(set) var model: String?
     /// Set by `message_stop`; a reply without it is incomplete.
     private(set) var finished = false
 
@@ -401,10 +495,15 @@ struct StreamAssembler {
         switch type {
         case "message_start":
             started = true
-            mergeUsage((event["message"] as? [String: Any])?["usage"])
+            let message = event["message"] as? [String: Any]
+            if let name = message?["model"] as? String { model = name }
+            mergeUsage(message?["usage"])
         case "content_block_start":
             if let index = event["index"] as? Int, let block = event["content_block"] as? [String: Any] {
                 blockTypes[index] = block["type"] as? String
+                if block["type"] as? String == "fallback", let to = (block["to"] as? [String: Any])?["model"] as? String {
+                    model = to
+                }
                 if let text = block["text"] as? String, !text.isEmpty { texts[index, default: ""] += text }
             }
         case "content_block_delta":
@@ -432,6 +531,7 @@ struct StreamAssembler {
     }
 
     /// The finished reply in normal Messages API shape.
+    /// - Returns: JSON with `content` (one text block), `usage` and, when known, `stop_reason`.
     /// - Throws: `StreamError` if the stream didn't start and finish.
     func response() throws -> Data {
         guard started, finished else { throw StreamError(message: "the reply ended early") }
@@ -441,7 +541,8 @@ struct StreamAssembler {
         return try JSONSerialization.data(withJSONObject: object)
     }
 
-    /// Just the usage seen so far, so a failed stream's input tokens can still be recorded; `nil` if it never started.
+    /// Just the usage seen so far, so a failed stream's input tokens can still be recorded.
+    /// - Returns: JSON with only `usage`, or `nil` if the stream never started.
     func usageOnlyResponse() -> Data? {
         guard started else { return nil }
         return try? JSONSerialization.data(withJSONObject: ["usage": usage])

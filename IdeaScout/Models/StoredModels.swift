@@ -28,6 +28,10 @@ import SwiftData
     @Relationship(deleteRule: .cascade, inverse: \Theme.digest) var themes: [Theme] = []
 
     /// Creates a digest stamped with the current time.
+    /// - Parameters:
+    ///   - day: Start of the day it belongs to.
+    ///   - summarizer: Name of the AI that built it.
+    ///   - warnings: Notes about the refresh, if already known.
     init(day: Date, summarizer: String, warnings: [String] = []) {
         self.day = day
         self.createdAt = .now
@@ -85,6 +89,11 @@ import SwiftData
     @Relationship(deleteRule: .cascade, inverse: \Item.theme) var items: [Item] = []
 
     /// Creates a theme; scores and cluster fields are set afterwards.
+    /// - Parameters:
+    ///   - title: Short name.
+    ///   - summary: One or two sentences.
+    ///   - order: Position in the AI's reply (catch-all last).
+    ///   - opportunities: Money-making variants (empty for clusters).
     init(title: String, summary: String, order: Int, opportunities: [String]) {
         self.title = title
         self.summary = summary
@@ -105,7 +114,10 @@ import SwiftData
         ScoreReasons(novelty: noveltyReason, momentum: momentumReason, viability: viabilityReason, gap: gapReason)
     }
 
-    /// Copies scores and reasons into the stored fields.
+    /// Copies scores and reasons into the stored fields. The caller saves the database.
+    /// - Parameters:
+    ///   - s: The four scores.
+    ///   - r: The four reasons.
     func apply(_ s: ThemeScores, _ r: ScoreReasons) {
         novelty = s.novelty; momentum = s.momentum; viability = s.viability; opportunityGap = s.gap
         noveltyReason = r.novelty; momentumReason = r.momentum; viabilityReason = r.viability; gapReason = r.gap
@@ -113,13 +125,21 @@ import SwiftData
 
     /// Whether the theme clears the quality bar. Unscored themes (keyword mode) always pass;
     /// the catch-all "Other projects" only shows when the bar is off.
+    /// - Parameters:
+    ///   - bar: The quality bar (0 = off).
+    ///   - weights: The user's score weights.
+    /// - Returns: `true` if the theme should be shown.
     func clears(_ bar: Double, weights: RankWeights) -> Bool {
         if isCatchAll { return bar <= 0 }
         guard let overall = scores.overall(weights) else { return true }
         return overall >= bar
     }
 
-    /// Ranked order: best overall score first, catch-all last.
+    /// Ranked order: best overall score first, catch-all last; ties keep the AI's order.
+    /// - Parameters:
+    ///   - themes: The themes to sort.
+    ///   - weights: The user's score weights.
+    /// - Returns: The themes in display order.
     static func ranked(_ themes: [Theme], weights: RankWeights) -> [Theme] {
         themes.sorted { a, b in
             if a.isCatchAll != b.isCatchAll { return b.isCatchAll }
@@ -246,6 +266,9 @@ import SwiftData
     var oneWeekTest: String
     /// The manual task or costly workaround the product replaces.
     var replaces: String = ""
+    /// Where a solo builder would find the first buyers (a marketplace, community or search phrase); empty
+    /// for ideas found before sales channels were asked for.
+    var channel: String = ""
     /// The devil's advocate's strongest objection.
     var objection: String
     /// Competitors named by the devil's advocate, or "none found".
@@ -267,6 +290,11 @@ import SwiftData
     var gap = 0
     /// How well it suits the user (from About me).
     var fit = 0
+    /// Whether one person with AI coding tools could build a first version in about 4 weeks.
+    /// 0 means not scored (ideas found before this score existed).
+    var buildability = 0
+    /// How reachable the buyers are through the sales channel without a sales team. 0 means not scored.
+    var channelScore = 0
     /// The killer score each time the idea was proposed.
     var scoreHistory: [Double] = []
     /// When it was first proposed.
@@ -291,6 +319,9 @@ import SwiftData
     }
 
     /// Creates an empty idea; DigestService fills in the rest from the AI's reply.
+    /// - Parameters:
+    ///   - key: `KillerIdea.key(for: title)`; unique, so the same idea matches across days.
+    ///   - title: The AI's title.
     init(key: String, title: String) {
         self.key = key
         self.title = title
@@ -300,9 +331,28 @@ import SwiftData
         lastSeen = .now
     }
 
-    /// Average of the five review scores.
+    /// The weighted killer score of the review scores.
     var killerScore: Double {
-        Double(pain + willingToPay + timing + gap + fit) / 5
+        Self.killerScore(pain: pain, willingToPay: willingToPay, timing: timing, gap: gap, fit: fit,
+                         buildability: buildability, channel: channelScore)
+    }
+
+    /// "Why now" counts half as much as the other scores: for a solo builder using AI tools, "AI makes it
+    /// cheap to build" is true of almost every idea, so timing separates ideas less than buildability or a sales channel.
+    static let timingWeight = 0.5
+
+    /// The killer score: the single source of the weighting, used by `KillerEngine` and on screen.
+    /// - Parameters:
+    ///   - pain: 0–5. Each other parameter is a 0–5 review score with the same name.
+    ///   - buildability: 0–5; 0 together with `channel` 0 means an older idea scored before these existed.
+    ///   - channel: 0–5, the sales-channel score.
+    /// - Returns: 0–5. Older ideas keep their original score (the plain average of the first five), so they
+    ///   aren't marked down for scores they were never given.
+    static func killerScore(pain: Int, willingToPay: Int, timing: Int, gap: Int, fit: Int,
+                            buildability: Int, channel: Int) -> Double {
+        guard buildability > 0 || channel > 0 else { return Double(pain + willingToPay + timing + gap + fit) / 5 }
+        let total = Double(pain + willingToPay + gap + fit + buildability + channel) + Double(timing) * timingWeight
+        return total / (6 + timingWeight)
     }
 
     /// Killer score plus a bonus for coming back on several days (up to +0.6).
@@ -310,12 +360,18 @@ import SwiftData
 
     /// +0.15 for each extra day it was proposed, up to 4 extra days (+0.6), so ideas that keep coming
     /// back rise without outranking a clearly stronger idea.
+    /// - Parameters:
+    ///   - killer: The killer score (0–5).
+    ///   - timesSeen: Days it has been proposed (1 or more).
+    /// - Returns: The leaderboard score (0–5.6).
     static func leaderboardScore(killer: Double, timesSeen: Int) -> Double {
         killer + Double(min(max(timesSeen - 1, 0), 4)) * 0.15
     }
 
     /// Whether the idea was proposed on the given day. Ideas saved before days were recorded
     /// fall back to their first and last day.
+    /// - Parameter day: Any moment in the day to check, in the phone's calendar.
+    /// - Returns: `true` if it was proposed that day.
     func wasSeen(on day: Date) -> Bool {
         let calendar = Calendar.current
         if !daysSeen.isEmpty { return daysSeen.contains { calendar.isDate($0, inSameDayAs: day) } }
@@ -333,6 +389,10 @@ import SwiftData
     }
 
     /// Ideas proposed on a given day, best first.
+    /// - Parameters:
+    ///   - day: Any moment in the day.
+    ///   - ideas: The ideas to filter.
+    /// - Returns: The matching ideas, highest killer score first.
     static func seen(on day: Date, in ideas: [KillerIdea]) -> [KillerIdea] {
         ideas.filter { $0.wasSeen(on: day) }.sorted { $0.killerScore > $1.killerScore }
     }
@@ -343,6 +403,8 @@ import SwiftData
     }
 
     /// Normalised key so the same idea matches across days: lowercase letters and digits only.
+    /// - Parameter title: The AI's title.
+    /// - Returns: The key; empty if the title has no letters or digits.
     static func key(for title: String) -> String {
         title.lowercased().filter { $0.isLetter || $0.isNumber }
     }

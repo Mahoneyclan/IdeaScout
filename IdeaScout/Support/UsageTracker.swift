@@ -112,6 +112,8 @@ enum UsageTracker {
 
     /// The ledger key for a date, in the phone's time zone with a fixed Gregorian "yyyy-MM-dd" format,
     /// so keys sort and compare correctly whatever the user's calendar or language.
+    /// - Parameter date: The moment to file under.
+    /// - Returns: The day as "yyyy-MM-dd".
     static func dayKey(_ date: Date) -> String {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
