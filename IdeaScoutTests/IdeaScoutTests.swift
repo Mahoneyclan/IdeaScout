@@ -134,6 +134,9 @@ struct KeychainTests {
     @Test func roundTrip() {
         Keychain.set("test-value", for: .openaiAPIKey, service: Self.testService)
         #expect(Keychain.get(.openaiAPIKey, service: Self.testService) == "test-value")
+        // Saving again replaces the entry in place.
+        #expect(Keychain.set("newer-value", for: .openaiAPIKey, service: Self.testService))
+        #expect(Keychain.get(.openaiAPIKey, service: Self.testService) == "newer-value")
         Keychain.set(nil, for: .openaiAPIKey, service: Self.testService)
         #expect(Keychain.get(.openaiAPIKey, service: Self.testService) == nil)
     }
@@ -193,6 +196,7 @@ struct FleshOutPromptTests {
         #expect(prompt.contains("My angle / notes: For nurses on night shifts"))
         #expect(prompt.contains("Novelty 4/5, Opportunity gap 5/5"))
         #expect(prompt.contains("- Sync with rosters"))
+        #expect(prompt.hasSuffix(Prompts.pastedPromptNotice))
         #expect(prompt.contains("7. The next three concrete steps"))
     }
 }
@@ -719,7 +723,27 @@ struct ScanSettingsTests {
         #expect(AppSettings.defaultTrendWindowDays == 7)
         #expect(AppSettings.defaultPainWindowDays == 14)
         #expect(AppSettings.defaultClaudeMaxItems == 300)
-        #expect(AppSettings.estimatedRefreshCost(items: 300).lowerBound < AppSettings.estimatedRefreshCost(items: 500).lowerBound)
+        let opus = AppSettings.refreshReferencePrice
+        #expect(AppSettings.estimatedRefreshCost(items: 300, price: opus).lowerBound
+                < AppSettings.estimatedRefreshCost(items: 500, price: opus).lowerBound)
+    }
+
+    /// The refresh estimate follows the chosen model's price, and a free refresh says so. Compares dollars,
+    /// because the currency text depends on the device's region ("$0.45" or "USD 0.45").
+    @Test(arguments: [
+        (ModelPrice(input: 4, output: 20), 0.453),    // Claude Opus: the measured reference
+        (ModelPrice(input: 2, output: 10), 0.2265),   // Claude Sonnet, GPT-6.1 Sol
+        (ModelPrice(input: 10, output: 50), 1.1325),  // Fable, GPT-6 Astra
+        (ModelPrice(input: 0, output: 0), 0),         // free-within-limits models
+    ])
+    func refreshEstimateFollowsModelPrice(price: ModelPrice, dollars: Double) {
+        let high = AppSettings.estimatedRefreshCost(items: 300, price: price).upperBound
+        #expect(abs(high - dollars) < 0.001)
+        #expect(AppSettings.refreshCostText(items: 300, price: price) == AppSettings.approximateCostText(high))
+    }
+
+    @Test func refreshWithoutPaidModelIsFree() {
+        #expect(AppSettings.refreshCostText(items: 300, price: nil) == "Free")
     }
 }
 
@@ -1238,6 +1262,40 @@ struct RefreshRoutineTests {
         #expect(h.service.lastError == nil && !h.service.isRefreshing)
     }
 
+    /// Two ideas whose titles give the same key in one batch become one idea: the later updates the earlier and
+    /// keeps its evidence, instead of a second insert replacing it.
+    @Test func sameTitleTwiceInOneBatchMergesIntoOneIdea() async throws {
+        let twice = #"{"ideas":[{"title":"InvoiceChaser","pitch":"p1","buyer":"b","pricing":"$49/mo","why_now":"w","one_week_test":"t","replaces":"r","channel":"Xero App Store","evidence_numbers":[1],"same_as":""},"#
+            + #"{"title":"Invoice Chaser","pitch":"p2","buyer":"b","pricing":"$49/mo","why_now":"w","one_week_test":"t","replaces":"r","channel":"Xero App Store","evidence_numbers":[],"same_as":""}]}"#
+        let h = try harness(llm: ScriptedLLM(replies: ["Trends": .success(Self.trends), "Killer ideas": .success(twice),
+                                                       "Devil's advocate": .success(Self.reviews)]))
+        await h.service.refresh(force: true, notify: false)
+        let ideas = try h.context.fetch(FetchDescriptor<KillerIdea>())
+        #expect(ideas.count == 1)
+        #expect(ideas.first?.pitch == "p2")
+        #expect(ideas.first?.evidenceTitles.isEmpty == false)
+        #expect(h.service.lastError == nil)
+    }
+
+    /// An idea the AI marks as the same as an earlier one (`same_as`) updates that idea, found by key without
+    /// loading the rest; unrelated ideas are left alone.
+    @Test func returningIdeaUpdatesTheEarlierOneOnly() async throws {
+        let h = try harness(llm: ScriptedLLM(replies: ["Trends": .success(Self.trends),
+                                                       "Killer ideas": .success(Self.ideas.replacingOccurrences(of: #""same_as":"""#, with: #""same_as":"Chase My Invoices""#)),
+                                                       "Devil's advocate": .success(Self.reviews)]))
+        let earlier = KillerIdea(key: KillerIdea.key(for: "Chase My Invoices"), title: "Chase My Invoices")
+        earlier.lastSeen = .now.addingTimeInterval(-2 * 86400)
+        let other = KillerIdea(key: KillerIdea.key(for: "Roster Helper"), title: "Roster Helper")
+        other.pitch = "unchanged"
+        h.context.insert(earlier); h.context.insert(other)
+        try h.context.save()
+        await h.service.refresh(force: true, notify: false)
+        let ideas = try h.context.fetch(FetchDescriptor<KillerIdea>())
+        #expect(ideas.count == 2)
+        #expect(earlier.timesSeen == 2 && earlier.pitch == "p" && earlier.title == "Chase My Invoices")
+        #expect(other.pitch == "unchanged")
+    }
+
     @Test func aiFailureFallsBackToKeywordsWithAPlainWarning() async throws {
         let h = try harness(llm: ScriptedLLM(replies: ["Trends": .failure(LLMHTTPError(provider: "Claude", status: 503,
                                                                                          retryAfter: nil, detail: "req_123"))]))
@@ -1382,5 +1440,6 @@ struct SoloBuilderTests {
         #expect(brief.contains("first prompt I should give my AI coding tool"))
         let older = KillerIdea(key: "b", title: "Old")
         #expect(!Prompts.buildBrief(older).contains("Sales channel:"))
+        #expect(brief.hasSuffix(Prompts.pastedPromptNotice))
     }
 }

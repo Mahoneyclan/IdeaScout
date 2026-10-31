@@ -375,12 +375,16 @@ struct RefreshBar: View {
     @Query(sort: \Digest.createdAt, order: .reverse) private var digests: [Digest]
     @AppStorage(AppSettings.Keys.claudeMaxItems) private var maxItems = AppSettings.defaultClaudeMaxItems
     @AppStorage(AppSettings.Keys.dailyCap) private var dailyCap = AppSettings.defaultDailyCap
+    @AppStorage(AppSettings.Keys.aiProvider) private var providerRaw = AIProvider.claude.rawValue
     /// Shows the "Run another refresh today?" confirmation.
     @State private var confirm = false
+    /// The chosen cloud model's price, or `nil` when a refresh is free. Kept here because looking it up reads
+    /// the Keychain; refreshed when the screen appears (after any change in Settings) and when the AI changes.
+    @State private var price: ModelPrice?
 
-    /// The estimated cost of one refresh, shown on the button.
+    /// The estimated cost of one refresh, shown on the button: "~$0.45", or "Free".
     private var costText: String {
-        AppSettings.estimatedRefreshCost(items: maxItems).upperBound.formatted(.currency(code: "USD"))
+        AppSettings.refreshCostText(items: maxItems, price: price)
     }
 
     var body: some View {
@@ -392,7 +396,7 @@ struct RefreshBar: View {
             else { Task { await service.refresh(force: true) } }
         } label: {
             Label(!store.access.canRefresh ? (store.access == .expired ? "Unlock to find new ideas · \(store.unlockPrice)" : "Start free trial")
-                  : service.isRefreshing ? "Refreshing…" : (hasToday ? "Refresh again · ~\(costText)" : "Find today's ideas · ~\(costText)"),
+                  : service.isRefreshing ? "Refreshing…" : (hasToday ? "Refresh again · \(costText)" : "Find today's ideas · \(costText)"),
                   systemImage: store.access.canRefresh ? "arrow.clockwise" : "lock.open")
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
@@ -408,8 +412,10 @@ struct RefreshBar: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.bar)
+        .onAppear { price = AppSettings.chosenModelPrice() }
+        .onChange(of: providerRaw) { price = AppSettings.chosenModelPrice() }
         .confirmationDialog("Run another refresh today?", isPresented: $confirm, titleVisibility: .visible) {
-            Button("Refresh (~\(costText))") { Task { await service.refresh(force: true) } }
+            Button("Refresh (\(costText))") { Task { await service.refresh(force: true) } }
         } message: {
             let spent = UsageTracker.summary().today.cost.formatted(.currency(code: "USD"))
             Text(dailyCap > 0 ? "Today's refresh already ran. Spent today: \(spent) of \(dailyCap.formatted(.currency(code: "USD")))."

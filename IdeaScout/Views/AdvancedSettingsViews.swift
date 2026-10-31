@@ -60,6 +60,9 @@ struct ScanRankingSettings: View {
     @AppStorage(AppSettings.Keys.weightMomentum) private var wMomentum = 1.0
     @AppStorage(AppSettings.Keys.weightViability) private var wViability = 1.0
     @AppStorage(AppSettings.Keys.weightGap) private var wGap = 1.0
+    /// The chosen cloud model's price for the cost estimates, or `nil` when refreshes are free. Looked up once
+    /// when the screen opens, because it reads the Keychain.
+    @State private var price: ModelPrice?
 
     var body: some View {
         Form {
@@ -72,8 +75,12 @@ struct ScanRankingSettings: View {
                 }
                 Picker("Items Claude reads", selection: $maxItems) {
                     ForEach(AppSettings.maxItemChoices, id: \.self) { count in
-                        let cost = AppSettings.estimatedRefreshCost(items: count)
-                        Text("\(count) · ~\(cost.lowerBound.formatted(.currency(code: "USD")))–\(cost.upperBound.formatted(.currency(code: "USD")))").tag(count)
+                        if let price {
+                            let cost = AppSettings.estimatedRefreshCost(items: count, price: price)
+                            Text("\(count) · ~\(cost.lowerBound.formatted(.currency(code: "USD")))–\(cost.upperBound.formatted(.currency(code: "USD")))").tag(count)
+                        } else {
+                            Text("\(count) · free").tag(count)
+                        }
                     }
                 }
             } header: {
@@ -110,6 +117,7 @@ struct ScanRankingSettings: View {
             }
         }
         .navigationTitle("Scan & ranking")
+        .onAppear { price = AppSettings.chosenModelPrice() }
     }
 }
 

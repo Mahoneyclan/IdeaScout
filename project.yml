@@ -71,6 +71,10 @@ schemes:
       # Lets purchases be tested from Xcode without real money (local StoreKit test file).
       storeKitConfiguration: IdeaScout/IdeaScout.storekit
     test:
+      # Records how much of the app's code the tests run (Public store target: 80% of non-screen logic).
+      gatherCoverageData: true
+      coverageTargets:
+        - IdeaScout
       targets:
         - IdeaScoutTests
         - IdeaScoutUITests

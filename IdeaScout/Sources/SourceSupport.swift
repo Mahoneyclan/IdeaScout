@@ -26,14 +26,11 @@ protocol ItemFetcher: Sendable {
 enum FetchError: LocalizedError {
     /// The server answered with this non-2xx status code.
     case http(Int)
-    /// A source needs a credential the user hasn't added. Currently unused: no remaining source needs one.
-    case missingCredential(String)
 
     /// Plain-English message shown in warnings.
     var errorDescription: String? {
         switch self {
         case .http(let code): "Server returned error \(code)"
-        case .missingCredential(let name): "Add a \(name) in Settings"
         }
     }
 }

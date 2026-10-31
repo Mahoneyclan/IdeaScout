@@ -33,7 +33,7 @@ extension Prompts {
                   "5. A build plan in weekly steps, with the first prompt I should give my AI coding tool",
                   "6. A launch plan for the sales channel: listing title, first 10 customers, and a landing-page headline",
                   "7. How to answer the strongest objection, and what would have to be true to reach 100 paying customers",
-                  "Be specific and practical."]
+                  "Be specific and practical.", "", pastedPromptNotice]
         return lines.joined(separator: "\n")
     }
 }

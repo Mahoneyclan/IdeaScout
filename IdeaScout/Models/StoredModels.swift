@@ -343,7 +343,11 @@ import SwiftData
 
     /// The killer score: the single source of the weighting, used by `KillerEngine` and on screen.
     /// - Parameters:
-    ///   - pain: 0–5. Each other parameter is a 0–5 review score with the same name.
+    ///   - pain: 0–5, how painful the problem is.
+    ///   - willingToPay: 0–5, evidence that buyers would pay.
+    ///   - timing: 0–5, "why now"; weighted by `timingWeight`.
+    ///   - gap: 0–5, how poorly existing products serve the need.
+    ///   - fit: 0–5, how well it uses the user's skills, domain experience and access.
     ///   - buildability: 0–5; 0 together with `channel` 0 means an older idea scored before these existed.
     ///   - channel: 0–5, the sales-channel score.
     /// - Returns: 0–5. Older ideas keep their original score (the plain average of the first five), so they

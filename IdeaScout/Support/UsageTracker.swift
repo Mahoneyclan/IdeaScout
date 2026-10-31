@@ -42,6 +42,10 @@ enum UsageTracker {
         }
 
         /// Adds two usages. The result always stores dollars, so mixed old and new entries add up correctly.
+        /// - Parameters:
+        ///   - a: The first usage.
+        ///   - b: The usage to add to it.
+        /// - Returns: The combined token counts, calls and cost.
         static func + (a: Usage, b: Usage) -> Usage {
             Usage(input: a.input + b.input, output: a.output + b.output, cacheWrite: a.cacheWrite + b.cacheWrite,
                   cacheRead: a.cacheRead + b.cacheRead, calls: a.calls + b.calls, dollars: a.cost + b.cost)
@@ -138,6 +142,10 @@ enum UsageTracker {
         var lastDays: [(day: String, cost: Double)] = []
 
         /// Compares the totals only; tuple arrays can't be compared automatically.
+        /// - Parameters:
+        ///   - a: The first summary.
+        ///   - b: The summary to compare it with.
+        /// - Returns: `true` when today's, this month's and all-time totals match.
         static func == (a: Summary, b: Summary) -> Bool {
             a.today == b.today && a.thisMonth == b.thisMonth && a.allTime == b.allTime
         }

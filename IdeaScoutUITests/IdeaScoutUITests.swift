@@ -1,6 +1,6 @@
 // IdeaScoutUITests.swift
 // Automated screen tests for the critical flows: first launch with consent, a refresh, the paywall
-// after the trial, and "Delete all my data". The app runs in its sealed test mode (TestMode.swift):
+// after the trial, "Delete all my data", and saving an idea. The app runs in its sealed test mode (TestMode.swift):
 // in-memory database, separate settings and Keychain, fake sources and a scripted AI. So these tests
 // never touch the owner's real data, never use the network and never spend money.
 
@@ -77,5 +77,25 @@ final class IdeaScoutUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "should ask before deleting")
         confirm.tap()
         XCTAssertTrue(app.staticTexts["Welcome to IdeaScout"].waitForExistence(timeout: 10))
+    }
+
+    /// Saving an idea from its detail screen puts it in Saved; unsaving it there shows the empty state.
+    func testSavedIdeaAppearsInSavedAndCanBeUnsaved() {
+        let app = launch("-ui-skip-welcome")
+        let idea = element(app, containing: "InvoiceChaser")
+        XCTAssertTrue(idea.waitForExistence(timeout: 20))
+        idea.tap()
+        let save = app.buttons["Save idea"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5), "detail screen should offer Save")
+        save.tap()
+        XCTAssertTrue(app.buttons["Remove from Saved"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Saved"].tap()
+        let saved = element(app, containing: "InvoiceChaser")
+        XCTAssertTrue(saved.waitForExistence(timeout: 5), "the idea should be listed in Saved")
+        saved.swipeLeft()
+        let unsave = app.buttons["Unsave"]
+        XCTAssertTrue(unsave.waitForExistence(timeout: 5))
+        unsave.tap()
+        XCTAssertTrue(app.staticTexts["Nothing saved yet"].waitForExistence(timeout: 5))
     }
 }

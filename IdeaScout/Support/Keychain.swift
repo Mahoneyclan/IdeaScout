@@ -36,7 +36,8 @@ enum Keychain {
         return value
     }
 
-    /// Saves or removes a secret. The old entry is always deleted first, so saving replaces it.
+    /// Saves or removes a secret. Saving updates the existing entry in place (adding one if there's none), so
+    /// a failed save keeps the old key instead of leaving none.
     /// - Parameters:
     ///   - value: The new value; `nil` or blank text removes the entry.
     ///   - key: Which secret to write.
@@ -44,15 +45,19 @@ enum Keychain {
     /// - Returns: `true` if the save (or removal) succeeded.
     @discardableResult
     static func set(_ value: String?, for key: Key, service: String = Keychain.service) -> Bool {
-        SecItemDelete(baseQuery(key, service: service) as CFDictionary)
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return true }
-        var query = baseQuery(key, service: service)
-        query[kSecValueData as String] = Data(value.utf8)
+        let query = baseQuery(key, service: service)
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            SecItemDelete(query as CFDictionary)
+            return true
+        }
         // Security: "after first unlock" so background refresh can read keys while the phone is locked;
         // "this device only" so keys never leave the phone, not even inside encrypted backups or on a
-        // new iPhone restored from one (the user re-enters them there).
-        query[kSecAttrAccessible as String] = accessibility
-        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+        // new iPhone restored from one (the user re-enters them there). Updating it here also moves
+        // entries saved with an older class (`migrateAccessibility`).
+        let fields: [String: Any] = [kSecValueData as String: Data(value.utf8), kSecAttrAccessible as String: accessibility]
+        let status = SecItemUpdate(query as CFDictionary, fields as CFDictionary)
+        guard status == errSecItemNotFound else { return status == errSecSuccess }
+        return SecItemAdd(query.merging(fields) { _, new in new } as CFDictionary, nil) == errSecSuccess
     }
 
     /// The protection class used for every saved secret.

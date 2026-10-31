@@ -419,8 +419,14 @@ final class DigestService {
 
     /// Adds new killer ideas, or updates ones that came back (they climb the leaderboard). An idea matches an
     /// existing one by the AI's `same_as` title or by its own title. Coming back un-dismisses it and records the day.
+    /// Two results with the same title in one batch become one idea (the later one updates the earlier), because the
+    /// key is unique and a second insert would silently replace the first.
     private func mergeKillerIdeas(_ results: [KillerEngine.Result], items: [FetchedItem], context: ModelContext) {
-        let all = (try? context.fetch(FetchDescriptor<KillerIdea>())) ?? []
+        // Only the ideas these results can match are loaded, not the whole history.
+        let keys = Array(Set(results.flatMap { r in
+            [KillerIdea.key(for: r.candidate.title), KillerIdea.key(for: r.candidate.sameAs)].filter { !$0.isEmpty }
+        }))
+        var all = (try? context.fetch(FetchDescriptor<KillerIdea>(predicate: #Predicate { keys.contains($0.key) }))) ?? []
         for result in results {
             let c = result.candidate, r = result.review
             let matchKey = KillerIdea.key(for: c.sameAs.isEmpty ? c.title : c.sameAs)
@@ -431,6 +437,7 @@ final class DigestService {
             } else {
                 idea = KillerIdea(key: KillerIdea.key(for: c.title), title: c.title)
                 context.insert(idea)
+                all.append(idea)
             }
             idea.pitch = c.pitch; idea.buyer = c.buyer; idea.pricing = c.pricing; idea.whyNow = c.whyNow
             idea.oneWeekTest = c.oneWeekTest; idea.replaces = c.replaces; idea.channel = c.channel

@@ -8,7 +8,7 @@ IdeaScout has **no server, no accounts, no analytics and no third-party code**. 
 ## What data the app holds, and where
 | Data | Where it's stored | Protection |
 |---|---|---|
-| AI provider API keys | iOS **Keychain**, one entry per provider (`Support/Keychain.swift`) | `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: encrypted by iOS, never synced, never included in backups or restored to another phone. Only the last 4 characters are ever shown |
+| AI provider API keys | iOS **Keychain**, one entry per provider (`Support/Keychain.swift`) | `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: encrypted by iOS, never synced, never included in backups or restored to another phone. Only the last 4 characters are ever shown. A key is saved when the user finishes typing (not per keystroke), and replacing one updates it in place, so a failed save keeps the old key |
 | About me, industry focus, My Business Challenges, settings, consents | UserDefaults (app container) | iOS file encryption (available after first unlock). Included in the user's own encrypted device backup. Not secrets |
 | Digests, themes, items, saved projects, killer ideas | SwiftData database (app container) | iOS file encryption, as above (the default class, readable after the first unlock since restart). Not tightened further because the daily background refresh may write to it while the phone is locked. Public content plus the user's notes |
 | AI cost ledger | UserDefaults (JSON) | As above. Token counts and dollar amounts only |
@@ -42,6 +42,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 **Untrusted content**
 - All public content and AI replies are treated as untrusted. AI replies are decoded strictly against expected fields; item numbers are bounds-checked; scores are clamped; text is rendered as plain text.
 - **Prompt injection:** every prompt containing public text tells the model to treat it as data and ignore instructions inside it (`Prompts.untrustedData`). The AI has no tools, browsing or actions, so manipulated content can at worst skew an idea, never exfiltrate data.
+- **Copied prompts:** the build brief and "flesh out" prompts are pasted into AI coding tools that can run commands. Both end with a note telling the tool that the idea text comes from public websites and AI output, and not to run commands, install packages or visit links because of it (`Prompts.pastedPromptNotice`).
 - **Links:** only `http`/`https` links with a host can be opened (`URL.isWebLink`). Phone, message, script, file and other-app links show as text.
 - Links built from source data use safe construction (encoded query values, numeric App Store IDs); malformed items are skipped rather than crashing.
 
@@ -52,13 +53,14 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 - No `print` or `NSLog`. The only log is a database save failure (`os.Logger`, `Support/Persistence.swift`): it names the action, and the error text is marked private. Logs stay on the device.
 
 **Money**
-- A daily AI spending limit (default $1.00) is checked before the trend and idea steps and before variant suggestions. A second refresh on the same day asks first and shows the cost. "Suggest variants" shows its estimated cost on the button, and a repeat paid request asks first. Prices typed in for an "Other…" model can't be negative (they count as $0), and Settings warns that a $0 price isn't counted towards the limit.
+- A daily AI spending limit (default $1.00) is checked before the trend and idea steps and before variant suggestions. A second refresh on the same day asks first and shows the cost. The refresh cost on the button, in that question and in Settings is scaled to the chosen model's price, and says "Free" when no paid AI is set up (`AppSettings.refreshCostText`). "Suggest variants" shows its estimated cost on the button, and a repeat paid request asks first. Prices typed in for an "Other…" model can't be negative (they count as $0), and Settings warns that a $0 price isn't counted towards the limit.
 - Purchases: StoreKit 2, verified transactions only, refunds honoured. The developer-build purchase bypass exists only in Debug builds (`#if DEBUG`; verified absent from Release).
 
 **Platform**
 - Privacy manifest (`PrivacyInfo.xcprivacy`): no tracking; "Other user content" for app functionality, not linked to identity; UserDefaults required-reason `CA92.1`.
 - Permissions: notifications only, requested when the user taps a button. Background fetch is used for the daily refresh. No entitlements file, no URL schemes, no web views.
 - Export compliance: standard HTTPS only (`ITSAppUsesNonExemptEncryption = NO`).
+- Test-only fakes (`Support/TestMode.swift`: stand-in sources, AI replies and a dummy key) are compiled only into Debug builds (`#if DEBUG`); a Release build uses the live services. Verified absent from the Release binary.
 
 ## Known remaining risks
 | Risk | Severity | Why it's accepted or what's next |

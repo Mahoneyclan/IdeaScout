@@ -8,7 +8,9 @@ import SwiftUI
 
 /// Entry for a secret stored in the Keychain. Shows whether one is saved (last 4 characters only).
 /// Only non-empty input is saved, so the field clearing itself when tapped again (normal for
-/// password fields) can't erase a saved key; removing one is a deliberate tap.
+/// password fields) can't erase a saved key; removing one is a deliberate tap. The key is saved once the
+/// user finishes (Return, Save, leaving the field or the screen), not on every keystroke, so a half-typed
+/// key never replaces a working one.
 struct SecretField: View {
     /// Field label, e.g. "Claude API key".
     let title: String
@@ -20,17 +22,25 @@ struct SecretField: View {
     @State private var saved = ""
     /// Shows the "Remove the key?" confirmation.
     @State private var confirmRemove = false
+    /// Whether the field has the keyboard; losing it saves what was typed.
+    @FocusState private var editing: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            SecureField(saved.isEmpty ? title : "Replace \(title.lowercased())", text: $input)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .onChange(of: input) { _, value in
-                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty, Keychain.set(trimmed, for: key) else { return }
-                    saved = trimmed
+            HStack {
+                SecureField(saved.isEmpty ? title : "Replace \(title.lowercased())", text: $input)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.done)
+                    .focused($editing)
+                    .onSubmit(save)
+                    .onChange(of: editing) { _, isEditing in if !isEditing { save() } }
+                if !trimmedInput.isEmpty {
+                    Button("Save", action: save)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .buttonStyle(.borderless)
                 }
+            }
             if !saved.isEmpty {
                 HStack {
                     Label("Saved · ends …\(String(saved.suffix(4)))", systemImage: "checkmark.seal.fill")
@@ -50,6 +60,19 @@ struct SecretField: View {
             }
         }
         .onAppear { saved = Keychain.get(key) ?? "" }
+        .onDisappear(perform: save)
+    }
+
+    /// The typed text without surrounding spaces or line breaks (often picked up when pasting a key).
+    private var trimmedInput: String { input.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Saves the typed key if there is one. The field is cleared once it's saved, so the same text isn't saved
+    /// twice and only the "Saved · ends …" label shows it.
+    private func save() {
+        let value = trimmedInput
+        guard !value.isEmpty, Keychain.set(value, for: key) else { return }
+        saved = value
+        input = ""
     }
 }
 

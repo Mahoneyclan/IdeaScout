@@ -103,7 +103,9 @@ xcodebuild -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'id=<devi
 
 ```
 IdeaScout/
-  App/        IdeaScoutApp (entry point), DigestService (the refresh: fetch → select → AI → save)
+  App/        IdeaScoutApp (entry point), DigestService (the refresh: fetch → select → AI → save),
+              DigestService+Selection (which items reach the AI), DigestService+Housekeeping (delete all,
+              starring and variant suggestions, background refresh scheduling)
   AI/         Summarizer protocol and prompts, LLMSummarizer (cloud AI, Claude client, retries),
               OpenAICompatibleClient (all other providers), AIProviders (provider and model catalogue),
               AppleSummarizer (on-device), KillerEngine (ideas and devil's advocate)
@@ -127,10 +129,10 @@ CLAUDE.md     Conventions for working on this repo
 
 ## Status and open items
 
-Version 1.0 is feature-complete. All 100 tests pass (96 unit, 4 screen) with no compiler warnings, and the last internal quality review scored 84.6 / 100.
+Version 1.0 is feature-complete. All 129 tests pass (124 unit, 5 screen) with no compiler warnings; the tests cover 83% of the non-screen code. The latest internal quality review (31 Oct 2026, round 2 of the review loop) scored 79.0 / 100; progress is tracked in `docs/review/PROGRESS.md`.
 
 Still to do:
 - **Before App Store release (owner):** choose a support email and host the privacy policy publicly, then fill in `AppInfo` in `AboutView.swift`; create the two in-app purchases in App Store Connect; decide whether to keep Y Combinator data (see `docs/source-terms.md`); archive, TestFlight and submit.
 - **Reddit** as a source, once Reddit approves API access.
 - **Model list upkeep:** a future admin routine to update providers, models and prices automatically (today they're hand-maintained in `AI/AIProviders.swift`).
-- **Code quality backlog:** screen tests for History and Saved; split the six files over 300 lines; Swift 6 strict concurrency; typed JSON schemas for AI replies.
+- **Code quality backlog:** a screen test for History; split the seven files over 300 lines; Swift 6 strict concurrency; typed JSON schemas for AI replies. The killer-idea leaderboard loads every saved idea to rank it, because its score is calculated rather than stored; that's fast at today's volumes (a few ideas a day), and storing the score would add a new database field.
