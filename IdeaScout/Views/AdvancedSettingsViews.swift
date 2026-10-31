@@ -45,6 +45,7 @@ struct SourcesSettings: View {
                 Text("Demand 40% · Supply 40% · Timing 20%. Numbers = items in the last digest.")
             }
         }
+        .readableList()
         .navigationTitle("Sources")
         .keyboardDone($keyboardOpen)
     }
@@ -116,6 +117,7 @@ struct ScanRankingSettings: View {
                 Text("How much each score counts towards a trend's rank. 0 ignores it.")
             }
         }
+        .readableList()
         .navigationTitle("Scan & ranking")
         .onAppear { price = AppSettings.chosenModelPrice() }
     }
@@ -166,7 +168,7 @@ struct AISettings: View {
                 Text("AI")
             } footer: {
                 if chosen.isCloud {
-                    Text("Run by a company in \(chosen.country). \(chosen.dataNote.map { $0 + " " } ?? "")Get a key at \(chosen.keyURL). Reads up to \(maxItems) items and makes the killer ideas. Keys stay in the iPhone Keychain. If this provider isn't set up, IdeaScout uses Apple's free on-device AI, never another paid provider.")
+                    Text("Run by a company in \(chosen.country). \(chosen.dataNote.map { $0 + " " } ?? "")Get a key at \(chosen.keyURL). Reads up to \(maxItems) items and makes the killer ideas. Keys stay in this device's Keychain. If this provider isn't set up, IdeaScout uses Apple's free on-device AI, never another paid provider.")
                 } else {
                     Text("Free and private, but reads only about 20 items and can't make killer ideas.")
                 }
@@ -208,6 +210,7 @@ struct AISettings: View {
                 Text("Estimated at list prices. Refreshes skip Claude once the daily limit is reached.")
             }
         }
+        .readableList()
         .navigationTitle("AI & costs")
         // Switching to a cloud provider asks for consent before any data is sent to it.
         .onChange(of: provider) { _, value in

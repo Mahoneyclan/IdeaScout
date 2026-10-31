@@ -19,6 +19,8 @@ struct RootView: View {
             Tab("Saved", systemImage: "bookmark") { IdeasView() }
             Tab("Settings", systemImage: "gearshape") { SettingsView() }
         }
+        // A tab bar on iPhone; on iPad the tabs can also be shown as a sidebar (Apple's iPad convention).
+        .tabViewStyle(.sidebarAdaptable)
         .fullScreenCover(isPresented: Binding(get: { !onboarded && !AppSettings.isRunningTests }, set: { _ in })) {
             WelcomeView()
         }
@@ -53,6 +55,7 @@ struct HistoryView: View {
                                            description: Text("Each day's ideas, pain clusters and trends will appear here."))
                 }
             }
+            .readableList()
             .navigationTitle("History")
             .safeAreaInset(edge: .bottom) { RefreshBar() }
         }

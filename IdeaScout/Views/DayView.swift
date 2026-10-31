@@ -147,6 +147,7 @@ struct DigestContentView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
+        .readableList()
         .overlay {
             if themes.isEmpty && gamesFilter && hiddenCount == 0 {
                 ContentUnavailableView("No games in this digest", systemImage: "gamecontroller",

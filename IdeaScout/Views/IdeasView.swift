@@ -77,6 +77,7 @@ struct IdeasView: View {
                                            description: Text("Tap the bookmark on an idea (or swipe right on it in Ideas), or the star on any project in History."))
                 }
             }
+            .readableList()
             .navigationTitle("Saved")
             .toolbar {
                 if !ideas.isEmpty {
@@ -175,6 +176,7 @@ struct IdeaDetailView: View {
                 Text("Paste into Claude, ChatGPT, Lovable or Bolt to get a full product brief. It includes your notes, scores and extensions.")
             }
         }
+        .readableList()
         .onChange(of: idea.note) { copied = false }
         .onAppear { suggestionCost = AppSettings.suggestionCost() }
         .navigationTitle("Idea")

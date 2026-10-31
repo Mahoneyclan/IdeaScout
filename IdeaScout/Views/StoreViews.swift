@@ -13,7 +13,7 @@ struct PaywallView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
+            FillingScrollView { VStack(spacing: 20) {
                 Image(systemName: "lightbulb.max.fill")
                     .font(.system(size: 56)).foregroundStyle(.indigo)
                     .accessibilityHidden(true)
@@ -50,11 +50,12 @@ struct PaywallView: View {
                     Button("Restore purchases") { run { await store.restore() } }
                         .frame(minHeight: 44)
                 }
+                .frame(maxWidth: Layout.buttonWidth)
                 .disabled(working)
                 Text("One-off purchase, no subscription. You pay your AI provider directly for its use.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
-            .padding(24)
+            .padding(24) }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
             }

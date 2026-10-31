@@ -1,6 +1,6 @@
 # IdeaScout
 
-An iPhone app that hunts for a **killer business software idea that one person can vibe-code and sell**. It's for someone looking for a business idea who will build it on their own with AI coding tools. Every day it scans places where businesses complain about missing or overpriced tools, what they already pay for, and what other builders have already made. It proposes ideas for business buyers that one person could ship in about four weeks and sell through a named channel (a marketplace or community), each checked by a devil's-advocate review.
+An iPhone and iPad app that hunts for a **killer business software idea that one person can vibe-code and sell**. It's for someone looking for a business idea who will build it on their own with AI coding tools. Every day it scans places where businesses complain about missing or overpriced tools, what they already pay for, and what other builders have already made. It proposes ideas for business buyers that one person could ship in about four weeks and sell through a named channel (a marketplace or community), each checked by a devil's-advocate review.
 
 Native Swift / SwiftUI / SwiftData. No backend: everything runs on the phone.
 
@@ -67,7 +67,7 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 See [SECURITY.md](SECURITY.md) for what data the app holds, how it's protected and the remaining risks.
 
 
-API keys are **never** stored in source. Each AI provider's key is entered by the user in the app (Settings → Advanced → AI & costs, or the welcome screens) and saved in the iPhone Keychain.
+API keys are **never** stored in source. Each AI provider's key is entered by the user in the app (Settings → Advanced → AI & costs, or the welcome screens) and saved in the device Keychain.
 
 **No configuration file is required to build.** The project has no `.xcconfig` keys today. If one is ever needed (for example a signing override), put it in an untracked `*.xcconfig` file: `.gitignore` already excludes `*.xcconfig` and `.env`. Never commit key values.
 
@@ -88,16 +88,16 @@ Set your own signing team in `project.yml` (`DEVELOPMENT_TEAM`) if you aren't th
 
 Swift Testing tests in `IdeaScoutTests/IdeaScoutTests.swift` (no network calls; samples of each source and AI reply format). They cover source parsing, theme building and ranking, the Claude and OpenAI-style request and reply handling, streaming and retries, the killer-idea rules and evidence caps, costs and the daily limit, digest replacement rules, the English filter, scan settings, business-focus rules, demand sources, signal-based selection, pain clusters, saving ideas, and the trial and consent rules.
 
-**Screen (UI) tests** in `IdeaScoutUITests/` cover first launch with consent, a refresh (and the "ask before a second refresh" rule), the paywall after the trial, and "Delete all my data". They run the app in a sealed test mode (`IdeaScout/Support/TestMode.swift`, active only in Debug builds) with an in-memory database, a separate settings store and Keychain area, fake sources and a scripted AI, so they never touch real data, the network or AI costs. Keep the iPhone unlocked while they run.
+**Screen (UI) tests** in `IdeaScoutUITests/` cover first launch with consent, a refresh (and the "ask before a second refresh" rule), the paywall after the trial, "Delete all my data", saving an idea, and (on iPad) rotation. They run the app in a sealed test mode (`IdeaScout/Support/TestMode.swift`, active only in Debug builds) with an in-memory database, a separate settings store and Keychain area, fake sources and a scripted AI, so they never touch real data, the network or AI costs. Keep the device unlocked while they run.
 
-Run them in Xcode with ⌘U, or on a connected iPhone:
+Run them in Xcode with ⌘U, or on a connected iPhone or iPad:
 
 ```sh
 xcodebuild -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'id=<device-id>' build-for-testing
 xcodebuild -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'id=<device-id>' test-without-building
 ```
 
-(The iOS simulator on the original development Mac hangs, so tests are run on a physical iPhone.)
+(The iOS simulator on the development Mac has hung in the past; since 31 Oct 2026 the shared "iPhone 17" simulator and the iPad Pro 13-inch simulator have worked. Use a physical device if a simulator run hangs.)
 
 ## Project layout
 

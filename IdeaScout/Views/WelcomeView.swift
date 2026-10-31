@@ -39,7 +39,7 @@ struct WelcomeView: View {
 
     /// Page 1: what IdeaScout does.
     private var intro: some View {
-        VStack(spacing: 18) {
+        FillingScrollView { VStack(spacing: 18) {
             Spacer()
             Image(systemName: "lightbulb.max.fill").font(.system(size: 64)).foregroundStyle(.indigo)
                 .accessibilityHidden(true)
@@ -48,12 +48,12 @@ struct WelcomeView: View {
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
             Spacer()
             primary("Continue") { page = 1 }
-        }
+        } }
     }
 
     /// Page 2: start the free trial (or restore a purchase).
     private var trial: some View {
-        VStack(spacing: 18) {
+        FillingScrollView { VStack(spacing: 18) {
             Spacer()
             Image(systemName: "gift").font(.system(size: 56)).foregroundStyle(.indigo).accessibilityHidden(true)
             Text("Free for 7 days").font(.title.bold())
@@ -69,7 +69,7 @@ struct WelcomeView: View {
                 primary("Continue") { page = 2 }
             }
             Button("Restore purchases") { Task { await store.restore() } }.frame(minHeight: 44)
-        }
+        } }
     }
 
     /// Page 3: choose a provider and paste its key; "Done" asks for consent if needed, then finishes.
@@ -100,13 +100,15 @@ struct WelcomeView: View {
                 .listRowBackground(Color.clear)
             }
         }
+        .readableList()
         .navigationTitle("Almost there")
     }
 
-    /// A full-width prominent button with a 44-point minimum height.
+    /// A full-width prominent button (capped on large screens) with a 44-point minimum height.
     private func primary(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Text(title).frame(maxWidth: .infinity, minHeight: 44) }
             .buttonStyle(.borderedProminent)
+            .frame(maxWidth: Layout.buttonWidth)
     }
 }
 
@@ -127,7 +129,7 @@ struct ConsentView: View {
                     Label("Public posts and listings IdeaScout collected (e.g. Hacker News, App Store reviews, government contracts)", systemImage: "doc.text")
                     Label("Your saved project notes, when you ask for variant suggestions", systemImage: "note.text")
                 } footer: {
-                    Text("It's sent directly from your iPhone using your own API key. IdeaScout has no server and never sees your data. \(provider.shortName)'s own privacy policy applies to what it receives. \(provider.dataNote ?? "")")
+                    Text("It's sent directly from your device using your own API key. IdeaScout has no server and never sees your data. \(provider.shortName)'s own privacy policy applies to what it receives. \(provider.dataNote ?? "")")
                 }
                 // Security: what users type here leaves the phone and is kept under the provider's own retention
                 // rules (some providers are outside the user's country), so warn before anything is shared.
@@ -139,6 +141,7 @@ struct ConsentView: View {
                     }
                 }
             }
+            .readableList()
             .navigationTitle("Share data with \(provider.shortName)?")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
@@ -154,7 +157,9 @@ struct ConsentView: View {
                         dismiss()
                     } label: { Text("Don't share · use Apple's on-device AI").frame(maxWidth: .infinity, minHeight: 44) }
                 }
+                .frame(maxWidth: Layout.buttonWidth)
                 .padding(16)
+                .frame(maxWidth: .infinity)
                 .background(.bar)
             }
         }

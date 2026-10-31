@@ -129,7 +129,7 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .qwen: "Uses Alibaba's US (Virginia) service address."
         case .deepseek, .glm, .kimi, .mimo: "Your About me and business challenges are sent to servers run by a company in China."
-        case .apple: "Runs entirely on this iPhone."
+        case .apple: "Runs entirely on this device."
         default: nil
         }
     }

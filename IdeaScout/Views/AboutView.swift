@@ -54,7 +54,7 @@ struct AboutView: View {
                 }
             }
             Section {
-                Text("IdeaScout has no server and no tracking. Your settings, history and keys stay on this iPhone. When you use a cloud AI, your About me, business challenges and the collected public posts are sent directly to the provider you chose, using your own key.")
+                Text("IdeaScout has no server and no tracking. Your settings, history and keys stay on this device. When you use a cloud AI, your About me, business challenges and the collected public posts are sent directly to the provider you chose, using your own key.")
                     .font(.subheadline)
             } header: {
                 Text("Privacy")
@@ -74,18 +74,20 @@ struct AboutView: View {
             Section {
                 Button("Delete all my data", role: .destructive) { confirmDelete = true }
                     .frame(minHeight: 44)
+                    // Attached to the button so on iPad the question points at it.
+                    .confirmationDialog("Delete all your IdeaScout data?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                        Button("Delete everything", role: .destructive) { deleteBlocked = !service.deleteAllData() }
+                    } message: {
+                        Text("This can't be undone. Your API keys will need to be entered again. Purchases are kept and can be restored.")
+                    }
                 if deleteBlocked {
                     Text("A refresh is running. Try again when it finishes.").font(.caption).foregroundStyle(.red)
                 }
             } footer: {
-                Text("Removes your history, ideas, saved projects, settings, API keys and cost records from this iPhone. Purchases are kept.")
+                Text("Removes your history, ideas, saved projects, settings, API keys and cost records from this device. Purchases are kept.")
             }
         }
+        .readableList()
         .navigationTitle("About")
-        .confirmationDialog("Delete all your IdeaScout data?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete everything", role: .destructive) { deleteBlocked = !service.deleteAllData() }
-        } message: {
-            Text("This can't be undone. Your API keys will need to be entered again. Purchases are kept and can be restored.")
-        }
     }
 }

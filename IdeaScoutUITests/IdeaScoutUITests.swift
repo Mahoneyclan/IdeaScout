@@ -1,6 +1,6 @@
 // IdeaScoutUITests.swift
 // Automated screen tests for the critical flows: first launch with consent, a refresh, the paywall
-// after the trial, "Delete all my data", and saving an idea. The app runs in its sealed test mode (TestMode.swift):
+// after the trial, "Delete all my data", saving an idea, and iPad rotation. The app runs in its sealed test mode (TestMode.swift):
 // in-memory database, separate settings and Keychain, fake sources and a scripted AI. So these tests
 // never touch the owner's real data, never use the network and never spend money.
 
@@ -20,6 +20,12 @@ final class IdeaScoutUITests: XCTestCase {
     /// Any element whose label contains `text` (SwiftUI merges a NavigationLink's texts into one button label).
     private func element(_ app: XCUIApplication, containing text: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+    }
+
+    /// A tab: in the tab bar on iPhone; on iPad the tabs sit at the top (or in the sidebar) as plain buttons.
+    private func tab(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+        let inTabBar = app.tabBars.buttons[name]
+        return inTabBar.exists ? inTabBar : app.buttons[name].firstMatch
     }
 
     private func button(_ app: XCUIApplication, startingWith text: String) -> XCUIElement {
@@ -65,7 +71,7 @@ final class IdeaScoutUITests: XCTestCase {
     /// "Delete all my data" asks first, then returns to the welcome screens.
     func testDeleteAllMyDataReturnsToWelcome() {
         let app = launch("-ui-skip-welcome")
-        app.tabBars.buttons["Settings"].tap()
+        tab(app, "Settings").tap()
         let about = element(app, containing: "About & privacy")
         for _ in 0..<6 where !about.isHittable { app.swipeUp() }
         about.tap()
@@ -79,6 +85,18 @@ final class IdeaScoutUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Welcome to IdeaScout"].waitForExistence(timeout: 10))
     }
 
+    /// iPad only: the main screen keeps working in landscape and back in portrait (iPhone stays portrait).
+    func testIPadRotationKeepsTheMainScreenWorking() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPhone is portrait-only")
+        let app = launch("-ui-skip-welcome")
+        XCTAssertTrue(element(app, containing: "InvoiceChaser").waitForExistence(timeout: 20))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(button(app, startingWith: "Refresh again").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, containing: "InvoiceChaser").isHittable, "the idea should still be on screen in landscape")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(button(app, startingWith: "Refresh again").waitForExistence(timeout: 5))
+    }
+
     /// Saving an idea from its detail screen puts it in Saved; unsaving it there shows the empty state.
     func testSavedIdeaAppearsInSavedAndCanBeUnsaved() {
         let app = launch("-ui-skip-welcome")
@@ -89,7 +107,7 @@ final class IdeaScoutUITests: XCTestCase {
         XCTAssertTrue(save.waitForExistence(timeout: 5), "detail screen should offer Save")
         save.tap()
         XCTAssertTrue(app.buttons["Remove from Saved"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Saved"].tap()
+        tab(app, "Saved").tap()
         let saved = element(app, containing: "InvoiceChaser")
         XCTAssertTrue(saved.waitForExistence(timeout: 5), "the idea should be listed in Saved")
         saved.swipeLeft()

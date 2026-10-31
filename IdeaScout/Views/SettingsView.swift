@@ -93,6 +93,7 @@ struct SettingsView: View {
                     Text("Advanced")
                 }
             }
+            .readableList()
             .navigationTitle("Settings")
             .keyboardDone($keyboardOpen)
             .onAppear {

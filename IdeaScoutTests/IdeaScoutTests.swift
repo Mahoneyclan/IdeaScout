@@ -747,6 +747,14 @@ struct ScanSettingsTests {
     }
 }
 
+/// iPad layout: lists keep the system margins until the window is wider than the readable column.
+struct ReadableWidthTests {
+    @Test(arguments: [(CGFloat(390), CGFloat(0)), (700, 0), (1032, 166), (1366, 333)])
+    func listMarginCentresAReadableColumn(width: CGFloat, margin: CGFloat) {
+        #expect(abs(ReadableListMargins.margin(for: width) - margin) < 0.001)
+    }
+}
+
 /// Demand sources, signal-based selection, pain clusters and noise.
 struct DemandSourceTests {
     @Test func fieldNotesBecomeDemandItems() {

@@ -9,7 +9,7 @@ Once a day (or when the user asks), IdeaScout:
 3. asks the AI for **business ideas**, then asks it again, as a devil's advocate, to try to kill them;
 4. saves what survives and shows it.
 
-There is **no server**. Everything runs on the iPhone; AI calls go directly from the phone to the provider the user chose, with the user's own API key.
+There is **no server**. Everything runs on the iPhone or iPad; AI calls go directly from the device to the provider the user chose, with the user's own API key.
 
 ## Screens
 | Tab / screen | File | What it shows |
@@ -22,6 +22,12 @@ There is **no server**. Everything runs on the iPhone; AI calls go directly from
 | **Settings** | `Views/SettingsView.swift`, `AdvancedSettingsViews.swift`, `SettingsControls.swift` | About me, My Business Challenges, industry focus, digest time; Advanced: sources, scan and ranking, AI and costs |
 | Welcome / consent | `Views/WelcomeView.swift` | First launch: intro, trial, AI choice; consent before data goes to a cloud AI |
 | Paywall / About | `Views/StoreViews.swift`, `Views/AboutView.swift` | Trial and unlock; version, privacy, source credits |
+
+**iPhone and iPad:** one universal app with the same screens. iPhone is portrait-only; iPad supports every
+orientation, Split View, Slide Over and Stage Manager. `Views/ReadableWidth.swift` keeps wide windows readable:
+lists and forms get extra side space beyond a 700-point column (`readableList()`), bottom-bar buttons are capped
+at 480 points, and the welcome and paywall pages scroll when a window is short (`FillingScrollView`). On iPad the
+tabs can also show as a sidebar.
 
 ## Data model (`Models/StoredModels.swift`, SwiftData; value types in `Models/Values.swift`)
 ```

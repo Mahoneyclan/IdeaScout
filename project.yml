@@ -7,7 +7,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "2"
+    CURRENT_PROJECT_VERSION: "4"
     DEVELOPMENT_TEAM: 6QTPKSJB67
 targets:
   IdeaScout:
@@ -21,7 +21,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mahoney.IdeaScout
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        TARGETED_DEVICE_FAMILY: "1"
+        # Universal: iPhone (1) and iPad (2).
+        TARGETED_DEVICE_FAMILY: "1,2"
     info:
       path: IdeaScout/Info.plist
       properties:
@@ -29,7 +30,11 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        # iPhone stays portrait (owner's choice, 31 Oct 2026). iPad allows every orientation, which Split View,
+        # Slide Over and Stage Manager require.
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown,
+                                                UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIBackgroundModes: [fetch]
         BGTaskSchedulerPermittedIdentifiers: [com.mahoney.IdeaScout.refresh]
         # Only standard HTTPS is used, so no export-compliance paperwork is needed at upload.

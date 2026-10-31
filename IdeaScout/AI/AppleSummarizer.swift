@@ -26,7 +26,7 @@ struct AppleSummarizer: Summarizer {
     static var statusText: String {
         switch SystemLanguageModel.default.availability {
         case .available: return "Ready"
-        case .unavailable(.deviceNotEligible): return "This iPhone doesn't support Apple Intelligence"
+        case .unavailable(.deviceNotEligible): return "This device doesn't support Apple Intelligence"
         case .unavailable(.appleIntelligenceNotEnabled): return "Turn on Apple Intelligence in iOS Settings"
         case .unavailable(.modelNotReady): return "Apple's model is still downloading"
         case .unavailable: return "Not available"

@@ -204,6 +204,7 @@ struct KillerIdeaDetailView: View {
                 }
             }
         }
+        .readableList()
         .safeAreaInset(edge: .bottom) {
             let prompt = Prompts.buildBrief(idea)
             HStack(spacing: 12) {
@@ -221,8 +222,10 @@ struct KillerIdeaDetailView: View {
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Share build brief")
             }
+            .frame(maxWidth: Layout.buttonWidth)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
             .background(.bar)
         }
         .toolbar {
@@ -276,11 +279,13 @@ struct LeaderboardView: View {
                     }
                 }
             }
+            .readableList()
             .navigationTitle("Ideas")
             .safeAreaInset(edge: .bottom) { RefreshBar() }
-            .confirmationDialog("Dismiss \(pendingDismiss?.title ?? "this idea")?",
-                                isPresented: Binding(get: { pendingDismiss != nil }, set: { if !$0 { pendingDismiss = nil } }),
-                                titleVisibility: .visible) {
+            // An alert rather than a confirmation dialog: it comes from a swipe, so on iPad there's no button to point at.
+            .alert("Dismiss \(pendingDismiss?.title ?? "this idea")?",
+                   isPresented: Binding(get: { pendingDismiss != nil }, set: { if !$0 { pendingDismiss = nil } })) {
+                Button("Cancel", role: .cancel) { pendingDismiss = nil }
                 Button("Dismiss", role: .destructive) {
                     // Hidden rather than deleted, so its history and a saved copy are kept.
                     if let idea = pendingDismiss { idea.isDismissed = true; context.saveOrReport("the dismissal") }
@@ -409,8 +414,10 @@ struct RefreshBar: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(service.isRefreshing)
+        .frame(maxWidth: Layout.buttonWidth)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
         .background(.bar)
         .onAppear { price = AppSettings.chosenModelPrice() }
         .onChange(of: providerRaw) { price = AppSettings.chosenModelPrice() }
