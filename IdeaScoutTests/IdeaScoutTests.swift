@@ -1004,7 +1004,7 @@ struct StoreAndConsentTests {
 
     @Test func storeProductIDsMatchTheTestFile() throws {
         // The StoreKit test file (bundled into the test target) must offer the same product IDs the app asks for,
-        // and those must match App Store Connect (docs/app-store.md).
+        // and those must match App Store Connect (store/LISTING.md).
         #expect(StoreManager.trialID == "com.mahoney.IdeaScout.trial7")
         #expect(StoreManager.unlockID == "com.mahoney.IdeaScout.unlock")
         let bundle = try #require(Bundle.allBundles.first { $0.bundlePath.hasSuffix(".xctest") })

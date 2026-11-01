@@ -4,12 +4,14 @@
 
 import SwiftUI
 
-/// Contact details and links shown in the app and on the App Store. Fill in before release.
+/// Contact details and links shown in the app. They must match `store/LISTING.md` and the public
+/// support repo (`IdeaScout-support`).
 enum AppInfo {
-    /// Empty until the privacy policy is hosted publicly; while nil, the link row is hidden.
-    static let privacyPolicyURL = URL(string: "")
-    /// Empty until a support address is chosen; while empty, the contact row is hidden.
-    static let supportEmail = ""
+    /// The privacy policy in the public support repo. Optional only because `URL(string:)` is; a nil
+    /// value hides the link row.
+    static let privacyPolicyURL = URL(string: "https://github.com/Mahoneyclan/IdeaScout-support/blob/main/PRIVACY.md")
+    /// The app's support inbox. An empty value hides the contact row.
+    static let supportEmail = "mahoneyclanapps+ideascout@gmail.com"
 
     /// "1.0 (1)": marketing version and build number from Info.plist.
     static var version: String {
