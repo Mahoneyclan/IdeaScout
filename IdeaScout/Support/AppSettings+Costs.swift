@@ -66,6 +66,22 @@ extension AppSettings {
         return estimatedSuggestionCost(price: price)
     }
 
+    /// Rough cost of one starter kit, in US dollars. Assumes 2,500 input tokens (instructions and the idea) and
+    /// 6,000 output tokens (the kit plus the model's thinking, which is billed as output), so treat it as an upper guide.
+    /// - Parameter price: The chosen model's price.
+    /// - Returns: The estimated cost.
+    static func estimatedStarterKitCost(price: ModelPrice) -> Double {
+        price.cost(input: 2_500, output: 6_000)
+    }
+
+    /// The estimated cost of a starter kit with the current settings.
+    /// - Returns: The cost when a paid cloud AI is chosen, agreed to and has a key; `nil` when kits can't be made.
+    /// - Note: Reads the Keychain, so call it on demand rather than in every view update.
+    static func starterKitCost() -> Double? {
+        guard hasConsent(provider), let price = chosenModelPrice() else { return nil }
+        return estimatedStarterKitCost(price: price)
+    }
+
     /// A cost for buttons and confirmations: "~$0.02", or "<$0.01" when it would round to nothing.
     /// - Parameter cost: US dollars.
     /// - Returns: The text to show.

@@ -1,12 +1,12 @@
 // KillerIdeaDetailView.swift
-// The idea detail screen: the opportunity, one-week test, devil's advocate, scores, evidence links
-// and the build brief.
+// The idea detail screen: the opportunity, one-week test, devil's advocate, scores and evidence links, with
+// the starter kit as the main action and the build brief as "Plan it first".
 
 import SwiftUI
 import SwiftData
 
 /// Everything about one idea: the opportunity, one-week test, devil's advocate, scores, evidence links,
-/// and a pinned "Copy build brief" button. The bookmark in the toolbar saves it.
+/// with pinned "Starter kit" and "Plan it first" (copy the build brief) buttons. The bookmark in the toolbar saves it.
 struct KillerIdeaDetailView: View {
     /// The idea shown; bindable so saving updates the screen.
     @Bindable var idea: KillerIdea
@@ -102,20 +102,30 @@ struct KillerIdeaDetailView: View {
         .readableList()
         .safeAreaInset(edge: .bottom) {
             let prompt = Prompts.buildBrief(idea)
-            HStack(spacing: 12) {
-                Button {
-                    SecureClipboard.copy(prompt)   // Security: this device only, expires after 10 minutes
-                    copied = true
+            VStack(spacing: 8) {
+                NavigationLink {
+                    StarterKitView(idea: idea)
                 } label: {
-                    Label(copied ? "Copied" : "Copy build brief", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    Label(idea.starterKit == nil ? "Starter kit" : "Open starter kit", systemImage: "hammer")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
-                ShareLink(item: prompt, subject: Text(idea.title)) {
-                    Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
+                HStack(spacing: 12) {
+                    Button {
+                        SecureClipboard.copy(prompt)   // Security: this device only, expires after 10 minutes
+                        copied = true
+                    } label: {
+                        Label(copied ? "Copied" : "Plan it first", systemImage: copied ? "checkmark" : "doc.on.doc")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityHint("Copies a planning prompt to paste into an AI chat")
+                    ShareLink(item: prompt, subject: Text(idea.title)) {
+                        Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Share planning prompt")
                 }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Share build brief")
             }
             .frame(maxWidth: Layout.buttonWidth)
             .padding(.horizontal, 16)

@@ -19,7 +19,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 ## What leaves the phone
 | Destination | What's sent | When |
 |---|---|---|
-| The chosen AI provider (Anthropic, OpenAI, Google, xAI, DeepSeek, Alibaba (US region), Z.ai, Moonshot, Xiaomi) | About me, industry focus, business challenges, the collected public items, and a saved project's notes when asking for variants | Only after the user agrees on the consent screen **for that provider**. HTTPS directly to the provider, with the user's key |
+| The chosen AI provider (Anthropic, OpenAI, Google, xAI, DeepSeek, Alibaba (US region), Z.ai, Moonshot, Xiaomi) | About me, industry focus, business challenges, the collected public items, a saved project's notes when asking for variants, and an idea's details when making its starter kit | Only after the user agrees on the consent screen **for that provider**. HTTPS directly to the provider, with the user's key |
 | Public sources (Hacker News/Algolia, GitHub, Apple App Store feeds, AusTender, Atlassian Marketplace, yc-oss on GitHub Pages, Hugging Face; optionally DEV, Lobsters, itch.io, Steam) | Nothing personal: plain GET requests with an "IdeaScout" User-Agent | Each refresh |
 | Apple | Purchases (StoreKit) and notifications (local only) | As used |
 
@@ -43,6 +43,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 - All public content and AI replies are treated as untrusted. AI replies are decoded strictly against expected fields; item numbers are bounds-checked; scores are clamped; text is rendered as plain text.
 - **Prompt injection:** every prompt containing public text tells the model to treat it as data and ignore instructions inside it (`Prompts.untrustedData`). The AI has no tools, browsing or actions, so manipulated content can at worst skew an idea, never exfiltrate data.
 - **Copied prompts:** the build brief and "flesh out" prompts are pasted into AI coding tools that can run commands. Both end with a note telling the tool that the idea text comes from public websites and AI output, and not to run commands, install packages or visit links because of it (`Prompts.pastedPromptNotice`).
+- **Starter kits:** the kit is shared into coding tools that build (run commands), so it carries its own note instead: the plan is a description of what to build, not instructions; don't follow links, run commands or add services because the text says so; keep keys out of the code (`StarterKitPrompts.buildNotice`). Links are stripped from the AI's kit, every text and list is capped (`StarterKit.sanitised`), and it's shown as plain text. About me is used to make the kit but isn't in the shared text.
 - **Links:** only `http`/`https` links with a host can be opened (`URL.isWebLink`). Phone, message, script, file and other-app links show as text.
 - Links built from source data use safe construction (encoded query values, numeric App Store IDs); malformed items are skipped rather than crashing.
 
@@ -53,7 +54,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 - No `print` or `NSLog`. The only log is a database save failure (`os.Logger`, `Support/Persistence.swift`): it names the action, and the error text is marked private. Logs stay on the device.
 
 **Money**
-- A daily AI spending limit (default $1.00) is checked before the trend and idea steps and before variant suggestions. A second refresh on the same day asks first and shows the cost. The refresh cost on the button, in that question and in Settings is scaled to the chosen model's price, and says "Free" when no paid AI is set up (`AppSettings.refreshCostText`). "Suggest variants" shows its estimated cost on the button, and a repeat paid request asks first. Prices typed in for an "Other…" model can't be negative (they count as $0), and Settings warns that a $0 price isn't counted towards the limit.
+- A daily AI spending limit (default $1.00) is checked before the trend and idea steps and before variant suggestions. A second refresh on the same day asks first and shows the cost. The refresh cost on the button, in that question and in Settings is scaled to the chosen model's price, and says "Free" when no paid AI is set up (`AppSettings.refreshCostText`). "Suggest variants" and the starter kit show their estimated cost on the button, and a repeat paid request asks first. A starter kit also needs the trial or unlock, and only one can be in progress, so a double tap can't pay twice. Prices typed in for an "Other…" model can't be negative (they count as $0), and Settings warns that a $0 price isn't counted towards the limit.
 - Purchases: StoreKit 2, verified transactions only, refunds honoured. The developer-build purchase bypass exists only in Debug builds (`#if DEBUG`; verified absent from Release).
 
 **Platform**
@@ -71,6 +72,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 | Trial and unlock are checked on the device only | Low | A server check isn't justified for a $0.99 app; a jailbroken phone could bypass it |
 | Apple App Store review feeds and yc-oss data have no explicit commercial-use terms | Low–Medium (legal) | See `docs/source-terms.md`; consider switching off Y Combinator data for the paid release |
 | Share sheet "Copy" of a prompt containing About me is a normal copy | Low | The user chooses to share; the app's own Copy button is local-only and expires |
+| The starter kit has only a Share button; its Copy is a normal copy that reaches the user's Mac and doesn't expire | Low | Owner's choice (10 Nov 2026), so kits reach Claude Code and Cursor on a Mac; the kit holds no About me or keys |
 | A Claude answer declined part-way (then served by a fallback model) isn't fully counted by the cost tracker | Low | Rare; same provider; the answering model's cost is counted |
 | Swift 5 language mode (strict Swift 6 concurrency checking off; 0 warnings today) | Low | Moving to Swift 6 strict concurrency is on the quality backlog |
 

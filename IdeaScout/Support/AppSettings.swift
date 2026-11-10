@@ -43,6 +43,8 @@ enum AppSettings {
         static let fieldNotes = "fieldNotes"
         /// Set once the welcome screens are finished.
         static let onboarded = "onboarded"
+        /// The AI coding tool the starter kit is worded for (`BuilderTool` raw value).
+        static let starterKitTool = "starterKit.tool"
         /// Whether the user agreed to share data with this provider.
         /// - Parameter provider: The cloud provider.
         /// - Returns: The key name, e.g. "consent.claude".

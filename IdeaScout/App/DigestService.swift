@@ -60,7 +60,7 @@ final class DigestService {
     }
 
     /// What this instance uses for sources, AI, trial state and notifications.
-    @ObservationIgnored private let dependencies: Dependencies
+    @ObservationIgnored let dependencies: Dependencies
 
     /// Creates the service. The app uses one shared instance; tests create their own.
     /// - Parameter dependencies: `.live` in the app; stand-ins in tests.
@@ -92,6 +92,8 @@ final class DigestService {
     /// Why the last refresh didn't produce a new digest (trial ended, nothing found, kept an earlier
     /// digest…), shown on the Ideas tab. Cleared when a refresh starts.
     var lastError: String?
+    /// The key of the idea whose starter kit is being made, or `nil`. Only one kit is made at a time.
+    var makingStarterKitFor: String?
 
     /// The database, set by IdeaScoutApp at launch. Refreshes do nothing until it's set.
     @ObservationIgnored var container: ModelContainer?

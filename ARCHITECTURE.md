@@ -15,7 +15,8 @@ There is **no server**. Everything runs on the iPhone or iPad; AI calls go direc
 | Tab / screen | File | What it shows |
 |---|---|---|
 | **Ideas** (first tab) | `Views/KillerViews.swift` (`LeaderboardView`) | Today's status and progress and the bottom refresh button (`RefreshViews.swift`), killer ideas then near-misses |
-| Idea detail | `Views/KillerIdeaDetailView.swift` | Who pays, price, what it replaces, where to find buyers, why now, one-week test, devil's advocate, scores, evidence, build brief (`AI/BuildBrief.swift`), save |
+| Idea detail | `Views/KillerIdeaDetailView.swift` | Who pays, price, what it replaces, where to find buyers, why now, one-week test, devil's advocate, scores, evidence, save; pinned **Starter kit** and **Plan it first** (build brief, `AI/BuildBrief.swift`) |
+| Starter kit | `Views/StarterKitView.swift` | Make the kit (cost first; repeat asks first), the kit itself, the coding-tool picker (`FlowLayout`, `ChoiceChip`) and Share for that tool |
 | **History** | `Views/RootView.swift` (`HistoryView`) | One row per day with its best idea and pain clusters |
 | Day view | `Views/DayView.swift` (`DigestContentView`) | That day's ideas, pain clusters, ranked trends with projects, notes |
 | **Saved** | `Views/IdeasView.swift` | Bookmarked ideas, then starred projects (notes, AI variants, prompt) |
@@ -36,6 +37,7 @@ Idea        – a starred Item, copied so it outlives the digest (Saved projects
 KillerIdea  – an AI business idea that survived the devil's advocate; updated when it comes back on later days
 ```
 - Deleting or replacing a Digest deletes its Themes and their Items (cascade). Idea and KillerIdea are independent and survive.
+- A KillerIdea can hold one starter kit: `starterKitJSON` (a `StarterKit` as JSON, whose property names are stored too), `starterKitMadeAt` and `starterKitModel`. The chosen coding tool is the setting `starterKit.tool`.
 - A KillerIdea records every day it was proposed (`daysSeen`), so History can show each day's ideas. Dismissing hides it; saving bookmarks it.
 - Settings live in UserDefaults (`Support/AppSettings.swift`); API keys live in the Keychain (`Support/Keychain.swift`); the cost ledger is JSON in UserDefaults (`Support/UsageTracker.swift`).
 

@@ -7,7 +7,8 @@ Native Swift / SwiftUI / SwiftData. No backend: everything runs on the phone.
 ## What it does
 
 - **Ideas** (opens first): a leaderboard of killer ideas and near-misses, with today's refresh status and step-by-step progress at the top. Ideas that come back on several days rank higher. Each card shows its weakest score; swipe left to dismiss (with confirmation).
-- **Killer ideas:** Claude suggests 5 business product ideas from the trends and pain clusters. Each names a business buyer, a monthly price, the manual task or costly workaround it replaces, and a **sales channel** where those buyers already look for tools; at most 1 may be a developer tool and at least 2 target your industry focus. Ideas must be buildable by one person with AI coding tools and favour narrow niches. A second, sceptical pass (given each idea's evidence) tries to kill each one and scores pain, willingness to pay, **buildable solo**, **sales channel**, gap, fit and why now (why now counts half). Any score below 2 drops the idea. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**. Each idea records every day it was proposed, and its detail screen has a **build brief** to paste into an AI coding tool. Ideas found before buildability and sales channel were scored show "Not scored" for them and keep their original score.
+- **Killer ideas:** Claude suggests 5 business product ideas from the trends and pain clusters. Each names a business buyer, a monthly price, the manual task or costly workaround it replaces, and a **sales channel** where those buyers already look for tools; at most 1 may be a developer tool and at least 2 target your industry focus. Ideas must be buildable by one person with AI coding tools and favour narrow niches. A second, sceptical pass (given each idea's evidence) tries to kill each one and scores pain, willingness to pay, **buildable solo**, **sales channel**, gap, fit and why now (why now counts half). Any score below 2 drops the idea. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**. Each idea records every day it was proposed, and its detail screen's main action is the **starter kit**. Ideas found before buildability and sales channel were scored show "Not scored" for them and keep their original score.
+- **Starter kit:** on an idea, one AI request (cost shown first, counts towards the daily limit, needs the trial or unlock) plans the first version: a one-paragraph spec, the screens, the data it stores, a cheap stack for one person with a rough running cost, what to leave out, the first slice with checks, and rules for the coding tool. It's saved on the idea. Pick Claude Code, Cursor, Replit or Lovable and **Share** the whole kit worded for that tool (rewording is free, on the phone; the share sheet includes Copy). Making it again asks first. **Plan it first** still copies the older build brief, a planning prompt for an AI chat.
 - **History:** one row per day with its best idea and pain clusters; tap a day for that day's ideas, pain clusters and trends.
 - **Saved:** ideas you've bookmarked (bookmark button, or swipe right in Ideas) and projects you've starred, with notes, AI-suggested monetisable variants, and a copyable "flesh out this idea" prompt.
 - **Settings:** About me, My Business Challenges, industry focus and the daily digest time up front; under **Advanced**: sources and topics, scan windows, items the AI reads, quality bar and ranking weights, and AI provider, model, key, costs and daily limit.
@@ -105,11 +106,12 @@ xcodebuild -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'id=<devi
 IdeaScout/
   App/        IdeaScoutApp (entry point), DigestService (the refresh: fetch → select → AI → save),
               DigestService+Selection (which items reach the AI), DigestService+Ideas (merging ideas into
-              the leaderboard), DigestService+Housekeeping (delete all, starring and variant suggestions,
+              the leaderboard), DigestService+StarterKit (making a kit), DigestService+Housekeeping (delete all, starring and variant suggestions,
               background refresh scheduling)
   AI/         Summarizer protocol and prompts, LLMSummarizer (cloud AI, Claude client, retries),
               OpenAICompatibleClient (all other providers), AIProviders (provider and model catalogue),
-              AppleSummarizer (on-device), KillerEngine (ideas and devil's advocate)
+              AppleSummarizer (on-device), KillerEngine (ideas and devil's advocate), StarterKit and
+              StarterKitPrompts (the kit, its checks, and its wording for each coding tool)
   Sources/    SourceSupport (shared helpers), CommunityFetchers, CodeAndAIFetchers, MarketFetchers,
               GamesFetchers, DemandFetchers (one file per source family)
   Models/     Values (sources, signals, items, scores) and StoredModels (SwiftData: Digest, Theme, Item, Idea) and KillerIdea

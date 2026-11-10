@@ -1,6 +1,6 @@
 // IdeaScoutUITests.swift
 // Automated screen tests for the critical flows: first launch with consent, a refresh, the paywall
-// after the trial, "Delete all my data", saving an idea, and iPad rotation. The app runs in its sealed test mode (TestMode.swift):
+// after the trial, "Delete all my data", saving an idea, making a starter kit, and iPad rotation. The app runs in its sealed test mode (TestMode.swift):
 // in-memory database, separate settings and Keychain, fake sources and a scripted AI. So these tests
 // never touch the owner's real data, never use the network and never spend money.
 
@@ -115,5 +115,22 @@ final class IdeaScoutUITests: XCTestCase {
         XCTAssertTrue(unsave.waitForExistence(timeout: 5))
         unsave.tap()
         XCTAssertTrue(app.staticTexts["Nothing saved yet"].waitForExistence(timeout: 5))
+    }
+
+    /// The idea's main action: make a starter kit, pick a coding tool and see the share button worded for it.
+    func testStarterKitIsMadeAndWordedForTheChosenTool() {
+        let app = launch("-ui-skip-welcome")
+        let idea = element(app, containing: "InvoiceChaser")
+        XCTAssertTrue(idea.waitForExistence(timeout: 20))
+        idea.tap()
+        let kit = button(app, startingWith: "Starter kit")
+        XCTAssertTrue(kit.waitForExistence(timeout: 5), "detail screen should offer the starter kit")
+        kit.tap()
+        let make = button(app, startingWith: "Make starter kit")
+        XCTAssertTrue(make.waitForExistence(timeout: 5))
+        make.tap()
+        XCTAssertTrue(button(app, startingWith: "Share for Claude Code").waitForExistence(timeout: 10), "kit should be made")
+        button(app, startingWith: "Cursor").tap()
+        XCTAssertTrue(button(app, startingWith: "Share for Cursor").waitForExistence(timeout: 5))
     }
 }

@@ -5,7 +5,6 @@
 import Foundation
 import SwiftData
 
-
 /// A business product idea proposed by the AI that survived the devil's-advocate check (shown as Killer or
 /// Near-miss). Independent of digests.
 /// Kept across days: when the same idea comes back, it's updated and climbs the leaderboard.
@@ -71,6 +70,12 @@ import SwiftData
     var savedAt: Date?
     /// Hidden from the leaderboard by the user. Cleared if the idea is proposed again.
     var isDismissed = false
+    /// The starter kit as JSON (see `StarterKit` and `starterKit`), or empty when none has been made.
+    var starterKitJSON: String = ""
+    /// When the starter kit was made.
+    var starterKitMadeAt: Date?
+    /// The model ID that made the starter kit.
+    var starterKitModel: String = ""
 
     /// Saves or unsaves the idea. The caller saves the database.
     func toggleSaved() {
