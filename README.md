@@ -86,7 +86,7 @@ Set your own signing team in `project.yml` (`DEVELOPMENT_TEAM`) if you aren't th
 
 ## Tests
 
-Swift Testing tests in `IdeaScoutTests/IdeaScoutTests.swift` (no network calls; samples of each source and AI reply format). They cover source parsing, theme building and ranking, the Claude and OpenAI-style request and reply handling, streaming and retries, the killer-idea rules and evidence caps, costs and the daily limit, digest replacement rules, the English filter, scan settings, business-focus rules, demand sources, signal-based selection, pain clusters, saving ideas, and the trial and consent rules.
+Swift Testing tests in `IdeaScoutTests/` (shared stand-ins in `TestSupport.swift`; no network calls; samples of each source and AI reply format). They cover source parsing, theme building and ranking, the Claude and OpenAI-style request and reply handling, streaming and retries, the killer-idea rules and evidence caps, costs and the daily limit, digest replacement rules, the English filter, scan settings, business-focus rules, demand sources, signal-based selection, pain clusters, saving ideas, and the trial and consent rules.
 
 **Screen (UI) tests** in `IdeaScoutUITests/` cover first launch with consent, a refresh (and the "ask before a second refresh" rule), the paywall after the trial, "Delete all my data", saving an idea, and (on iPad) rotation. They run the app in a sealed test mode (`IdeaScout/Support/TestMode.swift`, active only in Debug builds) with an in-memory database, a separate settings store and Keychain area, fake sources and a scripted AI, so they never touch real data, the network or AI costs. Keep the device unlocked while they run.
 
@@ -104,16 +104,17 @@ xcodebuild -project IdeaScout.xcodeproj -scheme IdeaScout -destination 'id=<devi
 ```
 IdeaScout/
   App/        IdeaScoutApp (entry point), DigestService (the refresh: fetch → select → AI → save),
-              DigestService+Selection (which items reach the AI), DigestService+Housekeeping (delete all,
-              starring and variant suggestions, background refresh scheduling)
+              DigestService+Selection (which items reach the AI), DigestService+Ideas (merging ideas into
+              the leaderboard), DigestService+Housekeeping (delete all, starring and variant suggestions,
+              background refresh scheduling)
   AI/         Summarizer protocol and prompts, LLMSummarizer (cloud AI, Claude client, retries),
               OpenAICompatibleClient (all other providers), AIProviders (provider and model catalogue),
               AppleSummarizer (on-device), KillerEngine (ideas and devil's advocate)
   Sources/    SourceSupport (shared helpers), CommunityFetchers, CodeAndAIFetchers, MarketFetchers,
               GamesFetchers, DemandFetchers (one file per source family)
-  Models/     Values (sources, signals, items, scores) and StoredModels (SwiftData: Digest, Theme, Item, Idea, KillerIdea)
+  Models/     Values (sources, signals, items, scores) and StoredModels (SwiftData: Digest, Theme, Item, Idea) and KillerIdea
   Store/      StoreManager (free trial and one-off unlock)
-  Support/    AppSettings, Keychain, UsageTracker (costs), Persistence (saving with error reporting),
+  Support/    AppSettings (+Costs: cost estimates), Keychain, UsageTracker (costs), Persistence (saving with error reporting),
               SecureClipboard (local-only, expiring copies), TestMode (sealed UI-test mode, active only
               in Debug builds). Notifier (the "ideas are ready" notification) is in AppSettings.swift
   Views/      SwiftUI screens: tabs, Ideas, day view, Saved, Settings, welcome/consent, paywall, About

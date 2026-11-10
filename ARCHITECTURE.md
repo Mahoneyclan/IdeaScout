@@ -14,8 +14,8 @@ There is **no server**. Everything runs on the iPhone or iPad; AI calls go direc
 ## Screens
 | Tab / screen | File | What it shows |
 |---|---|---|
-| **Ideas** (first tab) | `Views/KillerViews.swift` (`LeaderboardView`) | Today's status and progress, killer ideas then near-misses, and the bottom refresh button |
-| Idea detail | `KillerViews.swift` (`KillerIdeaDetailView`) | Who pays, price, what it replaces, where to find buyers, why now, one-week test, devil's advocate, scores, evidence, build brief (`AI/BuildBrief.swift`), save |
+| **Ideas** (first tab) | `Views/KillerViews.swift` (`LeaderboardView`) | Today's status and progress and the bottom refresh button (`RefreshViews.swift`), killer ideas then near-misses |
+| Idea detail | `Views/KillerIdeaDetailView.swift` | Who pays, price, what it replaces, where to find buyers, why now, one-week test, devil's advocate, scores, evidence, build brief (`AI/BuildBrief.swift`), save |
 | **History** | `Views/RootView.swift` (`HistoryView`) | One row per day with its best idea and pain clusters |
 | Day view | `Views/DayView.swift` (`DigestContentView`) | That day's ideas, pain clusters, ranked trends with projects, notes |
 | **Saved** | `Views/IdeasView.swift` | Bookmarked ideas, then starred projects (notes, AI variants, prompt) |
@@ -29,7 +29,7 @@ lists and forms get extra side space beyond a 700-point column (`readableList()`
 at 480 points, and the welcome and paywall pages scroll when a window is short (`FillingScrollView`). On iPad the
 tabs can also show as a sidebar.
 
-## Data model (`Models/StoredModels.swift`, SwiftData; value types in `Models/Values.swift`)
+## Data model (`Models/StoredModels.swift` and `Models/KillerIdea.swift`, SwiftData; value types in `Models/Values.swift`)
 ```
 Digest (one per day) ──owns──▶ Theme (trend, pain cluster or "Other projects") ──owns──▶ Item (post, review, contract…)
 Idea        – a starred Item, copied so it outlives the digest (Saved projects)

@@ -9,12 +9,6 @@ import Testing
 import SwiftData
 @testable import IdeaScout
 
-/// Builds a minimal FetchedItem for tests.
-private func item(_ key: String, _ source: SourceKind = .github, score: Int = 0, url: String? = nil, title: String = "Title") -> FetchedItem {
-    FetchedItem(key: key, source: source, title: title, detail: "", url: URL(string: url ?? "https://example.com/\(key)")!,
-                score: score, postedAt: .now)
-}
-
 /// Hacker News, GitHub parsing.
 struct SourceParsingTests {
     @Test func parsesShowHN() throws {
@@ -1190,29 +1184,6 @@ struct RobustnessFixTests {
 }
 
 // MARK: - Refresh routine (end to end, offline)
-
-/// A source that returns fixed items.
-private struct StubFetcher: ItemFetcher {
-    let kind: SourceKind
-    let items: [FetchedItem]
-    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] { items }
-}
-
-/// An AI that replies from a script, keyed by cost-tracker feature ("Trends", "Killer ideas", "Devil's advocate").
-private struct ScriptedLLM: LLMClient {
-    let provider = AIProvider.claude
-    let model = "test-model"
-    var replies: [String: Result<String, LLMHTTPError>]
-
-    func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
-        switch replies[feature] {
-        case .success(let json)?:
-            return try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": json]], "stop_reason": "end_turn"])
-        case .failure(let error)?: throw error
-        case nil: throw SummarizerError.unavailable
-        }
-    }
-}
 
 /// Tests the refresh rules with fake sources, a scripted AI and an in-memory database.
 @MainActor
