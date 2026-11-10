@@ -170,15 +170,16 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// Models offered in Settings. The first is the recommended default. Prices are list prices as checked in
-    /// October 2026; Claude's were verified against Anthropic's model price table (dated 6 Oct 2026) on 27 Oct 2026.
+    /// October 2026; Claude's were verified against Anthropic's model price table (dated 6 Oct 2026) on 27 Oct 2026,
+    /// and Fable 5.2's against Anthropic's pricing page on 10 Nov 2026.
     /// Labels compare cost with the default model. Any other model can be typed in with its own price.
     var models: [ModelOption] {
         switch self {
         case .claude:
             [ModelOption(id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", price: ModelPrice(input: 2, output: 10, cachedInput: 0.2)),
              ModelOption(id: "claude-opus-5-5", label: "Claude Opus 5.5 (sharper, 2× cost)", price: ModelPrice(input: 4, output: 20, cachedInput: 0.2)),
-             ModelOption(id: "claude-fable-5-1", label: "Claude Fable 5.1 (most capable, 5× cost)",
-                         price: ModelPrice(input: 10, output: 50, cachedInput: 0.25))]
+             ModelOption(id: "claude-fable-5-2", label: "Claude Fable 5.2 (most capable, 4× cost)",
+                         price: ModelPrice(input: 8, output: 40, cachedInput: 0.2))]
         case .openai:
             [ModelOption(id: "gpt-6.1-sol", label: "GPT-6.1 Sol", price: ModelPrice(input: 2, output: 10)),
              ModelOption(id: "gpt-6-astra", label: "GPT-6 Astra (most capable)", price: ModelPrice(input: 10, output: 50, cachedInput: 1))]

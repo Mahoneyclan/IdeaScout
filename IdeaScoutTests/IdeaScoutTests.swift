@@ -606,15 +606,15 @@ struct ReliabilityTests {
         #expect(AppSettings.sanitizedPrice(1.25) == 1.25)
     }
 
-    /// Accuracy: Claude prices match Anthropic's list (Oct 2026), and labels compare with the default (Sonnet).
+    /// Accuracy: Claude prices match Anthropic's list (Oct 2026; Fable 5.2 Nov 2026), and labels compare with the default (Sonnet).
     @Test func claudePricesMatchAnthropicList() throws {
         let models = AIProvider.claude.models
         let sonnet = try #require(models.first { $0.id == "claude-sonnet-5-5" })
         let opus = try #require(models.first { $0.id == "claude-opus-5-5" })
-        let fable = try #require(models.first { $0.id == "claude-fable-5-1" })
+        let fable = try #require(models.first { $0.id == "claude-fable-5-2" })
         #expect(sonnet.price == ModelPrice(input: 2, output: 10, cachedInput: 0.2))
         #expect(opus.price == ModelPrice(input: 4, output: 20, cachedInput: 0.2))
-        #expect(fable.price == ModelPrice(input: 10, output: 50, cachedInput: 0.25))
+        #expect(fable.price == ModelPrice(input: 8, output: 40, cachedInput: 0.2))
         #expect(opus.label.contains("\(Int(opus.price.input / sonnet.price.input))× cost"))
         #expect(fable.label.contains("\(Int(fable.price.input / sonnet.price.input))× cost"))
     }
@@ -733,7 +733,7 @@ struct ScanSettingsTests {
     @Test(arguments: [
         (ModelPrice(input: 4, output: 20), 0.453),    // Claude Opus: the measured reference
         (ModelPrice(input: 2, output: 10), 0.2265),   // Claude Sonnet, GPT-6.1 Sol
-        (ModelPrice(input: 10, output: 50), 1.1325),  // Fable, GPT-6 Astra
+        (ModelPrice(input: 10, output: 50), 1.1325),  // GPT-6 Astra
         (ModelPrice(input: 0, output: 0), 0),         // free-within-limits models
     ])
     func refreshEstimateFollowsModelPrice(price: ModelPrice, dollars: Double) {
@@ -882,7 +882,7 @@ struct ProviderChoiceTests {
             if provider != .claude { #expect(provider.chatURL != nil) }
         }
         #expect(AIProvider.claude.recommendedModel == "claude-sonnet-5-5")
-        #expect(AIProvider.claude.models.map(\.id) == ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"])
+        #expect(AIProvider.claude.models.map(\.id) == ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"])
         #expect(AIProvider.openai.recommendedModel == "gpt-6.1-sol")
         #expect(Set(AIProvider.allCases.compactMap(\.keychainKey)).count == 9)
         #expect(AIProvider.grok.recommendedModel == "grok-4.3")
