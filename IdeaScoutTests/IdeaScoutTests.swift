@@ -201,15 +201,17 @@ struct NewSourceTests {
         let json = """
         [{"id":"me/talkbot","likes":50,"trendingScore":221,"createdAt":"2026-10-14T23:23:19.000Z",
           "cardData":{"title":"Talk Bot","short_description":"Voice agent demo"}},
-         {"id":"you/plain","likes":3,"createdAt":"2026-10-10T01:00:00.000Z"}]
+         {"id":"you/plain","likes":3,"createdAt":"2026-10-10T01:00:00.000Z"},
+         {"id":"they/half","likes":9,"trendingScore":78.5,"createdAt":"2026-11-09T01:00:00.000Z"}]
         """
         let items = try HuggingFaceFetcher.parse(Data(json.utf8))
-        #expect(items.count == 2)
+        #expect(items.count == 3)
         #expect(items[0].title == "Talk Bot")
         #expect(items[0].score == 221)
         #expect(items[0].url.absoluteString == "https://huggingface.co/spaces/me/talkbot")
         #expect(items[1].title == "you/plain")
         #expect(items[1].score == 3)
+        #expect(items[2].score == 79, "a decimal trending score (seen 10 Nov 2026) must not break the source")
     }
 
     @Test func parsesDevTo() throws {

@@ -124,7 +124,8 @@ struct HuggingFaceFetcher: ItemFetcher {
         struct Card: Decodable { let title: String?; let short_description: String? }
         let id: String
         let likes: Int?
-        let trendingScore: Int?
+        /// Usually whole, but sometimes a decimal (e.g. 78.5, seen 10 Nov 2026).
+        let trendingScore: Double?
         let createdAt: Date?
         let cardData: Card?
     }
@@ -146,7 +147,7 @@ struct HuggingFaceFetcher: ItemFetcher {
             let title = space.cardData?.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.id
             return FetchedItem(key: "hf-\(space.id)", source: .huggingFace, title: title,
                                detail: TextCleaner.clean(space.cardData?.short_description), url: url,
-                               score: space.trendingScore ?? space.likes ?? 0, postedAt: space.createdAt ?? .distantPast)
+                               score: space.trendingScore.map { Int($0.rounded()) } ?? space.likes ?? 0, postedAt: space.createdAt ?? .distantPast)
         }
     }
 }
