@@ -61,7 +61,7 @@ struct LLMSummarizer: Summarizer {
     Items are tagged Demand (complaints, requests, spending), Supply (things being built) or Timing (new startups \
     and capabilities). Build the themes above from Supply and Timing items. Separately, group Demand items into 3 to 6 \
     pain_clusters: each is one problem felt by one type of buyer. Give: title (the problem in the buyer's words), \
-    buyer (a specific role and type of business), workaround (what they do today), pay_signals (any sign they pay or \
+    buyer (a specific role and type of business, or a specific type of consumer), workaround (what they do today), pay_signals (any sign they pay or \
     would pay, e.g. prices mentioned, paid tools they're leaving, or "none seen"), summary (one sentence), and item \
     numbers. A cluster needs at least 2 items unless one item is from "My business challenges". Those are the user's own \
     observations from work: treat them as strong evidence. List in noise_numbers any items that are spam, \

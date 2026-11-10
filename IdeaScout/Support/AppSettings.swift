@@ -136,7 +136,7 @@ enum AppSettings {
     static var trendWindowDays: Int { defaults.object(forKey: Keys.trendWindowDays) as? Int ?? defaultTrendWindowDays }
     /// A week: long enough for several projects to share a theme, short enough to stay fresh.
     static let defaultTrendWindowDays = 7
-    /// Window for Pain points and App Store complaints.
+    /// Window for Pain points and both App Store complaint sources.
     static var painWindowDays: Int { defaults.object(forKey: Keys.painWindowDays) as? Int ?? defaultPainWindowDays }
     /// Two weeks, because business complaints are rare.
     static let defaultPainWindowDays = 14

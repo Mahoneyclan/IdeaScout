@@ -385,7 +385,7 @@ final class DigestService {
         let results = await withTaskGroup(of: (Int, Result<[FetchedItem], Error>).self) { group in
             for (index, fetcher) in fetchers.enumerated() {
                 group.addTask {
-                    let start = [.painPoints, .appReviews].contains(fetcher.kind) ? painSince : since
+                    let start = [.painPoints, .appReviews, .consumerReviews].contains(fetcher.kind) ? painSince : since
                     do { return (index, .success(try await fetcher.fetch(since: start, topics: topics))) }
                     catch { return (index, .failure(error)) }
                 }

@@ -685,7 +685,7 @@ struct BestIdeaTests {
     }
 }
 
-/// Developer sources off by default and the business rules in the prompts.
+/// Developer sources off by default and the money-making rules in the prompts.
 struct BusinessFocusTests {
     @Test func developerSourcesOffByDefault() {
         #expect(!SourceKind.games.enabledByDefault)
@@ -697,13 +697,25 @@ struct BusinessFocusTests {
         #expect(!SourceKind.github.enabledByDefault && !SourceKind.hackerNews.enabledByDefault)
         #expect(!SourceKind.research.enabledByDefault && !SourceKind.ausTender.enabledByDefault)
         #expect(SourceKind.appReviews.enabledByDefault && SourceKind.atlassian.enabledByDefault)
+        #expect(SourceKind.consumerReviews.enabledByDefault && SourceKind.consumerReviews.signal == .demand)
+        #expect(SourceKind.consumerReviews.rawValue == "consumerReviews", "stored in the database: never rename")
         #expect(SourceKind.vibeCode.enabledByDefault && SourceKind.fieldNotes.enabledByDefault)
     }
 
-    @Test func promptsAimAtBusinessBuyers() {
+    /// Owner's decision (10 Nov 2026): buyers can be businesses or consumers, but the idea must make money.
+    @Test func promptsAimAtBuyersWhoPay() {
         #expect(KillerEngine.generateInstructions.contains("At most 1 of the 5 may be a tool for software developers"))
         #expect(KillerEngine.generateInstructions.contains("focus industry"))
-        #expect(KillerEngine.critiqueInstructions.contains("business buyer with a budget"))
+        #expect(KillerEngine.generateInstructions.contains("Someone must pay for it"))
+        #expect(KillerEngine.generateInstructions.contains("or a consumer"))
+        #expect(KillerEngine.critiqueInstructions.contains("no clear buyer who would pay"))
+        // Source labels in prompts must match SourceKind.label.
+        for text in [KillerEngine.generateInstructions, Prompts.themeInstructions] {
+            #expect(text.contains("\"\(SourceKind.consumerReviews.label)\""))
+        }
+        for text in [KillerEngine.generateInstructions, KillerEngine.critiqueInstructions, Prompts.themeInstructions] {
+            #expect(!text.contains("Never hobbyists or consumers") && !text.contains("consumer novelties"))
+        }
         let p = KillerEngine.generatePrompt(.init(themes: [], items: [], aboutMe: "", leaderboard: [], focusIndustry: "energy"))
         #expect(p.contains("Focus industry: energy"))
         let required = (((KillerEngine.candidateSchema["properties"] as? [String: Any])?["ideas"] as? [String: Any])?["items"] as? [String: Any])?["required"] as? [String]

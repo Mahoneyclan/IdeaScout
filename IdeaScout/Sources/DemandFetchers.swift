@@ -1,6 +1,6 @@
 // DemandFetchers.swift
-// The demand sources: evidence of what businesses need or pay for. "My Business Challenges" (typed by
-// the user), 1–2 star App Store reviews of top-grossing business apps, Atlassian Marketplace add-ons and
+// The demand sources: evidence of what businesses and consumers need or pay for. "My Business Challenges" (typed by
+// the user), 1–2 star App Store reviews of top-grossing business and consumer apps, Atlassian Marketplace add-ons and
 // Australian government IT contracts (AusTender, CC BY 4.0: credited in About). Each gets the "demand"
 // share of the AI's items except Atlassian, which counts as supply.
 
@@ -45,23 +45,28 @@ struct FieldNotesFetcher: ItemFetcher {
     }
 }
 
-// MARK: - App Store complaints (1-2 star reviews of top-grossing business apps)
+// MARK: - App Store complaints (1-2 star reviews of top-grossing apps)
 
-/// Recent 1–2 star reviews of top-grossing Business, Finance and Productivity apps in the Australian and
-/// US stores: what paying customers are unhappy about. Uses Apple's public RSS feeds (6 charts plus
-/// 12 review requests a day).
+/// Recent 1–2 star reviews of top-grossing apps in the Australian and US stores: what paying customers are
+/// unhappy about. Two sources use it: "App Store complaints" (business apps) and "Consumer app complaints".
+/// Uses Apple's public RSS feeds (one chart per country and genre, plus 12 review requests a day).
 struct AppReviewsFetcher: ItemFetcher {
-    /// Which source this is.
-    let kind = SourceKind.appReviews
+    /// Which source this is: `.appReviews` or `.consumerReviews`.
+    var kind = SourceKind.appReviews
     /// App Store countries checked: the owner's market and the largest one.
     static let countries = ["au", "us"]
-    /// App Store genre IDs and names.
-    static let genres = ["6000": "Business", "6015": "Finance", "6007": "Productivity"]
+    /// Business genre IDs and names (`.appReviews`).
+    static let businessGenres = ["6000": "Business", "6015": "Finance", "6007": "Productivity"]
+    /// Consumer genre IDs and names (`.consumerReviews`), checked against Apple's live charts on 10 Nov 2026.
+    /// Lifestyle (mostly dating) and Utilities (mostly VPNs and cleaners) are left out.
+    static let consumerGenres = ["6013": "Health & Fitness", "6017": "Education", "6023": "Food & Drink", "6003": "Travel"]
+    /// The genres for this source.
+    var genres: [String: String] { kind == .consumerReviews ? Self.consumerGenres : Self.businessGenres }
     /// Apps whose reviews are read each day.
     static let appsPerDay = 12
     /// Most low-star reviews kept per app, so one unpopular app can't dominate.
     static let reviewsPerApp = 5
-    /// Low-star reviews of business apps are rare, so look back further than other sources.
+    /// Low-star reviews of these apps are rare, so look back further than other sources.
     static let windowDays = 60.0
 
     /// One app from a top-grossing chart.
@@ -88,7 +93,7 @@ struct AppReviewsFetcher: ItemFetcher {
         var apps: [App] = []
         var firstError: Error?
         for country in Self.countries {
-            for (genreID, genre) in Self.genres.sorted(by: { $0.key < $1.key }) {
+            for (genreID, genre) in genres.sorted(by: { $0.key < $1.key }) {
                 // Safe to unwrap: country and genre come from the fixed lists above, not from outside data.
                 let url = URL(string: "https://itunes.apple.com/\(country)/rss/topgrossingapplications/limit=25/genre=\(genreID)/json")!
                 do { apps += try Self.parseChart(try await HTTP.get(url), country: country, genre: genre) }
@@ -102,7 +107,7 @@ struct AppReviewsFetcher: ItemFetcher {
             // Robustness: the app ID comes from Apple's chart; skip it if it can't form a valid link.
             guard let url = URL(string: "https://itunes.apple.com/\(app.country)/rss/customerreviews/page=1/id=\(app.id)/sortby=mostrecent/json")
             else { continue }
-            do { results += try Self.parseReviews(try await HTTP.get(url), app: app, since: reviewsSince) }
+            do { results += try Self.parseReviews(try await HTTP.get(url), app: app, since: reviewsSince, source: kind) }
             catch { firstError = firstError ?? error }
         }
         if results.isEmpty, apps.isEmpty, let firstError { throw firstError }
@@ -178,16 +183,17 @@ struct AppReviewsFetcher: ItemFetcher {
     ///   - data: The app's review feed.
     ///   - app: The app the reviews belong to.
     ///   - since: Oldest review date kept.
+    ///   - source: The source the items belong to.
     /// - Returns: Up to `reviewsPerApp` items, in the feed's newest-first order.
     /// - Throws: `DecodingError` if the reply's shape has changed.
-    static func parseReviews(_ data: Data, app: App, since: Date) throws -> [FetchedItem] {
+    static func parseReviews(_ data: Data, app: App, since: Date, source: SourceKind = .appReviews) throws -> [FetchedItem] {
         let entries = try JSONDecoder().decode(Reviews.self, from: data).feed.entry ?? []
         guard let url = URL(string: "https://apps.apple.com/\(app.country)/app/id\(app.id)") else { return [] }
         return entries.compactMap { entry -> FetchedItem? in
             guard let stars = entry.rating.flatMap({ Int($0.label) }), stars <= 2,
                   let date = ISODates.parse(entry.updated.label), date >= since else { return nil }
             let text = TextCleaner.clean(entry.content?.label, max: 300)
-            return FetchedItem(key: "rev-\(entry.id.label)", source: .appReviews,
+            return FetchedItem(key: "rev-\(entry.id.label)", source: source,
                                title: "\(app.name): \(TextCleaner.clean(entry.title.label, max: 100))",
                                detail: "★\(stars) review (#\(app.rank) top-grossing \(app.genre), \(app.country.uppercased())): \(text)",
                                url: url, score: 3 - stars, postedAt: date)

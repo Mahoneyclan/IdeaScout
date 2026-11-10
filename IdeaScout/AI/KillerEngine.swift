@@ -1,12 +1,12 @@
 // KillerEngine.swift
-// The idea step of a refresh: two cloud AI calls. Pass 1 proposes 5 business ideas from the pain clusters,
+// The idea step of a refresh: two cloud AI calls. Pass 1 proposes 5 money-making ideas from the pain clusters,
 // trends and items; pass 2 plays devil's advocate and scores them. Code then applies the evidence rules
 // and keeps up to 3 survivors, which DigestService saves as KillerIdeas. Ideas are aimed at a solo builder
 // who will vibe-code the product, so each must be buildable by one person and have a named sales channel.
 
 import Foundation
 
-/// Turns the trends and pain clusters into business product ideas, then has a second,
+/// Turns the trends and pain clusters into money-making product ideas, then has a second,
 /// sceptical pass try to kill them. Up to 3 survivors a day are kept. Needs a cloud AI:
 /// Apple's on-device model is too small for this kind of reasoning.
 struct KillerEngine {
@@ -21,7 +21,7 @@ struct KillerEngine {
         var title: String
         /// One-sentence pitch.
         var pitch: String
-        /// Who pays: a specific role in a specific type of business.
+        /// Who pays: a specific role in a type of business, or a specific type of consumer.
         var buyer: String
         /// Pricing model and price per customer per month.
         var pricing: String
@@ -119,30 +119,32 @@ struct KillerEngine {
 
     // MARK: - Pass 1: generate
 
-    /// Pass 1 instructions: business buyers only, buildable by one person with AI coding tools, a named sales
+    /// Pass 1 instructions: someone pays (a business or a consumer), buildable by one person with AI coding tools, a named sales
     /// channel, at most 1 developer tool, at least 2 in the focus industry, each replacing a named manual task,
     /// with a one-week test. Field names must match `candidateSchema`.
     static let generateInstructions = """
-    You are a sharp B2B product strategist finding a business software idea for a solo builder who will \
+    You are a sharp product strategist finding a software idea that makes money, for a solo builder who will \
     vibe-code it (build it alone with AI coding tools) and sell it without a sales team. A good idea has real pain, \
-    a specific business buyer with a budget, a clear gap, a place where those buyers already look for tools, and \
+    a specific buyer who will pay, a clear gap, a place where those buyers already look for products like it, and \
     a good fit for the person described.
     Using the pain clusters, trends and numbered projects (items tagged Demand show need: "Pain points" are people \
-    complaining or asking for tools that don't exist, "App Store complaints" are 1-2 star reviews of business apps \
-    people pay for, which show buyers ready to switch, "AusTender" is government IT spending, and "My business challenges" \
+    complaining or asking for tools that don't exist, "App Store complaints" and "Consumer app complaints" are \
+    1-2 star reviews of business and consumer apps people pay for, which show buyers ready to switch, "AusTender" is government IT spending, and "My business challenges" \
     are the user's own observations from work, which are strong evidence; "Atlassian Marketplace", "Y Combinator" and \
-    "App Store top paid" show what businesses already pay for, and also who the competitors are; "Vibe-coded", "Show HN" \
+    "App Store top paid" show what people and businesses already pay for, and also who the competitors are; "Vibe-coded", "Show HN" \
     and "GitHub" show what other builders have already made, so treat them as competition, not inspiration; \
     "AI research" shows new capabilities), propose 5 distinct product ideas. Rules:
-    - The buyer must be a business: small and medium businesses are the main market (software they would pay \
-    $20 to $500 a month for), plus larger companies in the focus industry. Never hobbyists or consumers.
+    - Someone must pay for it. The buyer can be a business (small and medium businesses would pay $20 to $500 a \
+    month; larger companies in the focus industry may pay more) or a consumer (for example a subscription of a few \
+    dollars a month, a one-off purchase or usage-based pricing). It needs a clear way to make money: not a hobby \
+    project or a free tool with no income.
     - One person with AI coding tools must be able to ship a useful first version in about 4 weeks. Avoid products \
     that need hardware, a team, real-time systems, many deep integrations, holding money or health records, or \
     government or enterprise procurement.
-    - Each must have a named sales channel where these buyers already look for tools: an app marketplace (for \
-    example Shopify App Store, Atlassian Marketplace, Chrome Web Store, WordPress plugins, Google Workspace \
-    Marketplace), an industry community, or a phrase buyers search for. "Social media" or "cold outreach" alone is not a channel.
-    - Prefer a narrow niche (one type of business, one job) over a broad tool: easy-to-build products are easy to \
+    - Each must have a named sales channel where these buyers already look for products like it: an app \
+    marketplace (for example the App Store, Shopify App Store, Atlassian Marketplace, Chrome Web Store, WordPress \
+    plugins, Google Workspace Marketplace), an industry or interest community, or a phrase buyers search for. "Social media" or "cold outreach" alone is not a channel.
+    - Prefer a narrow niche (one type of buyer, one job) over a broad tool: easy-to-build products are easy to \
     copy, so the builder's protection is the niche, domain knowledge and owning the channel.
     - At most 1 of the 5 may be a tool for software developers.
     - At least 2 of the 5 must be aimed at the focus industry given below.
@@ -151,7 +153,7 @@ struct KillerEngine {
     Prefer ideas that solve a pain cluster and are supported by several projects. Cite at least one Demand item for each idea. Only propose ideas you would genuinely back; \
     quality matters more than variety.
     For each idea give: a short memorable title; a one-sentence pitch; the buyer (a specific role in a specific \
-    type of business); pricing (model and price per customer per month); replaces (the manual task or workaround \
+    type of business, or a specific type of consumer); pricing (model and price per customer, per month or one-off); replaces (the manual task or workaround \
     it replaces and roughly what that costs the buyer today); channel (the named place where the first 100 buyers \
     would be found); why now (what recently became possible); a one-week test (the cheapest way to check demand \
     in 7 days, with a pass mark); the numbers of the projects that are evidence for it; and same_as: if the idea \
@@ -239,14 +241,14 @@ struct KillerEngine {
     /// Pass 2 instructions: try to kill each idea using its evidence, with a defined meaning for every
     /// score level; no invented competitor prices. Field names must match `reviewSchema`.
     static let critiqueInstructions = """
-    You are a blunt, experienced B2B investor playing devil's advocate for a solo builder who will vibe-code the \
+    You are a blunt, experienced investor playing devil's advocate for a solo builder who will vibe-code the \
     product (build it alone with AI coding tools) and sell it without a sales team. For each product idea, read its \
-    cited evidence and try hard to kill it: name competitors you are confident exist, question whether the business \
-    buyer really has a budget for it, whether one person could really build it, and whether the named channel would \
+    cited evidence and try hard to kill it: name competitors you are confident exist, question whether the \
+    buyer would really pay for it, whether one person could really build it, and whether the named channel would \
     really reach buyers. Give a competitor's price only if you are sure of it; otherwise say "price unknown". Don't invent facts.
     Score each 1-5 (be strict; 5 is rare):
     - pain: 1 nice-to-have; 3 a recurring problem people work around; 5 costly and frequent, shown in 2 or more independent evidence items
-    - willing_to_pay: 1 no sign anyone spends money here; 3 businesses pay for nearby tools; 5 buyers already pay for a worse product or name a budget
+    - willing_to_pay: 1 no sign anyone spends money here; 3 people or businesses pay for nearby products; 5 buyers already pay for a worse product or name a budget
     - timing: 1 could have been built years ago; 3 recent tools make it easier; 5 a new capability, rule or price makes it possible or required now
     - gap: 1 well served by existing products; 3 options exist but leave a clear segment unhappy; 5 no credible option
     - fit: 1 needs skills or access the person lacks; 3 unknown or neutral; 5 uses their domain experience or access
@@ -254,7 +256,8 @@ struct KillerEngine {
     in 2-3 months; 5 one person with AI coding tools could ship a useful first version in 4 weeks
     - channel_score: 1 needs a sales team or cold outreach; 3 buyers are reachable but there is no obvious place they \
     look; 5 a named marketplace or community where these buyers already shop for tools like this
-    Mark ideas down hard if there is no clear business buyer with a budget, or if the buyer is a consumer or hobbyist.
+    Mark ideas down hard if there is no clear buyer who would pay, or no realistic way for it to make money. For \
+    consumer ideas, also judge whether the channel reaches buyers without a large advertising budget.
     Judge whether the one-week test would really show demand. survives is true only if the idea is still worth \
     a one-week test after your objections. Give the single strongest objection, the main competitors (or "none found"), \
     a one-sentence verdict, and evidence_needed: the one fact that would most raise the score. Copy each title exactly. \
@@ -384,10 +387,10 @@ struct KillerEngine {
     }
 
     /// Sources that count as evidence of pain: complaints and the user's own business challenges.
-    static let painEvidence: Set<SourceKind> = [.painPoints, .appReviews, .fieldNotes]
+    static let painEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .fieldNotes]
     /// Sources that count as evidence that people pay: complaints, funded startups, top paid apps, paid
     /// marketplace add-ons, government contracts.
-    static let payEvidence: Set<SourceKind> = [.painPoints, .appReviews, .ycombinator, .appStore, .atlassian, .ausTender]
+    static let payEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .ycombinator, .appStore, .atlassian, .ausTender]
 
     /// Caps pain at 3 without pain evidence, and willingness to pay at 3 without pay evidence. Enforced
     /// in code rather than trusted to the prompt, because models tend to score generously.

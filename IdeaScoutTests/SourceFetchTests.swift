@@ -163,13 +163,17 @@ struct SourceFetchTests {
         #expect(try await AppStoreFetcher().fetch(since: since, topics: []).map(\.title) == ["AnkiMobile"])
     }
 
-    @Test func appReviewsReadsChartsThenTodaysApps() async throws {
+    /// Business and consumer complaints share the reader; each reads its own genres and labels its own items.
+    @Test(arguments: [(SourceKind.appReviews, "genre=6000"), (.consumerReviews, "genre=6013")])
+    func appReviewsReadsChartsThenTodaysApps(kind: SourceKind, genreQuery: String) async throws {
         StubWeb.serve([("topgrossingapplications", .init(body: Samples.chart(count: 25))),
                        ("customerreviews", .init(body: Samples.review))])
-        let items = try await AppReviewsFetcher().fetch(since: since, topics: [])
-        #expect(!items.isEmpty && items.allSatisfy { $0.source == .appReviews })
-        let charts = StubWeb.requests.filter { $0.url?.absoluteString.contains("topgrossing") == true }
-        #expect(charts.count == AppReviewsFetcher.countries.count * AppReviewsFetcher.genres.count)
+        let fetcher = AppReviewsFetcher(kind: kind)
+        let items = try await fetcher.fetch(since: since, topics: [])
+        #expect(!items.isEmpty && items.allSatisfy { $0.source == kind })
+        let charts = StubWeb.requests.compactMap { $0.url?.absoluteString }.filter { $0.contains("topgrossing") }
+        #expect(charts.count == AppReviewsFetcher.countries.count * fetcher.genres.count)
+        #expect(charts.contains { $0.contains(genreQuery) })
     }
 
     @Test func atlassianReadsTrendingAndNew() async throws {

@@ -6,7 +6,7 @@ A plain-language map of how the app fits together. File names are in `IdeaScout/
 Once a day (or when the user asks), IdeaScout:
 1. reads public sources: complaints, startups, launches, government spending;
 2. asks the user's chosen AI to group them into **pain clusters** (problems one type of buyer has) and **trends** (things being built);
-3. asks the AI for **business ideas**, then asks it again, as a devil's advocate, to try to kill them;
+3. asks the AI for **money-making ideas** (for businesses or consumers), then asks it again, as a devil's advocate, to try to kill them;
 4. saves what survives and shows it.
 
 There is **no server**. Everything runs on the iPhone or iPad; AI calls go directly from the device to the provider the user chose, with the user's own API key.

@@ -14,6 +14,8 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case github, hackerNews, vibeCode, huggingFace, devTo, games, painPoints, ycombinator, appStore, research, lobsters
     /// Business sources added later: My Business Challenges, App Store complaints, Atlassian Marketplace and AusTender.
     case fieldNotes, appReviews, atlassian, ausTender
+    /// Consumer source (10 Nov 2026): 1–2 star reviews of top-grossing consumer apps.
+    case consumerReviews
 
     /// Identity for SwiftUI lists.
     var id: String { rawValue }
@@ -35,6 +37,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .lobsters: "Lobsters"
         case .fieldNotes: "My business challenges"
         case .appReviews: "App Store complaints"
+        case .consumerReviews: "Consumer app complaints"
         case .atlassian: "Atlassian Marketplace"
         case .ausTender: "AusTender"
         }
@@ -56,6 +59,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .lobsters: "ladybug"
         case .fieldNotes: "note.text"
         case .appReviews: "star.slash"
+        case .consumerReviews: "hand.thumbsdown"
         case .atlassian: "puzzlepiece.extension"
         case .ausTender: "building.2"
         }
@@ -65,13 +69,13 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     /// so builder-heavy sources can't crowd out evidence of demand.
     var signal: Signal {
         switch self {
-        case .painPoints, .fieldNotes, .appReviews, .ausTender: .demand
+        case .painPoints, .fieldNotes, .appReviews, .consumerReviews, .ausTender: .demand
         case .ycombinator, .research: .timing
         default: .supply
         }
     }
 
-    /// Developer- and game-focused sources start switched off, so ideas lean towards business buyers.
+    /// Developer- and game-focused sources start switched off, so ideas lean towards people who pay.
     /// GitHub, Show HN and AI research show what builders make rather than what buyers need, and AusTender's
     /// government contracts are out of reach for a solo builder, so they start off too.
     /// A toggle the user has set in Settings always wins.

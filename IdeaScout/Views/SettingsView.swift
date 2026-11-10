@@ -53,7 +53,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Industry focus")
                 } footer: {
-                    Text("At least 2 ideas a day target this industry; the rest target small and medium businesses.")
+                    Text("At least 2 ideas a day target this industry; the rest can be for any customers who pay, businesses or consumers.")
                 }
 
                 Section {

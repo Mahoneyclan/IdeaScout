@@ -12,6 +12,7 @@ extension DigestService {
         var fetchers: [any ItemFetcher] = []
         if AppSettings.isEnabled(.fieldNotes) { fetchers.append(FieldNotesFetcher(notes: AppSettings.fieldNotes)) }
         if AppSettings.isEnabled(.appReviews) { fetchers.append(AppReviewsFetcher()) }
+        if AppSettings.isEnabled(.consumerReviews) { fetchers.append(AppReviewsFetcher(kind: .consumerReviews)) }
         if AppSettings.isEnabled(.ausTender) { fetchers.append(AusTenderFetcher()) }
         if AppSettings.isEnabled(.atlassian) { fetchers.append(AtlassianFetcher()) }
         if AppSettings.isEnabled(.vibeCode) { fetchers.append(VibeCodeFetcher()) }

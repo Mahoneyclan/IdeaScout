@@ -5,7 +5,7 @@
 import Foundation
 import SwiftData
 
-/// A business product idea proposed by the AI that survived the devil's-advocate check (shown as Killer or
+/// A money-making product idea proposed by the AI that survived the devil's-advocate check (shown as Killer or
 /// Near-miss). Independent of digests.
 /// Kept across days: when the same idea comes back, it's updated and climbs the leaderboard.
 @Model final class KillerIdea {
@@ -15,7 +15,7 @@ import SwiftData
     var title: String
     /// One-sentence pitch.
     var pitch: String
-    /// Who pays: a role in a type of business.
+    /// Who pays: a role in a type of business, or a type of consumer.
     var buyer: String
     /// Pricing model and monthly price per customer.
     var pricing: String
