@@ -56,7 +56,7 @@ struct AboutView: View {
                 }
             }
             Section {
-                Text("IdeaScout has no server and no tracking. Your settings, history and keys stay on this device. When you use a cloud AI, your About me, business challenges and the collected public posts are sent directly to the provider you chose, using your own key.")
+                Text("IdeaScout has no server and no tracking. Your settings, history and keys stay on this device. When you use a cloud AI, your About me, interest area, pain points and the collected public posts are sent directly to the provider you chose, using your own key.")
                     .font(.subheadline)
             } header: {
                 Text("Privacy")

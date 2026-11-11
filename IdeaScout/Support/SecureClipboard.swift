@@ -1,6 +1,6 @@
 // SecureClipboard.swift
 // Copies prompt text (which can include the user's About me and notes) to the clipboard safely.
-// Used by "Plan it first" (KillerIdeaDetailView) and "Copy prompt" (IdeasView).
+// Used by "Copy prompt" (IdeasView).
 
 import UIKit
 import UniformTypeIdentifiers

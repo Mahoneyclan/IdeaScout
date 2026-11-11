@@ -31,15 +31,16 @@ enum AppSettings {
         static let qualityBar = "qualityBar"
         /// Daily AI spending limit in US dollars (0 = no limit).
         static let dailyCap = "dailyCap"
-        /// Industry that at least 2 ideas a day must target.
-        static let focusIndustry = "focusIndustry"
+        /// The user's interest area: every idea must be in it. Stored under its old name ("industry focus"), so a
+        /// value typed before carries over.
+        static let interestArea = "focusIndustry"
         /// How many days back sources are searched (7, 14 or 28).
         static let trendWindowDays = "trendWindowDays"
         /// Separate, longer window for complaint sources, which are rarer.
         static let painWindowDays = "painWindowDays"
         /// Items the cloud AI reads per refresh. Named before other providers existed; applies to all of them.
         static let claudeMaxItems = "claudeMaxItems"
-        /// "My Business Challenges": the user's own problems, one per line.
+        /// "My pain points" (first called "My Business Challenges"): the user's own problems, one per line.
         static let fieldNotes = "fieldNotes"
         /// Set once the welcome screens are finished.
         static let onboarded = "onboarded"
@@ -121,13 +122,16 @@ enum AppSettings {
     /// - Returns: `true` if a limit is set (`cap` > 0) and `spent` has reached it.
     static func overCap(spent: Double, cap: Double) -> Bool { cap > 0 && spent >= cap }
 
-    /// The industry where at least two killer ideas a day should be aimed (the owner's domain).
-    static var focusIndustry: String {
-        let value = defaults.string(forKey: Keys.focusIndustry)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value ?? defaultFocusIndustry
+    /// The area every idea must be in; empty means any area (owner's decision, 11 Nov 2026: this replaces "at least
+    /// two ideas a day in the industry focus", and the default is blank).
+    static var interestArea: String {
+        defaults.string(forKey: Keys.interestArea)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
-    /// The owner's own domain, where their experience is an edge.
-    static let defaultFocusIndustry = "energy, utilities and enterprise IT"
+
+    /// The user's AI coding tool (chosen in Settings, also used to word the starter kit). It decides the app type.
+    static var builderTool: BuilderTool {
+        defaults.string(forKey: Keys.starterKitTool).flatMap(BuilderTool.init(rawValue:)) ?? .claudeCode
+    }
 
     /// Work problems the owner has seen, one per line. Each becomes a demand item.
     static var fieldNotes: String { defaults.string(forKey: Keys.fieldNotes) ?? "" }

@@ -1,6 +1,6 @@
 // StarterKitView.swift
-// The starter kit screen for one idea: make the kit (cost shown first), read it, pick the AI coding tool and share
-// the kit worded for that tool. Making it again asks first, because it's another paid AI request.
+// The starter kit screen for one idea: make the kit (cost shown first), read it, and share it as a build prompt
+// worded for the AI coding tool chosen in Settings. Making it again asks first, because it's another paid AI request.
 
 import SwiftUI
 import SwiftData
@@ -26,16 +26,10 @@ struct StarterKitView: View {
         Form {
             if let kit = idea.starterKit {
                 Section {
-                    FlowLayout(spacing: 8) {
-                        ForEach(BuilderTool.allCases) { option in
-                            ChoiceChip(title: option.label, isSelected: option == tool) { toolRaw = option.rawValue }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                } header: {
-                    Text("Your AI coding tool")
+                    LabeledContent("Worded for", value: tool.label)
                 } footer: {
-                    Text("Changes how the shared kit is worded. Free: nothing is sent to the AI.")
+                    Text("Change your AI coding tool in Settings. It also decides the kind of app ideas are for, so a kit "
+                         + "made for another tool may need making again.")
                 }
                 kitSections(kit)
                 Section {
@@ -66,7 +60,7 @@ struct StarterKitView: View {
         .safeAreaInset(edge: .bottom) {
             if let kit = idea.starterKit {
                 ShareLink(item: StarterKitPrompts.shareText(kit, title: idea.title, tool: tool), subject: Text(idea.title)) {
-                    Label("Share for \(tool.label)…", systemImage: "square.and.arrow.up")
+                    Label("Share build prompt for \(tool.label)…", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)

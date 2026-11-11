@@ -9,7 +9,7 @@ IdeaScout has **no server, no accounts, no analytics and no third-party code**. 
 | Data | Where it's stored | Protection |
 |---|---|---|
 | AI provider API keys | iOS **Keychain**, one entry per provider (`Support/Keychain.swift`) | `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: encrypted by iOS, never synced, never included in backups or restored to another phone. Only the last 4 characters are ever shown. A key is saved when the user finishes typing (not per keystroke), and replacing one updates it in place, so a failed save keeps the old key |
-| About me, industry focus, My Business Challenges, settings, consents | UserDefaults (app container) | iOS file encryption (available after first unlock). Included in the user's own encrypted device backup. Not secrets |
+| About me, interest area, My pain points, settings, consents | UserDefaults (app container) | iOS file encryption (available after first unlock). Included in the user's own encrypted device backup. Not secrets |
 | Digests, themes, items, saved projects, killer ideas | SwiftData database (app container) | iOS file encryption, as above (the default class, readable after the first unlock since restart). Not tightened further because the daily background refresh may write to it while the phone is locked. Public content plus the user's notes |
 | AI cost ledger | UserDefaults (JSON) | As above. Token counts and dollar amounts only |
 | Purchases (trial, unlock) | Apple (StoreKit) | Verified, unrevoked transactions only; nothing stored by the app |
@@ -19,7 +19,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 ## What leaves the phone
 | Destination | What's sent | When |
 |---|---|---|
-| The chosen AI provider (Anthropic, OpenAI, Google, xAI, DeepSeek, Alibaba (US region), Z.ai, Moonshot, Xiaomi) | About me, industry focus, business challenges, the collected public items, a saved project's notes when asking for variants, and an idea's details when making its starter kit or improving it | Only after the user agrees on the consent screen **for that provider**. HTTPS directly to the provider, with the user's key |
+| The chosen AI provider (Anthropic, OpenAI, Google, xAI, DeepSeek, Alibaba (US region), Z.ai, Moonshot, Xiaomi) | About me, interest area, pain points, the collected public items, a saved project's notes when asking for variants, and an idea's details when making its starter kit or improving it | Only after the user agrees on the consent screen **for that provider**. HTTPS directly to the provider, with the user's key |
 | Public sources (Hacker News/Algolia, GitHub, Apple App Store feeds, AusTender, Atlassian Marketplace, yc-oss on GitHub Pages, Hugging Face; optionally DEV, Lobsters, itch.io, Steam) | Nothing personal: plain GET requests with an "IdeaScout" User-Agent | Each refresh |
 | Apple | Purchases (StoreKit) and notifications (local only) | As used |
 
@@ -69,8 +69,8 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 |---|---|---|
 | User text and public content are processed by the chosen AI provider under **its** retention policy; five providers are China-based | Medium (user choice) | Disclosed per provider with consent and a confidential-data warning; users can choose a US provider or Apple on-device |
 | Prompt injection can still skew an individual idea | Low | Mitigated by the untrusted-data rule, the devil's-advocate pass and evidence caps; no data exposure possible |
-| About me and business challenges are in UserDefaults, included in the user's own (encrypted) backups | Low | Not secrets; "Delete all my data" removes them |
-| Trial and unlock are checked on the device only | Low | A server check isn't justified for a $0.99 app; a jailbroken phone could bypass it |
+| About me, interest area and pain points are in UserDefaults, included in the user's own (encrypted) backups | Low | Not secrets; "Delete all my data" removes them |
+| Trial and unlock are checked on the device only | Low | A server check isn't justified for a $1.99 app; a jailbroken phone could bypass it |
 | Apple App Store review feeds and yc-oss data have no explicit commercial-use terms | Low–Medium (legal) | See `docs/source-terms.md`; consider switching off Y Combinator data for the paid release |
 | Share sheet "Copy" of a prompt containing About me is a normal copy | Low | The user chooses to share; the app's own Copy button is local-only and expires |
 | The starter kit has only a Share button; its Copy is a normal copy that reaches the user's Mac and doesn't expire | Low | Owner's choice (10 Nov 2026), so kits reach Claude Code and Cursor on a Mac; the kit holds no About me or keys |

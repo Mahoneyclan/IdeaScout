@@ -61,7 +61,7 @@ struct KillerEngine {
         var gap: Int
         /// Fit with the user's experience and access, from About me (1–5).
         var fit: Int
-        /// Whether one person with AI coding tools could ship a first version in about 4 weeks (1–5).
+        /// Whether one person could build all of it with their AI coding tool (1–5).
         var buildability: Int
         /// How reachable the buyers are without a sales team, through the named channel (1–5).
         var channelScore: Int
@@ -90,8 +90,10 @@ struct KillerEngine {
         var aboutMe: String
         /// Top existing ideas as "Title: pitch", so a returning idea reuses its title.
         var leaderboard: [String]
-        /// Industry that at least 2 ideas must target.
-        var focusIndustry = ""
+        /// The area every idea must be in; empty means any area.
+        var interestArea = ""
+        /// The user's coding tool, which decides the kind of app every idea must be.
+        var tool = BuilderTool.claudeCode
         /// Pain clusters as one-line summaries for the prompt.
         var painClusters: [String] = []
     }
@@ -106,7 +108,7 @@ struct KillerEngine {
         let candidates = try await generate(context)
         guard !candidates.isEmpty else { return [] }
         await onCritique()
-        let reviews = try await critique(candidates, items: context.items, aboutMe: context.aboutMe)
+        let reviews = try await critique(candidates, items: context.items, aboutMe: context.aboutMe, tool: context.tool)
         return Self.survivors(candidates: candidates, reviews: reviews, items: context.items)
     }
 
@@ -120,7 +122,7 @@ struct KillerEngine {
     // MARK: - Pass 1: generate
 
     /// Pass 1 instructions: someone pays (a business or a consumer), buildable by one person with AI coding tools, a named sales
-    /// channel, at most 1 developer tool, at least 2 in the focus industry, each replacing a named manual task,
+    /// channel, at most 1 developer tool, all in the interest area and buildable as the tool's app type, each replacing a named manual task,
     /// with a one-week test. Field names must match `candidateSchema`.
     static let generateInstructions = """
     You are a sharp product strategist finding a software idea that makes money, for a solo builder who will \
@@ -129,16 +131,16 @@ struct KillerEngine {
     a good fit for the person described.
     Using the pain clusters, trends and numbered projects (items tagged Demand show need: "Pain points" are people \
     complaining or asking for tools that don't exist, "App Store complaints" and "Consumer app complaints" are \
-    1-2 star reviews of business and consumer apps people pay for, which show buyers ready to switch, "AusTender" is government IT spending, and "My business challenges" \
-    are the user's own observations from work, which are strong evidence; "Atlassian Marketplace", "Y Combinator" and \
+    1-2 star reviews of business and consumer apps people pay for, which show buyers ready to switch, "AusTender" is government IT spending, and "My pain points" \
+    are the user's own problems, which are strong evidence; "Atlassian Marketplace", "Y Combinator" and \
     "App Store top paid" show what people and businesses already pay for, and also who the competitors are; "Vibe-coded", "Show HN" \
     and "GitHub" show what other builders have already made, so treat them as competition, not inspiration; \
     "AI research" shows new capabilities), propose 5 distinct product ideas. Rules:
     - Someone must pay for it. The buyer can be a business (small and medium businesses would pay $20 to $500 a \
-    month; larger companies in the focus industry may pay more) or a consumer (for example a subscription of a few \
+    month; larger companies may pay more) or a consumer (for example a subscription of a few \
     dollars a month, a one-off purchase or usage-based pricing). It needs a clear way to make money: not a hobby \
     project or a free tool with no income.
-    - One person with AI coding tools must be able to ship a useful first version in about 4 weeks. Avoid products \
+    - One person must be able to build all of it with their AI coding tool (vibe-code it). Avoid products \
     that need hardware, a team, real-time systems, many deep integrations, holding money or health records, or \
     government or enterprise procurement.
     - Each must have a named sales channel where these buyers already look for products like it: an app \
@@ -147,7 +149,9 @@ struct KillerEngine {
     - Prefer a narrow niche (one type of buyer, one job) over a broad tool: easy-to-build products are easy to \
     copy, so the builder's protection is the niche, domain knowledge and owning the channel.
     - At most 1 of the 5 may be a tool for software developers.
-    - At least 2 of the 5 must be aimed at the focus industry given below.
+    - If an interest area is given below, every idea must be in it.
+    - Every idea must be the kind of app given below for the builder's tool, and one person must be able to build \
+    all of it with that tool. Don't propose anything that tool can't build.
     - Each must replace a named manual task, spreadsheet or costly workaround that the buyer does today.
     - Each must be a concrete product someone could start building this month, not a trend summary.
     Prefer ideas that solve a pain cluster and are supported by several projects. Cite at least one Demand item for each idea. Only propose ideas you would genuinely back; \
@@ -171,14 +175,15 @@ struct KillerEngine {
         return try Self.parseCandidates(data)
     }
 
-    /// The pass 1 prompt: profile, focus industry, pain clusters, trends with variants, numbered items
+    /// The pass 1 prompt: profile, interest area, the builder's tool and app type, pain clusters, trends with variants, numbered items
     /// (160 characters of detail) and the existing leaderboard.
     /// - Parameter context: What the prompt is built from.
     /// - Returns: The prompt text. Contains public text, so it's paired with `Prompts.untrustedData` in the instructions.
     static func generatePrompt(_ context: Context) -> String {
         var parts: [String] = []
         parts.append("About me: " + (context.aboutMe.isEmpty ? "(not provided)" : context.aboutMe))
-        if !context.focusIndustry.isEmpty { parts.append("Focus industry: " + context.focusIndustry) }
+        if !context.interestArea.isEmpty { parts.append("Interest area: " + context.interestArea) }
+        parts.append("Builder's tool: \(context.tool.label). Every idea must be \(context.tool.appTypeForAI).")
         let trends = context.themes.filter { !$0.isCatchAll && !$0.isPainCluster }.map { theme in
             "- \(theme.title): \(theme.summary)" + (theme.opportunities.isEmpty ? "" : " Variants: " + theme.opportunities.joined(separator: " | "))
         }
@@ -244,7 +249,8 @@ struct KillerEngine {
     You are a blunt, experienced investor playing devil's advocate for a solo builder who will vibe-code the \
     product (build it alone with AI coding tools) and sell it without a sales team. For each product idea, read its \
     cited evidence and try hard to kill it: name competitors you are confident exist, question whether the \
-    buyer would really pay for it, whether one person could really build it, and whether the named channel would \
+    buyer would really pay for it, whether one person could really build all of it with the builder's tool as the \
+    kind of app given, and whether the named channel would \
     really reach buyers. Give a competitor's price only if you are sure of it; otherwise say "price unknown". Don't invent facts.
     Score each 1-5 (be strict; 5 is rare):
     - pain: 1 nice-to-have; 3 a recurring problem people work around; 5 costly and frequent, shown in 2 or more independent evidence items
@@ -252,8 +258,9 @@ struct KillerEngine {
     - timing: 1 could have been built years ago; 3 recent tools make it easier; 5 a new capability, rule or price makes it possible or required now
     - gap: 1 well served by existing products; 3 options exist but leave a clear segment unhappy; 5 no credible option
     - fit: 1 needs skills or access the person lacks; 3 unknown or neutral; 5 uses their domain experience or access
-    - buildability: 1 needs a team, hardware, regulated data or many deep integrations; 3 one person could build it \
-    in 2-3 months; 5 one person with AI coding tools could ship a useful first version in 4 weeks
+    - buildability: 1 the builder's tool can't build it (it needs a team, hardware, regulated data or many deep \
+    integrations); 3 one person could build it with the tool, but with real difficulty; 5 one person could build all \
+    of it with the tool, simply
     - channel_score: 1 needs a sales team or cold outreach; 3 buyers are reachable but there is no obvious place they \
     look; 5 a named marketplace or community where these buyers already shop for tools like this
     Mark ideas down hard if there is no clear buyer who would pay, or no realistic way for it to make money. For \
@@ -272,9 +279,10 @@ struct KillerEngine {
     ///   - aboutMe: The user's profile, for the fit score.
     /// - Returns: One review per idea the critic answered; matched to candidates later by title.
     /// - Throws: Errors from the AI call or the parser.
-    func critique(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String) async throws -> [Review] {
+    func critique(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String,
+                  tool: BuilderTool = .claudeCode) async throws -> [Review] {
         let data = try await llm.client.complete(system: Self.critiqueInstructions,
-                                                 prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe),
+                                                 prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe, tool: tool),
                                                  schema: Self.reviewSchema, effort: "high", feature: "Devil's advocate")
         return try Self.parseReviews(data)
     }
@@ -286,8 +294,10 @@ struct KillerEngine {
     ///   - items: The numbered items the evidence numbers point into.
     ///   - aboutMe: The user's profile; "(not provided)" when empty.
     /// - Returns: The prompt text.
-    static func critiquePrompt(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String) -> String {
-        var text = "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe) + "\n\nIdeas:"
+    static func critiquePrompt(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String,
+                               tool: BuilderTool = .claudeCode) -> String {
+        var text = "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe)
+        text += "\nBuilder's tool: \(tool.label). Each idea must be \(tool.appTypeForAI).\n\nIdeas:"
         for c in candidates {
             text += "\n\nTitle: \(c.title)\nPitch: \(c.pitch)\nBuyer: \(c.buyer)\nPricing: \(c.pricing)"
             if !c.replaces.isEmpty { text += "\nReplaces: \(c.replaces)" }
@@ -386,7 +396,7 @@ struct KillerEngine {
         .map { $0 }
     }
 
-    /// Sources that count as evidence of pain: complaints and the user's own business challenges.
+    /// Sources that count as evidence of pain: complaints and the user's own pain points.
     static let painEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .fieldNotes]
     /// Sources that count as evidence that people pay: complaints, funded startups, top paid apps, paid
     /// marketplace add-ons, government contracts.

@@ -217,7 +217,7 @@ final class DigestService {
         var summarizer: any Summarizer
         /// Trends and pain clusters.
         var drafts: [ThemeDraft]
-        /// 1-based item numbers judged noise (never the user's own business challenges).
+        /// 1-based item numbers judged noise (never the user's own pain points).
         var noise: Set<Int>
         /// The items the summariser saw (translated where needed), in prompt order.
         var batch: [FetchedItem]
@@ -320,7 +320,7 @@ final class DigestService {
                 await MainActor.run { service.stage = .critique }
             }).run(
                 .init(themes: builtThemes, items: trends.batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard,
-                      focusIndustry: AppSettings.focusIndustry,
+                      interestArea: AppSettings.interestArea, tool: AppSettings.builderTool,
                       painClusters: builtThemes.filter(\.isPainCluster).map {
                           "\($0.title) (buyer: \($0.buyer); today: \($0.workaround); pays: \($0.paySignals); \($0.items.count) items)"
                       }))

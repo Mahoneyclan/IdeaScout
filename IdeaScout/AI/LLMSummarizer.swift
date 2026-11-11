@@ -63,8 +63,8 @@ struct LLMSummarizer: Summarizer {
     pain_clusters: each is one problem felt by one type of buyer. Give: title (the problem in the buyer's words), \
     buyer (a specific role and type of business, or a specific type of consumer), workaround (what they do today), pay_signals (any sign they pay or \
     would pay, e.g. prices mentioned, paid tools they're leaving, or "none seen"), summary (one sentence), and item \
-    numbers. A cluster needs at least 2 items unless one item is from "My business challenges". Those are the user's own \
-    observations from work: treat them as strong evidence. List in noise_numbers any items that are spam, \
+    numbers. A cluster needs at least 2 items unless one item is from "My pain points". Those are the user's own \
+    problems: treat them as strong evidence. List in noise_numbers any items that are spam, \
     off-topic or useless as product evidence.
     """
 

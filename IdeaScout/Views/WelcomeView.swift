@@ -44,7 +44,7 @@ struct WelcomeView: View {
             Image(systemName: "lightbulb.max.fill").font(.system(size: 64)).foregroundStyle(.indigo)
                 .accessibilityHidden(true)
             Text("Welcome to IdeaScout").font(.largeTitle.bold()).multilineTextAlignment(.center)
-            Text("Every day IdeaScout reads what people and businesses complain about and pay for, and proposes software ideas that make money, which you could build on your own with AI coding tools and sell through a marketplace or community. Each one survives a devil's-advocate check and comes with a starter kit.")
+            Text("IdeaScout finds the killer app idea in your interest area that you can vibe-code yourself and sell for a fraction of what competitors charge. Each idea has to survive a devil's-advocate check, and comes with a starter kit to build it.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
             Spacer()
             primary("Continue") { page = 1 }
@@ -125,7 +125,7 @@ struct ConsentView: View {
             List {
                 Section {
                     Text("To make your daily ideas, IdeaScout sends the following to **\(provider.label)**, a company based in **\(provider.country)**:")
-                    Label("Your About me, industry focus and business challenges", systemImage: "person.text.rectangle")
+                    Label("Your About me, interest area and pain points", systemImage: "person.text.rectangle")
                     Label("Public posts and listings IdeaScout collected (e.g. Hacker News, App Store reviews, government contracts)", systemImage: "doc.text")
                     Label("Your saved project notes, when you ask for variant suggestions", systemImage: "note.text")
                 } footer: {
@@ -135,7 +135,7 @@ struct ConsentView: View {
                 // rules (some providers are outside the user's country), so warn before anything is shared.
                 Section {
                     Label {
-                        Text("Don't include confidential company information, client names or personal details in About me or My Business Challenges. Describe problems in general terms.")
+                        Text("Don't include confidential company information, client names or personal details in About me or My pain points. Describe problems in general terms.")
                     } icon: {
                         Image(systemName: "exclamationmark.shield").foregroundStyle(.orange)
                     }

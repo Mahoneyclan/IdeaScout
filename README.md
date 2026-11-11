@@ -1,18 +1,29 @@
 # IdeaScout
 
-An iPhone and iPad app that hunts for a **killer monetisable app idea that one person can vibe-code and sell**. It's for someone looking for a business idea who will build it on their own with AI coding tools. Every day it scans places where people and businesses complain about missing or overpriced tools, what they already pay for, and what other builders have already made. It proposes ideas for paying customers (businesses or consumers) that one person could ship in about four weeks and sell through a named channel (a marketplace or community), each checked by a devil's-advocate review.
+An iPhone and iPad app. IdeaScout finds the killer app idea in your interest area that you can vibe-code yourself and sell for a fraction of what competitors charge. It must make money even if only a small group of customers ever buys it. Growth is a bonus, not the goal. Each idea comes with a starter kit to build it.
+
+An idea is killer only if it passes all five tests:
+1. **Must be vibe-codable:** one person can build all of it with their AI coding tool, as a web app or an iPhone/iPad app. Any idea that fails this is dropped before you see it.
+2. **People will pay for it:** they already pay for an app that does this, or pay for a workaround such as a pricier tool, a service or their own time.
+3. **Real pain:** people complain about the apps they use for this (too expensive, too bloated, or missing the one thing they need), or that no app does it.
+4. **Must be materially cheaper:** half the price of the cheapest competitor or less.
+5. **Sales cover the build cost:** the likely sales from a small number of customers, found in a named place where they already look, recover the build cost and then keep making money.
+
+The devil's advocate also asks: would the competitors follow, what stops another vibe coder copying it, and will customers keep paying? Each idea says which features to keep and which to leave out compared with the competitors, to size and price it.
+
+(The idea engine is being reworked to match this purpose; the sections below describe how it works today.)
 
 Native Swift / SwiftUI / SwiftData. No backend: everything runs on the phone.
 
 ## What it does
 
 - **Ideas** (opens first): a leaderboard of killer ideas and near-misses, with today's refresh status and step-by-step progress at the top. Ideas that come back on several days rank higher. Each card shows its weakest score; swipe left to dismiss (with confirmation).
-- **Killer ideas:** Claude suggests 5 money-making product ideas from the trends and pain clusters. Each names a buyer who pays (a business or a consumer), a price, the manual task or costly workaround it replaces, and a **sales channel** where those buyers already look for tools; at most 1 may be a developer tool and at least 2 target your industry focus. Ideas must be buildable by one person with AI coding tools and favour narrow niches. A second, sceptical pass (given each idea's evidence) tries to kill each one and scores pain, willingness to pay, **buildable solo**, **sales channel**, gap, fit and why now (why now counts half). Any score below 2 drops the idea. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**. Each idea records every day it was proposed, and its detail screen's main action is the **starter kit**. Ideas found before buildability and sales channel were scored show "Not scored" for them and keep their original score.
-- **Starter kit:** on an idea, one AI request (cost shown first, counts towards the daily limit, needs the trial or unlock) plans the first version: a one-paragraph spec, the screens, the data it stores, a cheap stack for one person with a rough running cost, what to leave out, the first slice with checks, and rules for the coding tool. It's saved on the idea. Pick Claude Code, Cursor, Replit or Lovable and **Share** the whole kit worded for that tool (rewording is free, on the phone; the share sheet includes Copy). Making it again asks first. **Plan it first** still copies the older build brief, a planning prompt for an AI chat.
+- **Killer ideas:** Claude suggests 5 money-making product ideas from the trends and pain clusters. Each names a buyer who pays (a business or a consumer), a price, the manual task or costly workaround it replaces, and a **sales channel** where those buyers already look for tools; at most 1 may be a developer tool, and every idea is in your interest area (if set) and is the kind of app your coding tool builds. Ideas must be buildable by one person with their AI coding tool and favour narrow niches. A second, sceptical pass (given each idea's evidence) tries to kill each one and scores pain, willingness to pay, **buildable solo**, **sales channel**, gap, fit and why now (why now counts half). Any score below 2 drops the idea. Up to 3 survivors a day are kept and marked **Killer** (at or above the quality bar) or **Near-miss**. Each idea records every day it was proposed, and its detail screen's main action is the **starter kit**. Ideas found before buildability and sales channel were scored show "Not scored" for them and keep their original score.
+- **Starter kit:** on an idea, one AI request (cost shown first, counts towards the daily limit, needs the trial or unlock) plans the first version: a one-paragraph spec, the screens, the data it stores, a cheap stack for one person with a rough running cost, what to leave out, the first slice with checks, and rules for the coding tool. It's saved on the idea. Pick Claude Code, Cursor, Replit or Lovable and **Share build prompt**: the kit as a prompt worded for that tool (rewording is free, on the phone; the share sheet includes Copy). Making it again asks first.
 - **Improve this idea:** on an idea, up to 3 rounds (cost shown first as an upper guide, counts towards the daily limit, needs the trial or unlock). Each round the AI rewrites the idea to answer the devil's advocate's strongest objection, then the devil's advocate scores the rewrite. It stops when the score stops rising, reaches the quality bar, the rewrite is rejected, or after 3 rounds. Pain and willingness to pay can't rise above the original's, because a rewrite adds no new evidence. Every version is shown beside the original; nothing changes until you tap **Keep this version**, and **Undo improvement** puts the original back. If the daily scan proposes the idea again, its new text replaces the kept improvement.
 - **History:** one row per day with its best idea and pain clusters; tap a day for that day's ideas, pain clusters and trends.
 - **Saved:** ideas you've bookmarked (bookmark button, or swipe right in Ideas) and projects you've starred, with notes, AI-suggested monetisable variants, and a copyable "flesh out this idea" prompt.
-- **Settings:** About me, My Business Challenges, industry focus and the daily digest time up front; under **Advanced**: sources and topics, scan windows, items the AI reads, quality bar and ranking weights, and AI provider, model, key, costs and daily limit.
+- **Settings:** About me, interest area, your AI coding tool (it decides the app type: Claude Code or Cursor for on-device iPhone/iPad apps, Lovable or Replit for web apps), My pain points and the daily digest time up front; under **Advanced**: sources and topics, scan windows, items the AI reads, quality bar and ranking weights, and AI provider, model, key, costs and daily limit.
 - **Refreshing:** a button at the bottom of Ideas and History shows the estimated cost; a second refresh on the same day asks first.
 
 All output is in English. Non-English items are translated by Claude, or filtered out when Apple's on-device model is used.
@@ -21,7 +32,7 @@ All output is in English. Non-English items are translated by Claude, or filtere
 
 | Source | What it gives |
 |---|---|
-| My business challenges | Problems you type in Settings, one per line; treated as strong demand evidence |
+| My pain points | Problems you type in Settings, one per line; treated as strong demand evidence |
 | App Store complaints | 1–2 star reviews (last 60 days) of 12 top-grossing business, finance and productivity apps a day, AU and US stores |
 | Consumer app complaints | The same for 12 top-grossing health and fitness, education, food and drink, and travel apps a day (on by default) |
 | AusTender | The 15 largest Australian government IT contracts in the window |
@@ -50,7 +61,7 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 
 ## Trial, purchase and privacy
 
-- Free download with a **7-day free trial** (a $0 non-consumable "7-Day Trial", as Apple requires) and a one-off **$0.99 unlock** (StoreKit 2). After the trial only new refreshes are locked; history and saved ideas stay readable. Debug builds without store products run as a "Developer build". `IdeaScout/IdeaScout.storekit` lets purchases be tested from Xcode.
+- Free download with a **7-day free trial** (a $0 non-consumable "7-Day Trial", as Apple requires) and a one-off **$1.99 unlock** (StoreKit 2). After the trial only new refreshes are locked; history and saved ideas stay readable. Debug builds without store products run as a "Developer build". `IdeaScout/IdeaScout.storekit` lets purchases be tested from Xcode.
 - A **welcome flow** on first launch, and a **consent screen** before any data goes to a cloud AI (asked per provider, withdrawable in Settings).
 - **About & privacy** screen with data-source credits; `PrivacyInfo.xcprivacy` privacy manifest; export-compliance flag set.
 - Submission drafts in `docs/`: privacy policy, App Store listing, App Privacy answers, review notes, in-app purchase setup, and a data-source terms check.

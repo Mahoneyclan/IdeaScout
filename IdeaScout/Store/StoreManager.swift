@@ -1,5 +1,5 @@
 // StoreManager.swift
-// The free 7-day trial and the one-off $0.99 unlock. DigestService asks it whether a refresh is allowed;
+// The free 7-day trial and the one-off $1.99 unlock. DigestService asks it whether a refresh is allowed;
 // PaywallView, AccessStatusRow, WelcomeView and RefreshBar show its state and start purchases.
 // Product IDs must match the in-app purchases in App Store Connect and IdeaScout.storekit (local testing).
 
@@ -19,7 +19,7 @@ final class StoreManager {
 
     /// Product ID of the $0 "7-Day Trial" non-consumable.
     nonisolated static let trialID = "com.mahoney.IdeaScout.trial7"
-    /// Product ID of the $0.99 one-off unlock non-consumable.
+    /// Product ID of the $1.99 one-off unlock non-consumable.
     nonisolated static let unlockID = "com.mahoney.IdeaScout.unlock"
     /// Trial length, counted from the trial purchase date.
     nonisolated static let trialDays = 7
@@ -175,6 +175,6 @@ final class StoreManager {
         await refreshEntitlements()
     }
 
-    /// The unlock's localised price from the App Store, or "$0.99" before products load.
-    var unlockPrice: String { products[Self.unlockID]?.displayPrice ?? "$0.99" }
+    /// The unlock's localised price from the App Store, or "$1.99" before products load.
+    var unlockPrice: String { products[Self.unlockID]?.displayPrice ?? "$1.99" }
 }

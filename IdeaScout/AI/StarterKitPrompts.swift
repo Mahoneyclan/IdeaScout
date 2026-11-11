@@ -5,11 +5,40 @@
 
 import Foundation
 
-/// The AI coding tool the shared kit is worded for. The raw value is stored in settings, so never rename it.
+/// The user's AI coding tool: it decides the kind of app ideas are for, and how the build prompt is worded. The raw
+/// value is stored in settings, so never rename it.
 enum BuilderTool: String, CaseIterable, Identifiable, Sendable {
     case claudeCode, cursor, replit, lovable
 
     var id: String { rawValue }
+
+    /// The kind of app a tool builds (owner's decision, 11 Nov 2026).
+    enum AppType: Sendable { case onDevice, web }
+
+    /// Claude Code and Cursor build iPhone and iPad apps that run on the device; Replit and Lovable build hosted web apps.
+    var appType: AppType {
+        switch self {
+        case .claudeCode, .cursor: .onDevice
+        case .replit, .lovable: .web
+        }
+    }
+
+    /// The app type in words, for AI prompts.
+    var appTypeForAI: String {
+        switch appType {
+        case .onDevice: "an iPhone and iPad app built in Swift and SwiftUI that runs entirely on the device, with no "
+            + "server or hosting (iCloud can sync data between the user's devices), sold on the App Store"
+        case .web: "a web app hosted on \(label)'s own hosting (hosting and any paid services count as running costs)"
+        }
+    }
+
+    /// The app type in words, for the screen.
+    var appTypeText: String {
+        switch appType {
+        case .onDevice: "Ideas will be iPhone and iPad apps that run on the device, with no hosting costs."
+        case .web: "Ideas will be web apps, with hosting counted in the running costs."
+        }
+    }
 
     /// The tool's name on screen.
     var label: String {
@@ -47,10 +76,10 @@ enum BuilderTool: String, CaseIterable, Identifiable, Sendable {
 enum StarterKitPrompts {
     /// Instructions for the kit call. Field names must match `StarterKit.schema`.
     static let instructions = """
-    You are a senior engineer and product lead helping one person build a software product with AI coding tools \
-    (Claude Code, Cursor, Replit or Lovable). Plan the smallest first version that customers would pay for and \
-    that one person can build in about 4 weeks. Write for a solo builder: plain words and concrete names, and \
-    explain any technical term in a few words.
+    You are a senior engineer and product lead helping one person build an app entirely with an AI coding tool. \
+    The request says which tool and what kind of app: plan for exactly that, and choose a stack that tool can \
+    build. Plan the smallest first version that customers would pay for. Write for a solo builder: plain words \
+    and concrete names, and explain any technical term in a few words.
 
     Return:
     - spec: one paragraph of at most 120 words: who it's for, the one job it does, and what the customer gets.
@@ -75,16 +104,19 @@ enum StarterKitPrompts {
         var title, pitch, buyer, pricing, replaces, channel, whyNow, oneWeekTest, objection, competitors: String
         /// The user's profile, so the stack suits their skills; empty when not given.
         var aboutMe: String
+        /// The user's coding tool, which decides the kind of app.
+        var tool: BuilderTool = .claudeCode
 
         /// Copies the fields the kit needs from a saved idea.
         /// - Parameters:
         ///   - idea: The saved idea.
         ///   - aboutMe: The user's profile.
-        init(_ idea: KillerIdea, aboutMe: String) {
+        init(_ idea: KillerIdea, aboutMe: String, tool: BuilderTool = .claudeCode) {
             title = idea.title; pitch = idea.pitch; buyer = idea.buyer; pricing = idea.pricing; replaces = idea.replaces
             channel = idea.channel; whyNow = idea.whyNow; oneWeekTest = idea.oneWeekTest; objection = idea.objection
             competitors = idea.competitors
             self.aboutMe = aboutMe
+            self.tool = tool
         }
     }
 
@@ -93,7 +125,7 @@ enum StarterKitPrompts {
     /// - Returns: The prompt. The idea was written by an AI from public posts, so the instructions end with
     ///   `Prompts.untrustedData`.
     static func prompt(_ request: Request) -> String {
-        var lines = ["Idea: \(request.title)", "Pitch: \(request.pitch)", "Customer: \(request.buyer)", "Pricing: \(request.pricing)"]
+        var lines = ["Build with: \(request.tool.label), as \(request.tool.appTypeForAI)", "Idea: \(request.title)", "Pitch: \(request.pitch)", "Customer: \(request.buyer)", "Pricing: \(request.pricing)"]
         if !request.replaces.isEmpty { lines.append("Replaces: \(request.replaces)") }
         if !request.channel.isEmpty { lines.append("Where customers are found: \(request.channel)") }
         lines += ["Why now: \(request.whyNow)", "One-week demand test: \(request.oneWeekTest)",

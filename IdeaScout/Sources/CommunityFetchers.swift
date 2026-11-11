@@ -140,15 +140,18 @@ struct PainPointsFetcher: ItemFetcher {
 // MARK: - Vibe-coded projects (mentions of AI app builders on HN and GitHub)
 
 /// Projects built with AI app builders: Hacker News stories mentioning them, and GitHub repos that say
-/// they were vibe-coded or built with Lovable.
+/// they were vibe-coded or built with Lovable or Replit.
 struct VibeCodeFetcher: ItemFetcher {
     /// Which source this is.
     let kind = SourceKind.vibeCode
 
     /// Search terms for Hacker News (15 stories each).
-    static let hnQueries = ["lovable", "bolt.new", "v0.dev", "vibe coded", "vibe coding", "replit agent", "built with cursor"]
-    /// GitHub searches (2 of the 10-per-minute budget).
-    static let githubQueries = ["\"vibe coded\" in:description,readme", "\"built with lovable\" in:description,readme"]
+    static let hnQueries = ["lovable", "bolt.new", "v0.dev", "vibe coded", "vibe coding", "replit agent", "made with replit", "built with cursor"]
+    /// GitHub searches (2 of the 10-per-minute budget, which the GitHub, Games and this source fill exactly, so add
+    /// terms with OR rather than as new searches). Replit's own Gallery and forum can't be read: its terms forbid
+    /// scraping (checked 11 Nov 2026), so Replit-built apps are found here and on Hacker News instead.
+    static let githubQueries = ["\"vibe coded\" in:description,readme",
+                                "\"built with lovable\" OR \"built with replit\" in:description,readme"]
 
     /// HN searches, then GitHub searches; throws only if every search failed.
     /// - Parameters:

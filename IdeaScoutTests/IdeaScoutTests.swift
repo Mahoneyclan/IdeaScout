@@ -602,13 +602,14 @@ struct ReliabilityTests {
         #expect(AppSettings.sanitizedPrice(1.25) == 1.25)
     }
 
-    /// Accuracy: Claude prices match Anthropic's list (Oct 2026; Fable 5.2 Nov 2026), and labels compare with the default (Sonnet).
+    /// Accuracy: Claude prices match Anthropic's list (rechecked 11 Nov 2026: Sonnet 5.5's cache reads are $0.10), and
+    /// labels compare with the default (Sonnet).
     @Test func claudePricesMatchAnthropicList() throws {
         let models = AIProvider.claude.models
         let sonnet = try #require(models.first { $0.id == "claude-sonnet-5-5" })
         let opus = try #require(models.first { $0.id == "claude-opus-5-5" })
         let fable = try #require(models.first { $0.id == "claude-fable-5-2" })
-        #expect(sonnet.price == ModelPrice(input: 2, output: 10, cachedInput: 0.2))
+        #expect(sonnet.price == ModelPrice(input: 2, output: 10, cachedInput: 0.1))
         #expect(opus.price == ModelPrice(input: 4, output: 20, cachedInput: 0.2))
         #expect(fable.price == ModelPrice(input: 8, output: 40, cachedInput: 0.2))
         #expect(opus.label.contains("\(Int(opus.price.input / sonnet.price.input))× cost"))
@@ -705,7 +706,6 @@ struct BusinessFocusTests {
     /// Owner's decision (10 Nov 2026): buyers can be businesses or consumers, but the idea must make money.
     @Test func promptsAimAtBuyersWhoPay() {
         #expect(KillerEngine.generateInstructions.contains("At most 1 of the 5 may be a tool for software developers"))
-        #expect(KillerEngine.generateInstructions.contains("focus industry"))
         #expect(KillerEngine.generateInstructions.contains("Someone must pay for it"))
         #expect(KillerEngine.generateInstructions.contains("or a consumer"))
         #expect(KillerEngine.critiqueInstructions.contains("no clear buyer who would pay"))
@@ -716,8 +716,6 @@ struct BusinessFocusTests {
         for text in [KillerEngine.generateInstructions, KillerEngine.critiqueInstructions, Prompts.themeInstructions] {
             #expect(!text.contains("Never hobbyists or consumers") && !text.contains("consumer novelties"))
         }
-        let p = KillerEngine.generatePrompt(.init(themes: [], items: [], aboutMe: "", leaderboard: [], focusIndustry: "energy"))
-        #expect(p.contains("Focus industry: energy"))
         let required = (((KillerEngine.candidateSchema["properties"] as? [String: Any])?["ideas"] as? [String: Any])?["items"] as? [String: Any])?["required"] as? [String]
         #expect(required?.contains("replaces") == true)
     }
@@ -1420,19 +1418,42 @@ struct SoloBuilderTests {
         c.channel = "Shopify App Store"
         #expect(KillerEngine.critiquePrompt([c], items: [], aboutMe: "").contains("Sales channel: Shopify App Store"))
     }
+}
 
-    @Test func buildBriefPlansASoloFirstVersion() {
-        let idea = KillerIdea(key: "a", title: "InvoiceChaser")
-        idea.pitch = "Chases unpaid invoices"; idea.buyer = "Trades businesses"; idea.pricing = "$49/month"
-        idea.channel = "Xero App Store"; idea.replaces = "Manual reminder emails"
-        let brief = Prompts.buildBrief(idea)
-        #expect(brief.contains("Idea: InvoiceChaser"))
-        #expect(brief.contains("Sales channel: Xero App Store"))
-        #expect(brief.contains("Replaces: Manual reminder emails"))
-        #expect(brief.contains("What not to build yet"))
-        #expect(brief.contains("first prompt I should give my AI coding tool"))
-        let older = KillerIdea(key: "b", title: "Old")
-        #expect(!Prompts.buildBrief(older).contains("Sales channel:"))
-        #expect(brief.hasSuffix(Prompts.pastedPromptNotice))
+/// Owner's decisions (11 Nov 2026): every idea is in the user's interest area (replacing "at least two in the industry
+/// focus"), and the user's coding tool decides the kind of app.
+struct InterestAreaAndToolTests {
+    @Test(arguments: [(BuilderTool.claudeCode, "runs entirely on the device"), (.cursor, "runs entirely on the device"),
+                      (.replit, "web app"), (.lovable, "web app")])
+    func everyPromptAsksForTheToolsAppType(tool: BuilderTool, phrase: String) {
+        #expect(tool.appTypeForAI.contains(phrase))
+        let generate = KillerEngine.generatePrompt(.init(themes: [], items: [], aboutMe: "", leaderboard: [],
+                                                         interestArea: "fitness coaching", tool: tool))
+        #expect(generate.contains("Interest area: fitness coaching"))
+        #expect(generate.contains("Builder's tool: \(tool.label)") && generate.contains(tool.appTypeForAI))
+        #expect(KillerEngine.critiquePrompt([], items: [], aboutMe: "", tool: tool).contains(tool.appTypeForAI))
+        let idea = KillerIdea(key: "a", title: "A")
+        #expect(StarterKitPrompts.prompt(.init(idea, aboutMe: "", tool: tool)).contains(tool.appTypeForAI))
+        let version = IdeaVersion(idea)
+        #expect(IdeaImprover.rewritePrompt(version, title: "A", evidence: [], aboutMe: "", tool: tool).contains(tool.appTypeForAI))
+        #expect(IdeaImprover.reviewPrompt(version, title: "A", evidence: [], aboutMe: "", tool: tool).contains(tool.appTypeForAI))
+    }
+
+    @Test func interestAreaReplacesTheIndustryRule() {
+        #expect(KillerEngine.generateInstructions.contains("every idea must be in it"))
+        #expect(!KillerEngine.generateInstructions.contains("focus industry"))
+        #expect(!KillerEngine.generatePrompt(.init(themes: [], items: [], aboutMe: "", leaderboard: [])).contains("Interest area:"),
+                "blank means any area")
+        #expect(AppSettings.Keys.interestArea == "focusIndustry", "stored under its old name: never rename")
+        #expect(!KillerEngine.generateInstructions.contains("4 weeks") && !StarterKitPrompts.instructions.contains("4 weeks"),
+                "no fixed build time (owner, 11 Nov 2026)")
+    }
+
+    /// Source labels in prompts must match SourceKind.label.
+    @Test func painPointsLabelMatchesPrompts() {
+        #expect(SourceKind.fieldNotes.rawValue == "fieldNotes", "stored: never rename")
+        for text in [KillerEngine.generateInstructions, Prompts.themeInstructions, LLMSummarizer.clusterInstruction] {
+            #expect(text.contains("\"\(SourceKind.fieldNotes.label)\""))
+        }
     }
 }

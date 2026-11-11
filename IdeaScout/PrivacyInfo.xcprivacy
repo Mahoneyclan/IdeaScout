@@ -7,7 +7,7 @@
 	<false/>
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
-	<!-- The user's own text (About me, business challenges) is sent to the AI provider they choose,
+	<!-- The user's own text (About me, interest area, pain points) is sent to the AI provider they choose,
 	     only to produce their ideas. It is not linked to their identity or used for tracking. -->
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array>

@@ -1,5 +1,5 @@
 // SettingsView.swift
-// The Settings tab: About me, My Business Challenges, industry focus, the daily digest time, and links to
+// The Settings tab: About me, interest area, coding tool, My pain points, the daily digest time, and links to
 // the Advanced pages (AdvancedSettingsViews.swift). Settings are UserDefaults keys from AppSettings.Keys,
 // edited via @AppStorage; API keys go to the Keychain (SecretField in SettingsControls.swift).
 
@@ -12,7 +12,8 @@ import SwiftData
 struct SettingsView: View {
     @AppStorage(AppSettings.Keys.aboutMe) private var aboutMe = ""
     @AppStorage(AppSettings.Keys.fieldNotes) private var fieldNotes = ""
-    @AppStorage(AppSettings.Keys.focusIndustry) private var focusIndustry = AppSettings.defaultFocusIndustry
+    @AppStorage(AppSettings.Keys.interestArea) private var interestArea = ""
+    @AppStorage(AppSettings.Keys.starterKitTool) private var toolRaw = BuilderTool.claudeCode.rawValue
     @AppStorage(AppSettings.Keys.notifyHour) private var notifyHour = 7
     /// Spending summary for the "AI & costs" row; refreshed when the screen appears.
     @State private var usage = UsageTracker.summary()
@@ -37,23 +38,36 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    TextField("e.g. Contractor timesheets are re-keyed into SAP every Friday", text: $fieldNotes, axis: .vertical)
-                        .lineLimit(3...10)
+                    TextField("e.g. small trades businesses, fitness coaching, home budgeting", text: $interestArea)
                         .focused($keyboardOpen)
                 } header: {
-                    Text("My Business Challenges")
+                    Text("Interest area")
                 } footer: {
-                    // Security: sent to the chosen AI provider; describing problems generically avoids leaking employer secrets.
-                    Text("One per line. Each is treated as strong evidence of demand. Sent to your AI provider, so describe problems in general terms: no confidential company information or client names.")
+                    Text("Every idea will be in this area. Leave it blank for any area.")
                 }
 
                 Section {
-                    TextField("e.g. energy, utilities and enterprise IT", text: $focusIndustry)
+                    FlowLayout(spacing: 8) {
+                        ForEach(BuilderTool.allCases) { option in
+                            ChoiceChip(title: option.label, isSelected: option.rawValue == toolRaw) { toolRaw = option.rawValue }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Your AI coding tool")
+                } footer: {
+                    Text((BuilderTool(rawValue: toolRaw) ?? .claudeCode).appTypeText + " Starter kits are worded for this tool.")
+                }
+
+                Section {
+                    TextField("e.g. My invoicing app charges $40 a month and I only use the reminders", text: $fieldNotes, axis: .vertical)
+                        .lineLimit(3...10)
                         .focused($keyboardOpen)
                 } header: {
-                    Text("Industry focus")
+                    Text("My pain points")
                 } footer: {
-                    Text("At least 2 ideas a day target this industry; the rest can be for any customers who pay, businesses or consumers.")
+                    // Security: sent to the chosen AI provider; describing problems generically avoids leaking employer secrets.
+                    Text("Problems you have with apps or tasks, one per line. Each is treated as strong evidence of pain. Sent to your AI provider, so describe them in general terms: no confidential company information or client names.")
                 }
 
                 Section {

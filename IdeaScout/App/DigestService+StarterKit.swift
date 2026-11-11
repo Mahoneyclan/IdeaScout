@@ -43,7 +43,7 @@ extension DigestService {
         guard let llm = dependencies.makeSummarizer() as? LLMSummarizer else { throw StarterKitError.needsCloudAI }
         if dependencies.isOverDailyCap() { throw SummarizerError.overDailyLimit }
 
-        let request = StarterKitPrompts.Request(idea, aboutMe: AppSettings.aboutMe)
+        let request = StarterKitPrompts.Request(idea, aboutMe: AppSettings.aboutMe, tool: AppSettings.builderTool)
         let data = try await llm.client.complete(system: StarterKitPrompts.instructions, prompt: StarterKitPrompts.prompt(request),
                                                  schema: StarterKit.schema, effort: "medium", feature: "Starter kit")
         idea.starterKit = try StarterKit.parse(data)

@@ -5,7 +5,7 @@
 import Foundation
 
 extension DigestService {
-    /// The enabled sources, in priority order. Business challenges and other demand sources come first, then
+    /// The enabled sources, in priority order. The user's pain points and other demand sources come first, then
     /// vibe-code and games, so an item they share with Show HN keeps the more specific label.
     /// - Returns: One fetcher per source switched on in Settings.
     static func enabledFetchers() -> [any ItemFetcher] {
@@ -37,13 +37,13 @@ extension DigestService {
         return items.filter { seenKeys.insert($0.key).inserted && seenURLs.insert($0.url.absoluteString.lowercased()).inserted }
     }
 
-    /// Fills the AI's quota by signal: business challenges first, then 40% demand, 40% supply and 20% timing,
+    /// Fills the AI's quota by signal: the user's pain points first, then 40% demand, 40% supply and 20% timing,
     /// each shared fairly between its sources. Unused share rolls over. The result interleaves the
     /// signals so a summariser that reads only the first few items still sees each kind.
     /// - Parameters:
     ///   - items: Candidates from every source.
     ///   - maxItems: The AI's item limit.
-    /// - Returns: At most `maxItems` items (plus all business challenges).
+    /// - Returns: At most `maxItems` items (plus all of the user's pain points).
     nonisolated static func selectBySignal(_ items: [FetchedItem], maxItems: Int) -> [FetchedItem] {
         let notes = items.filter { $0.source == .fieldNotes }
         let rest = items.filter { $0.source != .fieldNotes }

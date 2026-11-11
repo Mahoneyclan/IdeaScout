@@ -85,7 +85,7 @@ struct DigestContentView: View {
                 } header: {
                     Label("Pain clusters", systemImage: "exclamationmark.bubble")
                 } footer: {
-                    Text("Problems businesses complain about or pay to work around, from complaints, App Store reviews, government spending and your business challenges.")
+                    Text("Problems businesses complain about or pay to work around, from complaints, App Store reviews, government spending and your pain points.")
                 }
             }
             ForEach(themes) { theme in

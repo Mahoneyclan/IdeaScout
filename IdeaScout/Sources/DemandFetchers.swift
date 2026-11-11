@@ -1,14 +1,14 @@
 // DemandFetchers.swift
-// The demand sources: evidence of what businesses and consumers need or pay for. "My Business Challenges" (typed by
+// The demand sources: evidence of what businesses and consumers need or pay for. "My pain points" (typed by
 // the user), 1–2 star App Store reviews of top-grossing business and consumer apps, Atlassian Marketplace add-ons and
 // Australian government IT contracts (AusTender, CC BY 4.0: credited in About). Each gets the "demand"
 // share of the AI's items except Atlassian, which counts as supply.
 
 import Foundation
 
-// MARK: - My Business Challenges (source kind `fieldNotes`: the owner's own work problems, typed in Settings)
+// MARK: - My pain points (source kind `fieldNotes`: the user's own problems, typed in Settings)
 
-/// "My Business Challenges" from Settings, one item per line. Makes no network calls.
+/// "My pain points" from Settings, one item per line. Makes no network calls.
 struct FieldNotesFetcher: ItemFetcher {
     /// Which source this is.
     let kind = SourceKind.fieldNotes

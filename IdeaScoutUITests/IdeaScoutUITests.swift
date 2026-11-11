@@ -129,9 +129,7 @@ final class IdeaScoutUITests: XCTestCase {
         let make = button(app, startingWith: "Make starter kit")
         XCTAssertTrue(make.waitForExistence(timeout: 5))
         make.tap()
-        XCTAssertTrue(button(app, startingWith: "Share for Claude Code").waitForExistence(timeout: 10), "kit should be made")
-        button(app, startingWith: "Cursor").tap()
-        XCTAssertTrue(button(app, startingWith: "Share for Cursor").waitForExistence(timeout: 5))
+        XCTAssertTrue(button(app, startingWith: "Share build prompt for Claude Code").waitForExistence(timeout: 10), "kit should be made")
     }
 
     func testIdeaIsImprovedAndTheVersionKept() {

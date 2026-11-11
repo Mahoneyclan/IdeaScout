@@ -15,12 +15,12 @@ There is **no server**. Everything runs on the iPhone or iPad; AI calls go direc
 | Tab / screen | File | What it shows |
 |---|---|---|
 | **Ideas** (first tab) | `Views/KillerViews.swift` (`LeaderboardView`) | Today's status and progress and the bottom refresh button (`RefreshViews.swift`), killer ideas then near-misses |
-| Idea detail | `Views/KillerIdeaDetailView.swift` | Who pays, price, what it replaces, where to find buyers, why now, one-week test, devil's advocate, scores, evidence, save; pinned **Starter kit** and **Plan it first** (build brief, `AI/BuildBrief.swift`) |
-| Starter kit | `Views/StarterKitView.swift` | Make the kit (cost first; repeat asks first), the kit itself, the coding-tool picker (`FlowLayout`, `ChoiceChip`) and Share for that tool |
+| Idea detail | `Views/KillerIdeaDetailView.swift` | Who pays, price, what it replaces, where to find buyers, why now, one-week test, devil's advocate, scores, evidence, save; pinned **Starter kit** |
+| Starter kit | `Views/StarterKitView.swift` | Make the kit (cost first; repeat asks first), the kit itself, the coding-tool picker (`FlowLayout`, `ChoiceChip`) and **Share build prompt** for that tool |
 | **History** | `Views/RootView.swift` (`HistoryView`) | One row per day with its best idea and pain clusters |
 | Day view | `Views/DayView.swift` (`DigestContentView`) | That day's ideas, pain clusters, ranked trends with projects, notes |
 | **Saved** | `Views/IdeasView.swift` | Bookmarked ideas, then starred projects (notes, AI variants, prompt) |
-| **Settings** | `Views/SettingsView.swift`, `AdvancedSettingsViews.swift`, `SettingsControls.swift` | About me, My Business Challenges, industry focus, digest time; Advanced: sources, scan and ranking, AI and costs |
+| **Settings** | `Views/SettingsView.swift`, `AdvancedSettingsViews.swift`, `SettingsControls.swift` | About me, interest area, coding tool (`starterKit.tool`, which sets the app type), My pain points (`fieldNotes`), digest time; Advanced: sources, scan and ranking, AI and costs |
 | Welcome / consent | `Views/WelcomeView.swift` | First launch: intro, trial, AI choice; consent before data goes to a cloud AI |
 | Paywall / About | `Views/StoreViews.swift`, `Views/AboutView.swift` | Trial and unlock; version, privacy, source credits |
 

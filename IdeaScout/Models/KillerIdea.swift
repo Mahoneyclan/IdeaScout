@@ -49,7 +49,7 @@ import SwiftData
     var gap = 0
     /// How well it suits the user (from About me).
     var fit = 0
-    /// Whether one person with AI coding tools could build a first version in about 4 weeks.
+    /// Whether one person could build all of it with their AI coding tool (vibe-code it).
     /// 0 means not scored (ideas found before this score existed).
     var buildability = 0
     /// How reachable the buyers are through the sales channel without a sales team. 0 means not scored.

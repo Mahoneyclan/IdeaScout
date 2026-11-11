@@ -1,17 +1,16 @@
 // KillerIdeaDetailView.swift
 // The idea detail screen: the opportunity, one-week test, devil's advocate (with "Improve this idea"), scores and
-// evidence links, with the starter kit as the main action and the build brief as "Plan it first".
+// evidence links, with the starter kit as the main action.
 
 import SwiftUI
 import SwiftData
 
 /// Everything about one idea: the opportunity, one-week test, devil's advocate, scores, evidence links,
-/// with pinned "Starter kit" and "Plan it first" (copy the build brief) buttons. The bookmark in the toolbar saves it.
+/// with a pinned "Starter kit" button. The bookmark in the toolbar saves it.
 struct KillerIdeaDetailView: View {
     /// The idea shown; bindable so saving updates the screen.
     @Bindable var idea: KillerIdea
     @Environment(\.modelContext) private var context
-    @State private var copied = false
 
     /// The days it was proposed, as text (first and last day for ideas saved before days were recorded).
     private var seenDays: String {
@@ -95,7 +94,7 @@ struct KillerIdeaDetailView: View {
             } header: {
                 Text("Scores")
             } footer: {
-                Text("Buildable solo: could one person ship it with AI coding tools in about 4 weeks. Sales channel: can buyers be reached without a sales team. Why now counts half. Fit for me uses your About me in Settings. Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"): \(seenDays).")
+                Text("Buildable solo: could one person build all of it with their AI coding tool. Sales channel: can buyers be reached without a sales team. Why now counts half. Fit for me uses your About me in Settings. Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"): \(seenDays).")
             }
             if !idea.evidence.isEmpty {
                 Section("Evidence") {
@@ -111,32 +110,13 @@ struct KillerIdeaDetailView: View {
         }
         .readableList()
         .safeAreaInset(edge: .bottom) {
-            let prompt = Prompts.buildBrief(idea)
-            VStack(spacing: 8) {
-                NavigationLink {
-                    StarterKitView(idea: idea)
-                } label: {
-                    Label(idea.starterKit == nil ? "Starter kit" : "Open starter kit", systemImage: "hammer")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.borderedProminent)
-                HStack(spacing: 12) {
-                    Button {
-                        SecureClipboard.copy(prompt)   // Security: this device only, expires after 10 minutes
-                        copied = true
-                    } label: {
-                        Label(copied ? "Copied" : "Plan it first", systemImage: copied ? "checkmark" : "doc.on.doc")
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityHint("Copies a planning prompt to paste into an AI chat")
-                    ShareLink(item: prompt, subject: Text(idea.title)) {
-                        Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Share planning prompt")
-                }
+            NavigationLink {
+                StarterKitView(idea: idea)
+            } label: {
+                Label(idea.starterKit == nil ? "Starter kit" : "Open starter kit", systemImage: "hammer")
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
+            .buttonStyle(.borderedProminent)
             .frame(maxWidth: Layout.buttonWidth)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)

@@ -153,7 +153,7 @@ enum IdeaImprover {
     You improve one software product idea for a solo builder who will vibe-code it (build it alone with AI coding \
     tools) and sell it without a sales team. A devil's advocate has reviewed it. Rewrite the idea so it answers the \
     strongest objection and, where you can, the evidence the devil's advocate asked for. You may narrow the buyer, \
-    change the price or pricing model, pick a better sales channel, cut scope so it is buildable in about 4 weeks, \
+    change the price or pricing model, pick a better sales channel, cut scope so one person can build all of it with their tool, \
     or sharpen the one-week test. Keep it the same product solving the same buyer problem: don't swap in a \
     different idea. Someone must still pay for it. Don't invent evidence, customers, numbers or competitors' \
     prices; if the objection can only be answered by evidence you don't have, make the one-week test collect it.
@@ -165,8 +165,10 @@ enum IdeaImprover {
     """ + Prompts.untrustedData
 
     /// The rewrite prompt: the idea, its review and its evidence titles.
-    static func rewritePrompt(_ v: IdeaVersion, title: String, evidence: [String], aboutMe: String) -> String {
-        var text = "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe) + "\n\n"
+    static func rewritePrompt(_ v: IdeaVersion, title: String, evidence: [String], aboutMe: String,
+                              tool: BuilderTool = .claudeCode) -> String {
+        var text = "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe)
+        text += "\nBuilder's tool: \(tool.label). The idea must stay \(tool.appTypeForAI).\n\n"
         text += ideaText(v, title: title, evidence: evidence)
         text += "\n\nDevil's advocate:\nStrongest objection: \(v.objection)\nCompetitors: \(v.competitors)\nVerdict: \(v.verdict)"
         if !v.evidenceNeeded.isEmpty { text += "\nEvidence that would raise the score: \(v.evidenceNeeded)" }
@@ -175,8 +177,11 @@ enum IdeaImprover {
 
     /// The review prompt, in the daily scan's shape so the devil's advocate judges it the same way. Only the new
     /// version is shown, not the earlier rounds.
-    static func reviewPrompt(_ v: IdeaVersion, title: String, evidence: [String], aboutMe: String) -> String {
-        "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe) + "\n\nIdeas:\n\n" + ideaText(v, title: title, evidence: evidence)
+    static func reviewPrompt(_ v: IdeaVersion, title: String, evidence: [String], aboutMe: String,
+                             tool: BuilderTool = .claudeCode) -> String {
+        "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe)
+            + "\nBuilder's tool: \(tool.label). Each idea must be \(tool.appTypeForAI).\n\nIdeas:\n\n"
+            + ideaText(v, title: title, evidence: evidence)
     }
 
     private static func ideaText(_ v: IdeaVersion, title: String, evidence: [String]) -> String {

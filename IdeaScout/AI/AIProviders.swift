@@ -128,7 +128,7 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
     var dataNote: String? {
         switch self {
         case .qwen: "Uses Alibaba's US (Virginia) service address."
-        case .deepseek, .glm, .kimi, .mimo: "Your About me and business challenges are sent to servers run by a company in China."
+        case .deepseek, .glm, .kimi, .mimo: "Your About me and pain points are sent to servers run by a company in China."
         case .apple: "Runs entirely on this device."
         default: nil
         }
@@ -171,17 +171,19 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
 
     /// Models offered in Settings. The first is the recommended default. Prices are list prices as checked in
     /// October 2026; Claude's were verified against Anthropic's model price table (dated 6 Oct 2026) on 27 Oct 2026,
-    /// and Fable 5.2's against Anthropic's pricing page on 10 Nov 2026.
+    /// and Fable 5.2's against Anthropic's pricing page on 10 Nov 2026. On 11 Nov 2026 every price was rechecked against
+    /// each provider's pricing page, and the cached-input prices of Sonnet 5.5, GPT-6.1 Sol, Grok 4.3 and Qwen 3.8 Max
+    /// were corrected or filled in (DeepSeek's peak price is kept as a safe upper guide).
     /// Labels compare cost with the default model. Any other model can be typed in with its own price.
     var models: [ModelOption] {
         switch self {
         case .claude:
-            [ModelOption(id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", price: ModelPrice(input: 2, output: 10, cachedInput: 0.2)),
+            [ModelOption(id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", price: ModelPrice(input: 2, output: 10, cachedInput: 0.1)),
              ModelOption(id: "claude-opus-5-5", label: "Claude Opus 5.5 (sharper, 2× cost)", price: ModelPrice(input: 4, output: 20, cachedInput: 0.2)),
              ModelOption(id: "claude-fable-5-2", label: "Claude Fable 5.2 (most capable, 4× cost)",
                          price: ModelPrice(input: 8, output: 40, cachedInput: 0.2))]
         case .openai:
-            [ModelOption(id: "gpt-6.1-sol", label: "GPT-6.1 Sol", price: ModelPrice(input: 2, output: 10)),
+            [ModelOption(id: "gpt-6.1-sol", label: "GPT-6.1 Sol", price: ModelPrice(input: 2, output: 10, cachedInput: 0.1)),
              ModelOption(id: "gpt-6-astra", label: "GPT-6 Astra (most capable)", price: ModelPrice(input: 10, output: 50, cachedInput: 1))]
         case .gemini:
             [ModelOption(id: "gemini-4-argon", label: "Gemini 4 Argon", price: Self.geminiArgonPrice()),
@@ -189,11 +191,11 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
              ModelOption(id: "gemma-4-31b-it", label: "Gemma 4 31B (open, free within limits)", price: ModelPrice(input: 0, output: 0),
                          capabilities: ModelCapabilities(json: .prompt, reasoningEffort: false, systemMessage: false))]
         case .grok:
-            [ModelOption(id: "grok-4.3", label: "Grok 4.3", price: ModelPrice(input: 1.25, output: 2.5))]
+            [ModelOption(id: "grok-4.3", label: "Grok 4.3", price: ModelPrice(input: 1.25, output: 2.5, cachedInput: 0.2))]
         case .deepseek:
             [ModelOption(id: "deepseek-flash", label: "DeepSeek V4.1", price: ModelPrice(input: 0.3, output: 1.2))]
         case .qwen:
-            [ModelOption(id: "qwen3.8-max", label: "Qwen 3.8 Max", price: ModelPrice(input: 2, output: 6))]
+            [ModelOption(id: "qwen3.8-max", label: "Qwen 3.8 Max", price: ModelPrice(input: 2, output: 6, cachedInput: 0.25))]
         case .glm:
             [ModelOption(id: "glm-5.3", label: "GLM-5.3", price: ModelPrice(input: 1.4, output: 4.4, cachedInput: 0.26))]
         case .kimi:

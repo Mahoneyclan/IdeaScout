@@ -12,7 +12,7 @@ import Foundation
 enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     /// The first eleven sources. Each one's display name and signal are in `label` and `signal`.
     case github, hackerNews, vibeCode, huggingFace, devTo, games, painPoints, ycombinator, appStore, research, lobsters
-    /// Business sources added later: My Business Challenges, App Store complaints, Atlassian Marketplace and AusTender.
+    /// Business sources added later: My pain points (first called My Business Challenges), App Store complaints, Atlassian Marketplace and AusTender.
     case fieldNotes, appReviews, atlassian, ausTender
     /// Consumer source (10 Nov 2026): 1–2 star reviews of top-grossing consumer apps.
     case consumerReviews
@@ -35,7 +35,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .appStore: "App Store top paid"
         case .research: "AI research"
         case .lobsters: "Lobsters"
-        case .fieldNotes: "My business challenges"
+        case .fieldNotes: "My pain points"
         case .appReviews: "App Store complaints"
         case .consumerReviews: "Consumer app complaints"
         case .atlassian: "Atlassian Marketplace"
@@ -124,7 +124,7 @@ struct FetchedItem: Equatable, Sendable {
     var url: URL
     /// Stars / points / votes (or rank, value in $k): higher = more traction; compared only within a source.
     var score: Int
-    /// When it was posted. Sources with no dates at all (charts, Y Combinator, Atlassian, business challenges)
+    /// When it was posted. Sources with no dates at all (charts, Y Combinator, Atlassian, the user's pain points)
     /// use the start of the window, so they never look "new". Steam games, and items whose date is missing
     /// from itch.io, Hugging Face papers or AusTender, are dated at fetch time instead.
     var postedAt: Date
