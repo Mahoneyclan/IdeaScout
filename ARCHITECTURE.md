@@ -38,6 +38,7 @@ KillerIdea  – an AI business idea that survived the devil's advocate; updated 
 ```
 - Deleting or replacing a Digest deletes its Themes and their Items (cascade). Idea and KillerIdea are independent and survive.
 - A KillerIdea can hold one starter kit: `starterKitJSON` (a `StarterKit` as JSON, whose property names are stored too), `starterKitMadeAt` and `starterKitModel`. The chosen coding tool is the setting `starterKit.tool`.
+- "Improve this idea" (`IdeaImprover` for the rules and prompts, `DigestService+Improve` for the paid calls) saves its last run on the idea as `improvementJSON` (an `IdeaImprover.Run` of `IdeaVersion`s, whose property names are stored too). Keeping a version copies it onto the idea and saves the earlier text in `originalVersionJSON` for undo, with `improvedAt`; a refresh that proposes the idea again clears both.
 - A KillerIdea records every day it was proposed (`daysSeen`), so History can show each day's ideas. Dismissing hides it; saving bookmarks it.
 - Settings live in UserDefaults (`Support/AppSettings.swift`); API keys live in the Keychain (`Support/Keychain.swift`); the cost ledger is JSON in UserDefaults (`Support/UsageTracker.swift`).
 

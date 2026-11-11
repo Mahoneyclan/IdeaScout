@@ -104,13 +104,15 @@ enum TestMode {
         ///   - prompt: Ignored.
         ///   - schema: Ignored.
         ///   - effort: Ignored.
-        ///   - feature: Picks the reply: "Trends", "Starter kit", "Killer ideas", or the review for anything else.
+        ///   - feature: Picks the reply: "Trends", "Starter kit", "Improve idea", "Killer ideas", or the
+        ///     review for anything else (the improved idea's review scores the same, so the run stops after one round).
         /// - Returns: The reply in Claude's message format.
         /// - Throws: Only if the fixed reply can't be serialised, which doesn't happen.
         func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
             let json = switch feature {
             case "Trends": #"{"themes":[{"title":"Invoice automation","summary":"Tools that chase unpaid invoices.","opportunities":["Chaser for trades"],"item_numbers":[2,3],"novelty":4,"novelty_reason":"r","viability":4,"viability_reason":"r","opportunity_gap":4,"opportunity_gap_reason":"r"}],"translations":[],"pain_clusters":[{"title":"Chasing invoices","buyer":"Bookkeeper","workaround":"Email","pay_signals":"none seen","summary":"s","item_numbers":[1]}],"noise_numbers":[]}"#
             case "Starter kit": #"{"spec":"A web app that chases unpaid invoices for small trades businesses.","screens":[{"name":"Invoices","purpose":"See which invoices are overdue."}],"data_model":[{"entity":"Invoice","fields":["amount (number)","due date (date)"],"notes":"Belongs to one business."}],"stack":[{"part":"Website","choice":"Next.js on Vercel","why":"Free tier."}],"monthly_cost":"About $25, mostly email sending.","leave_out":["Payments: link to the existing invoice instead."],"first_slice":"Import invoices and list the overdue ones.","done_when":["Overdue invoices are listed."],"project_rules":["Keep keys out of the code."]}"#
+            case "Improve idea": #"{"pitch":"Chases unpaid invoices for plumbers, inside Xero.","buyer":"Plumbing business owners","pricing":"$29/month","replaces":"Manual follow-up emails","channel":"Xero App Store","why_now":"w","one_week_test":"t","changes":"Narrowed to plumbers."}"#
             case "Killer ideas": #"{"ideas":[{"title":"InvoiceChaser","pitch":"Chases unpaid invoices automatically.","buyer":"Small trades businesses","pricing":"$49/month","why_now":"w","one_week_test":"t","replaces":"Manual follow-up emails","channel":"Xero App Store","evidence_numbers":[1],"same_as":""}]}"#
             default: #"{"reviews":[{"title":"InvoiceChaser","survives":true,"objection":"o","competitors":"none found","verdict":"v","pain":4,"willing_to_pay":4,"timing":4,"gap":4,"fit":4,"buildability":4,"channel_score":4,"evidence_needed":"e"}]}"#
             }

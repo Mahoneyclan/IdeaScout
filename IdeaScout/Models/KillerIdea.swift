@@ -76,6 +76,12 @@ import SwiftData
     var starterKitMadeAt: Date?
     /// The model ID that made the starter kit.
     var starterKitModel: String = ""
+    /// The last "Improve this idea" run as JSON (see `IdeaImprover.Run` and `improvement`), or empty.
+    var improvementJSON: String = ""
+    /// The idea as it was before a kept improvement, as JSON (see `IdeaVersion`), for "Undo"; empty when not improved.
+    var originalVersionJSON: String = ""
+    /// When an improved version was kept; `nil` when the idea shows the AI's original.
+    var improvedAt: Date?
 
     /// Saves or unsaves the idea. The caller saves the database.
     func toggleSaved() {
@@ -176,5 +182,25 @@ import SwiftData
     /// - Returns: The key; empty if the title has no letters or digits.
     static func key(for title: String) -> String {
         title.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    /// The last improvement run, if any.
+    var improvement: IdeaImprover.Run? {
+        get { Self.decode(improvementJSON) }
+        set { improvementJSON = Self.encode(newValue) }
+    }
+
+    /// The idea before a kept improvement, if any.
+    var originalVersion: IdeaVersion? {
+        get { Self.decode(originalVersionJSON) }
+        set { originalVersionJSON = Self.encode(newValue) }
+    }
+
+    private static func decode<T: Decodable>(_ json: String) -> T? {
+        json.isEmpty ? nil : try? JSONDecoder().decode(T.self, from: Data(json.utf8))
+    }
+
+    private static func encode<T: Encodable>(_ value: T?) -> String {
+        value.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) } ?? ""
     }
 }

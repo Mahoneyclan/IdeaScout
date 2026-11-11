@@ -94,6 +94,10 @@ final class DigestService {
     var lastError: String?
     /// The key of the idea whose starter kit is being made, or `nil`. Only one kit is made at a time.
     var makingStarterKitFor: String?
+    /// The key of the idea being improved, or `nil`. Only one improvement runs at a time.
+    var improvingIdea: String?
+    /// What the running improvement is doing, for the screen ("Round 2 of 3: rewriting…").
+    var improveStep = ""
 
     /// The database, set by IdeaScoutApp at launch. Refreshes do nothing until it's set.
     @ObservationIgnored var container: ModelContainer?

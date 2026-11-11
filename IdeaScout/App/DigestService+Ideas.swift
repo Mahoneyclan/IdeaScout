@@ -19,7 +19,8 @@ extension DigestService {
     }
 
     /// Adds new killer ideas, or updates ones that came back (they climb the leaderboard). An idea matches an
-    /// existing one by the AI's `same_as` title or by its own title. Coming back un-dismisses it and records the day.
+    /// existing one by the AI's `same_as` title or by its own title. Coming back un-dismisses it and records the day,
+    /// and the new text replaces any kept improvement.
     /// Two results with the same title in one batch become one idea (the later one updates the earlier), because the
     /// key is unique and a second insert would silently replace the first.
     func mergeKillerIdeas(_ results: [KillerEngine.Result], items: [FetchedItem], context: ModelContext) {
@@ -46,6 +47,9 @@ extension DigestService {
             idea.verdict = r.evidenceNeeded.isEmpty ? r.verdict : "\(r.verdict) Evidence that would raise the score: \(r.evidenceNeeded)"
             idea.pain = r.pain; idea.willingToPay = r.willingToPay; idea.timing = r.timing; idea.gap = r.gap; idea.fit = r.fit
             idea.buildability = r.buildability; idea.channelScore = r.channelScore
+            // The scan's new version replaces any kept improvement, so there's nothing left to undo.
+            idea.improvedAt = nil
+            idea.originalVersionJSON = ""
             let evidence = c.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
             if !evidence.isEmpty {
                 idea.evidenceTitles = evidence.map(\.title)

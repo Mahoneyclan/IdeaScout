@@ -1,6 +1,6 @@
 // AppSettings+Costs.swift
-// Cost estimates shown before paid AI actions: a refresh and "Suggest variants", and the cost text
-// on buttons and confirmations.
+// Cost estimates shown before paid AI actions (a refresh, "Suggest variants", a starter kit, "Improve this idea"),
+// and the cost text on buttons and confirmations.
 
 import Foundation
 
@@ -80,6 +80,23 @@ extension AppSettings {
     static func starterKitCost() -> Double? {
         guard hasConsent(provider), let price = chosenModelPrice() else { return nil }
         return estimatedStarterKitCost(price: price)
+    }
+
+    /// Rough cost of a full "Improve this idea" run (every round), in US dollars. Each round assumes 3,000 input
+    /// tokens (instructions and the idea, sent twice) and 5,000 output tokens (the rewrite and the review, plus the
+    /// model's thinking, billed as output). Most runs stop early, so treat it as an upper guide.
+    /// - Parameter price: The chosen model's price.
+    /// - Returns: The estimated cost.
+    static func estimatedImproveCost(price: ModelPrice) -> Double {
+        price.cost(input: 3_000, output: 5_000) * Double(IdeaImprover.maxRounds)
+    }
+
+    /// The estimated cost of improving an idea with the current settings.
+    /// - Returns: The cost when a paid cloud AI is chosen, agreed to and has a key; `nil` when it can't run.
+    /// - Note: Reads the Keychain, so call it on demand rather than in every view update.
+    static func improveCost() -> Double? {
+        guard hasConsent(provider), let price = chosenModelPrice() else { return nil }
+        return estimatedImproveCost(price: price)
     }
 
     /// A cost for buttons and confirmations: "~$0.02", or "<$0.01" when it would round to nothing.

@@ -133,4 +133,25 @@ final class IdeaScoutUITests: XCTestCase {
         button(app, startingWith: "Cursor").tap()
         XCTAssertTrue(button(app, startingWith: "Share for Cursor").waitForExistence(timeout: 5))
     }
+
+    func testIdeaIsImprovedAndTheVersionKept() {
+        let app = launch("-ui-skip-welcome")
+        let idea = element(app, containing: "InvoiceChaser")
+        XCTAssertTrue(idea.waitForExistence(timeout: 20))
+        idea.tap()
+        let improve = button(app, startingWith: "Improve this idea")
+        for _ in 0..<4 where !improve.isHittable { app.swipeUp() }
+        improve.tap()
+        let start = button(app, startingWith: "Improve this idea")
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(element(app, containing: "Round 1").waitForExistence(timeout: 10), "a round should finish")
+        let keep = button(app, startingWith: "Keep this version")
+        for _ in 0..<4 where !keep.exists { app.swipeUp() }
+        XCTAssertTrue(keep.exists)
+        keep.tap()
+        let undo = button(app, startingWith: "Undo improvement")
+        for _ in 0..<4 where !undo.exists { app.swipeDown() }
+        XCTAssertTrue(undo.exists, "keeping a version should offer undo")
+    }
 }

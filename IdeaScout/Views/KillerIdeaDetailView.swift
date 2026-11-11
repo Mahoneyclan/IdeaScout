@@ -1,6 +1,6 @@
 // KillerIdeaDetailView.swift
-// The idea detail screen: the opportunity, one-week test, devil's advocate, scores and evidence links, with
-// the starter kit as the main action and the build brief as "Plan it first".
+// The idea detail screen: the opportunity, one-week test, devil's advocate (with "Improve this idea"), scores and
+// evidence links, with the starter kit as the main action and the build brief as "Plan it first".
 
 import SwiftUI
 import SwiftData
@@ -28,6 +28,10 @@ struct KillerIdeaDetailView: View {
                     KillerScoreBadge(score: idea.killerScore)
                 }
                 KillerStatusLabel(score: idea.killerScore)
+                if let improved = idea.improvedAt {
+                    Label("Improved on \(improved.formatted(date: .abbreviated, time: .omitted))", systemImage: "arrow.up.circle")
+                        .foregroundStyle(.secondary)
+                }
                 Text(idea.pitch)
             }
             Section("The opportunity") {
@@ -72,6 +76,12 @@ struct KillerIdeaDetailView: View {
                     Text("Verdict").font(.subheadline.bold())
                     Text(idea.verdict)
                 }
+                NavigationLink {
+                    ImproveIdeaView(idea: idea)
+                } label: {
+                    Label("Improve this idea", systemImage: "arrow.up.circle")
+                }
+                .frame(minHeight: 44)
             }
             Section {
                 ForEach(KillerScoreMetrics.metrics, id: \.name) { metric in
