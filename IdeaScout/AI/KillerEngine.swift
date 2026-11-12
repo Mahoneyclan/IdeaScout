@@ -50,6 +50,10 @@ struct KillerEngine {
         var fillsGap = false
         /// The competitors the generator believes exist, with their cheapest comparable plan.
         var competitors: [Competitor] = []
+        /// Sold once or by subscription, as the generator proposed; `nil` in replies from older prompts.
+        var salesModel: SalesModel?
+        /// Why that way of selling suits it.
+        var salesModelReason = ""
     }
 
     /// The devil's advocate's verdict on one candidate. Scores are clamped to 0–5 when parsed.
@@ -92,6 +96,8 @@ struct KillerEngine {
         var copyRisk = ""
         /// Will customers keep paying, or leave after one use or for the next cheaper app?
         var keepPaying = ""
+        /// How it should be sold and what it costs to run, as the critic judged; `nil` in replies from older prompts.
+        var salesPlan: SalesPlan?
     }
 
     /// A kept idea with its (evidence-capped) review, judged on the five principles.
@@ -104,6 +110,12 @@ struct KillerEngine {
         var tool = BuilderTool.claudeCode
         /// How many of the cited items show people paying (proof for "people will pay").
         var payEvidence = 0
+        /// The kind of app, for its yearly costs.
+        var appType = BuilderTool.AppType.onDevice
+        /// The critic's sales plan, or the generator's choice of sales model with no costs if the critic gave none.
+        var salesPlan: SalesPlan? {
+            review.salesPlan ?? candidate.salesModel.map { SalesPlan(model: $0, reason: candidate.salesModelReason) }
+        }
         /// The critic's competitors, with a known price from the generator where the critic had none; the generator's
         /// when the critic named none (unless the idea fills a gap, when none is right).
         var competitors: [Competitor] { KillerEngine.mergedCompetitors(critic: review.competitorsFound, generator: candidate.competitors,
@@ -111,7 +123,8 @@ struct KillerEngine {
         /// The five principles, in the owner's order.
         var outcomes: [TestOutcome] {
             KillerEngine.outcomes(review: review, price: candidate.monthlyPrice, competitors: competitors,
-                                  fillsGap: candidate.fillsGap, tool: tool, payEvidence: payEvidence)
+                                  fillsGap: candidate.fillsGap, tool: tool, payEvidence: payEvidence,
+                                  salesPlan: salesPlan)
         }
         /// The killer score: the average of the five principles.
         var score: Double { FiveTests.score(outcomes) }
@@ -150,7 +163,8 @@ struct KillerEngine {
         await onCritique()
         let reviews = try await critique(candidates, items: context.items, aboutMe: context.aboutMe, tool: context.tool,
                                        appType: context.appType)
-        return Self.survivors(candidates: candidates, reviews: reviews, items: context.items, tool: context.tool)
+        return Self.survivors(candidates: candidates, reviews: reviews, items: context.items, tool: context.tool,
+                              appType: context.appType ?? context.tool.defaultAppType)
     }
 
     /// Ideas scored before the five principles: no single measure may be this low (still used for older ideas).
@@ -170,16 +184,17 @@ struct KillerEngine {
     ///   - reviews: The pass 2 reviews; a candidate with no matching review is dropped.
     ///   - items: The item list, to check each idea's evidence.
     ///   - tool: The builder's tool, for the build cost.
+    ///   - appType: The kind of app, for its yearly costs.
     /// - Returns: Up to `maxPerDay` results: the ones the devil's advocate backed first, then highest killer score.
     static func survivors(candidates: [Candidate], reviews: [Review], items: [FetchedItem] = [],
-                          tool: BuilderTool = .claudeCode) -> [Result] {
+                          tool: BuilderTool = .claudeCode, appType: BuilderTool.AppType = .onDevice) -> [Result] {
         let byKey = Dictionary(reviews.map { (KillerIdea.key(for: $0.title), $0) }, uniquingKeysWith: { first, _ in first })
         return candidates.compactMap { candidate in
             guard let raw = byKey[KillerIdea.key(for: candidate.title)],
                   raw.buildability >= FiveTests.minimumVibeCodable else { return nil }
             let cited = evidence(for: candidate, in: items)
             return Result(candidate: candidate, review: capped(raw, evidence: cited), tool: tool,
-                          payEvidence: payEvidenceCount(cited))
+                          payEvidence: payEvidenceCount(cited), appType: appType)
         }
         .sorted { $0.review.survives != $1.review.survives ? $0.review.survives : $0.score > $1.score }
         .prefix(maxPerDay)
@@ -200,15 +215,19 @@ struct KillerEngine {
         }
     }
 
-    /// The five principles for a review and the idea's prices.
+    /// The five principles for a review and the idea's prices. With a sales plan, test 5 runs the first-year sums
+    /// (`PaybackSums`); ideas judged before sales plans keep the older build-cost-only payback.
     static func outcomes(review r: Review, price: Double, competitors: [Competitor], fillsGap: Bool,
-                         tool: BuilderTool, payEvidence: Int) -> [TestOutcome] {
+                         tool: BuilderTool, payEvidence: Int, salesPlan: SalesPlan?) -> [TestOutcome] {
         FiveTests.outcomes(vibeCodable: r.buildability,
                            willPay: FiveTests.willPay(score: r.willingToPay, competitors: competitors, payEvidence: payEvidence),
                            pain: r.pain,
                            cheaper: FiveTests.cheaper(price: price, competitors: competitors, fillsGap: fillsGap),
-                           coversBuild: FiveTests.coversBuild(buildDays: r.buildDays, customers: r.likelyCustomers,
-                                                              price: price, tool: tool, channelScore: r.channelScore))
+                           coversBuild: salesPlan.map {
+                               PaybackSums.coversBuild(plan: $0, monthlyPrice: price, customers: r.likelyCustomers,
+                                                       buildDays: r.buildDays, tool: tool, channelScore: r.channelScore)
+                           } ?? FiveTests.coversBuild(buildDays: r.buildDays, customers: r.likelyCustomers,
+                                                      price: price, tool: tool, channelScore: r.channelScore))
     }
 
     /// Sources that count as evidence of pain: complaints and the user's own pain points.

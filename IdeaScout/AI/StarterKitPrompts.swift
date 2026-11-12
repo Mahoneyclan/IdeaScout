@@ -150,7 +150,8 @@ enum StarterKitPrompts {
             self.appType = appType
             if idea.engineVersion >= 1 {
                 offer = KillerEngine.offerText(oneJob: idea.oneJob, keep: idea.keepFeatures, leaveOut: idea.leaveOutFeatures,
-                                               price: idea.monthlyPrice, competitors: idea.competitorList, fillsGap: idea.fillsGap)
+                                               price: idea.monthlyPrice, competitors: idea.competitorList, fillsGap: idea.fillsGap,
+                                               salesModel: idea.salesPlan?.model)
             }
         }
     }

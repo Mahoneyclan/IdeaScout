@@ -105,7 +105,7 @@ struct KillerIdeaCard: View {
             IdeaKindTag(idea: idea)
             Text(idea.pitch).font(.subheadline)
             Text("\(idea.buyer) · " + (idea.engineVersion >= 1 && idea.monthlyPrice >= FiveTests.minimumPrice
-                                         ? FiveTests.money(idea.monthlyPrice) + " a month" : idea.pricing))
+                                         ? (idea.salesPlan.map { "\($0.model.label), " } ?? "") + idea.priceText : idea.pricing))
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 if let weakest = idea.principles.min(by: { $0.score < $1.score }) {

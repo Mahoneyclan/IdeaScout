@@ -82,7 +82,8 @@ struct FiveTestsTests {
             let items = try #require(((schema["properties"] as? [String: Any])?[list] as? [String: Any])?["items"] as? [String: Any])
             return try #require(items["required"] as? [String])
         }
-        let added = ["one_job", "keep_features", "leave_out_features", "fills_gap", "price_per_month_usd"]
+        let added = ["one_job", "keep_features", "leave_out_features", "fills_gap", "price_per_month_usd", "sales_model",
+                     "sales_model_reason"]
         let ideaFields = try required(KillerEngine.candidateSchema, list: "ideas")
         for field in added + ["competitors"] {
             #expect(ideaFields.contains(field))
@@ -90,7 +91,8 @@ struct FiveTestsTests {
                     "instructions should describe \(field)")
         }
         let reviewFields = try required(KillerEngine.reviewSchema, list: "reviews")
-        for field in ["competitors_found", "build_days", "likely_customers", "follow_risk", "copy_risk", "keep_paying"] {
+        for field in ["competitors_found", "build_days", "likely_customers", "follow_risk", "copy_risk", "keep_paying",
+                      "sales_model", "running_cost_per_customer_usd", "other_yearly_costs_usd", "monthly_churn_percent"] {
             #expect(reviewFields.contains(field) && KillerEngine.critiqueInstructions.contains(field))
         }
         #expect(KillerEngine.competitorSchema["required"] as? [String] == ["name", "cheapest_plan", "price_per_month_usd", "is_free"])

@@ -55,6 +55,7 @@ extension DigestService {
             idea.followRisk = r.followRisk; idea.copyRisk = r.copyRisk; idea.keepPaying = r.keepPaying
             idea.criticRejected = !r.survives
             idea.payEvidenceCount = result.payEvidence
+            idea.salesPlan = result.salesPlan; idea.appTypeRaw = result.appType.rawValue
             // The scan's new version replaces any kept improvement, so there's nothing left to undo.
             idea.improvedAt = nil
             idea.originalVersionJSON = ""

@@ -111,6 +111,11 @@ import SwiftData
     var criticRejected = false
     /// How many cited items show people paying: with a paid competitor, the proof for "people will pay".
     var payEvidenceCount = 0
+    /// How it's sold and what it costs to run, as JSON (see `SalesPlan` and `salesPlan`); empty for ideas judged before
+    /// sales plans (owner, 12 Nov 2026), which keep the older build-cost-only payback until they come back.
+    var salesPlanJSON: String = ""
+    /// The kind of app it was judged as (`BuilderTool.AppType` raw value), for its yearly costs; empty uses the tool's.
+    var appTypeRaw: String = ""
 
     /// Saves or unsaves the idea. The caller saves the database.
     func toggleSaved() {
@@ -141,6 +146,20 @@ import SwiftData
     /// The tool the idea was judged for.
     var builderTool: BuilderTool { BuilderTool(rawValue: builderToolRaw) ?? .claudeCode }
 
+    /// The kind of app it was judged as.
+    var appType: BuilderTool.AppType { BuilderTool.AppType(rawValue: appTypeRaw) ?? builderTool.defaultAppType }
+
+    /// How it's sold and what it costs to run, or `nil` for ideas judged before sales plans.
+    var salesPlan: SalesPlan? {
+        get { Self.decode(salesPlanJSON) }
+        set { salesPlanJSON = Self.encode(newValue) }
+    }
+
+    /// The price as the customer sees it: "$24 once" or "$3 a month".
+    var priceText: String {
+        PaybackSums.priceText(salesPlan?.model ?? .subscription, monthlyPrice: monthlyPrice)
+    }
+
     /// The five principles, worked out from the stored scores and prices (empty for older ideas).
     var principles: [TestOutcome] {
         guard engineVersion >= 1 else { return [] }
@@ -149,8 +168,11 @@ import SwiftData
             willPay: FiveTests.willPay(score: willingToPay, competitors: competitorList, payEvidence: payEvidenceCount),
             pain: pain,
             cheaper: FiveTests.cheaper(price: monthlyPrice, competitors: competitorList, fillsGap: fillsGap),
-            coversBuild: FiveTests.coversBuild(buildDays: buildDays, customers: likelyCustomers, price: monthlyPrice,
-                                               tool: builderTool, channelScore: channelScore))
+            coversBuild: salesPlan.map {
+                PaybackSums.coversBuild(plan: $0, monthlyPrice: monthlyPrice, customers: likelyCustomers, buildDays: buildDays,
+                                        tool: builderTool, channelScore: channelScore)
+            } ?? FiveTests.coversBuild(buildDays: buildDays, customers: likelyCustomers, price: monthlyPrice,
+                                       tool: builderTool, channelScore: channelScore))
     }
 
     /// The competitors and their prices.

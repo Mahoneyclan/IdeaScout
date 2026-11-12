@@ -1,7 +1,7 @@
 // KillerEngine+Prompts.swift
-// The idea step's two AI calls: what the AI is told (instructions and prompts), the reply shapes (JSON schemas) and
-// the parsers. Prompts and schemas move together: field names here must match the parsers. Split from
-// KillerEngine.swift, which keeps the types and the rules applied in code.
+// Pass 1 of the idea step (proposing ideas): instructions, prompt, reply shape (JSON schema) and parser, plus the
+// competitor and price cleaning both passes share. Prompts and schemas move together: field names here must match
+// the parsers. The devil's advocate is in KillerEngine+Critique.swift; the rules applied in code in KillerEngine.swift.
 
 import Foundation
 
@@ -57,8 +57,11 @@ extension KillerEngine {
     cheapest comparable plan for one user, a one-off price divided by 12, 0 if you don't know; give a price only if \
     you are fairly sure of it; and is_free, true only if it is free to use; an empty list if no app does this job); fills_gap (true only if no app does this job); \
     price_per_month_usd (your recommended price per customer per month in US dollars, a one-off price divided by 12; \
-    ideally half the cheapest competitor's or less); pricing (the price as customers would see it, for example \
-    "$3 a month" or "$24 once"); replaces (the manual task or app it replaces and roughly what that costs the buyer \
+    ideally half the cheapest competitor's or less); sales_model ("one_off" for a single purchase or "subscription"): \
+    choose one_off when the app costs nothing per customer to keep running (for example it runs entirely on the \
+    device), and subscription when each customer costs money every month (AI calls, hosting, data) or gets something \
+    new every month; sales_model_reason (one sentence on why); pricing (the price as customers would see it, for \
+    example "$3 a month" or "$24 once", matching the sales model); replaces (the manual task or app it replaces and roughly what that costs the buyer \
     today); channel (the named place where the first buyers would be found); why now (what recently became \
     possible); a one-week test (the cheapest way to check demand in 7 days, with a pass mark); the numbers of the \
     projects that are evidence for it; and same_as: if the idea is essentially the same as one on the existing \
@@ -105,6 +108,9 @@ extension KillerEngine {
         "additionalProperties": false,
     ]
 
+    /// "one_off" or "subscription" (the `SalesModel` raw values).
+    static let salesModelSchema: [String: Any] = ["type": "string", "enum": SalesModel.allCases.map(\.rawValue)]
+
     /// JSON Schema for pass 1. Keep in sync with `parseCandidates` and the instructions.
     static let candidateSchema: [String: Any] = [
         "type": "object",
@@ -123,10 +129,11 @@ extension KillerEngine {
                         "leave_out_features": ["type": "array", "items": ["type": "string"]],
                         "competitors": ["type": "array", "items": competitorSchema],
                         "fills_gap": ["type": "boolean"], "price_per_month_usd": ["type": "number"],
+                        "sales_model": salesModelSchema, "sales_model_reason": ["type": "string"],
                     ] as [String: Any],
                     "required": ["title", "pitch", "buyer", "pricing", "why_now", "one_week_test", "replaces", "channel",
                                  "evidence_numbers", "same_as", "one_job", "keep_features", "leave_out_features",
-                                 "competitors", "fills_gap", "price_per_month_usd"],
+                                 "competitors", "fills_gap", "price_per_month_usd", "sales_model", "sales_model_reason"],
                     "additionalProperties": false,
                 ],
             ],
@@ -186,6 +193,7 @@ extension KillerEngine {
                 let competitors: [CompetitorReply]?
                 let fills_gap: Bool?
                 let price_per_month_usd: Double?
+                let sales_model, sales_model_reason: String?
             }
             let ideas: [I]
         }
@@ -195,184 +203,9 @@ extension KillerEngine {
                       replaces: $0.replaces ?? "", channel: $0.channel ?? "", oneJob: StarterKit.clean($0.one_job ?? "", 300),
                       keepFeatures: cleanList($0.keep_features), leaveOutFeatures: cleanList($0.leave_out_features),
                       monthlyPrice: cleanPrice($0.price_per_month_usd), fillsGap: $0.fills_gap ?? false,
-                      competitors: competitors($0.competitors))
-        }
-    }
-
-    // MARK: - Pass 2: devil's advocate
-
-    /// Pass 2 instructions: try to kill each idea using its evidence, with a defined meaning for every
-    /// score level; no invented competitor prices. Field names must match `reviewSchema`.
-    static let critiqueInstructions = """
-    You are a blunt, experienced investor playing devil's advocate for a solo builder who will vibe-code the \
-    product (build it alone with AI coding tools) and sell it without a sales team. For each product idea, read its \
-    cited evidence and try hard to kill it: name competitors you are confident exist, question whether the \
-    buyer would really pay for it, whether one person could really build all of it with the builder's tool as the \
-    kind of app given, and whether the named channel would \
-    really reach buyers. Check the idea's competitors and prices: correct them, and list in competitors_found the \
-    products it would really compete with (up to 3), each with name, cheapest_plan, price_per_month_usd (the cheapest \
-    comparable plan for one user, a one-off price divided by 12) and is_free (true only if it is free to use); an \
-    empty list if no app does this job. Give a price only if you are sure of it, otherwise 0. Don't invent facts.
-    Score each 1-5 (be strict; 5 is rare):
-    - pain: 1 nice-to-have; 3 a recurring problem people work around; 5 costly and frequent, shown in 2 or more independent evidence items
-    - willing_to_pay: 1 no sign anyone spends money here; 3 people or businesses pay for nearby products; 5 buyers already pay for a worse product or name a budget
-    - timing: 1 could have been built years ago; 3 recent tools make it easier; 5 a new capability, rule or price makes it possible or required now
-    - gap: 1 well served by existing products; 3 options exist but leave a clear segment unhappy; 5 no credible option
-    - fit: 1 needs skills or access the person lacks; 3 unknown or neutral; 5 uses their domain experience or access
-    - buildability: 1 the builder's tool can't build it (it needs a team, hardware, regulated data or many deep \
-    integrations); 3 one person could build it with the tool, but with real difficulty; 5 one person could build all \
-    of it with the tool, simply
-    - channel_score: 1 needs a sales team or cold outreach; 3 buyers are reachable but there is no obvious place they \
-    look; 5 a named marketplace or community where these buyers already shop for tools like this
-    Mark ideas down hard if there is no clear buyer who would pay, or no realistic way for it to make money. For \
-    consumer ideas, also judge whether the channel reaches buyers without a large advertising budget.
-    Estimate build_days (days for one person to build a first version people would pay for, with their tool) and \
-    likely_customers (paying customers likely in the first year from the named channel, assuming the app stays small; \
-    be realistic, often 10 to 200). Answer in one sentence each: follow_risk (would the competitors follow with a \
-    cheaper or simpler version?), copy_risk (what stops another vibe coder copying it?) and keep_paying (will \
-    customers keep paying, or leave after one use or for the next cheaper app?).
-    Judge whether the one-week test would really show demand. survives is true only if the idea is still worth \
-    a one-week test after your objections. Give the single strongest objection, the main competitors (or "none found"), \
-    a one-sentence verdict, and evidence_needed: the one fact that would most raise the score. Copy each title exactly. \
-    Write everything in English.
-    """ + Prompts.untrustedData
-
-    /// Pass 2: the devil's advocate (feature "Devil's advocate"). Uses high effort because judging is where
-    /// quality matters most.
-    /// - Parameters:
-    ///   - candidates: The pass 1 ideas.
-    ///   - items: The numbered items, to attach each idea's cited evidence.
-    ///   - aboutMe: The user's profile, for the fit score.
-    /// - Returns: One review per idea the critic answered; matched to candidates later by title.
-    /// - Throws: Errors from the AI call or the parser.
-    func critique(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String,
-                  tool: BuilderTool = .claudeCode, appType: BuilderTool.AppType? = nil) async throws -> [Review] {
-        let data = try await llm.client.complete(system: Self.critiqueInstructions,
-                                                 prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe, tool: tool, appType: appType),
-                                                 schema: Self.reviewSchema, effort: "high", feature: "Devil's advocate")
-        return try Self.parseReviews(data)
-    }
-
-    /// The pass 2 prompt: each idea with its pitch, buyer, price, what it replaces, why now, one-week test
-    /// and its cited evidence (200 characters each), so the critic can check claims.
-    /// - Parameters:
-    ///   - candidates: The pass 1 ideas.
-    ///   - items: The numbered items the evidence numbers point into.
-    ///   - aboutMe: The user's profile; "(not provided)" when empty.
-    /// - Returns: The prompt text.
-    static func critiquePrompt(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String,
-                               tool: BuilderTool = .claudeCode, appType: BuilderTool.AppType? = nil) -> String {
-        var text = "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe)
-        text += "\nBuilder's tool: \(tool.label). Each idea must be \(tool.forAI(appType)).\n\nIdeas:"
-        for c in candidates {
-            text += "\n\nTitle: \(c.title)\nPitch: \(c.pitch)\nBuyer: \(c.buyer)\nPricing: \(c.pricing)"
-            if !c.replaces.isEmpty { text += "\nReplaces: \(c.replaces)" }
-            if !c.channel.isEmpty { text += "\nSales channel: \(c.channel)" }
-            text += "\nWhy now: \(c.whyNow)\nOne-week test: \(c.oneWeekTest)"
-            text += Self.offerText(oneJob: c.oneJob, keep: c.keepFeatures, leaveOut: c.leaveOutFeatures,
-                                   price: c.monthlyPrice, competitors: c.competitors, fillsGap: c.fillsGap)
-            let evidence = Self.evidence(for: c, in: items)
-            text += "\nEvidence:" + (evidence.isEmpty ? " (none cited)" : "")
-            for item in evidence {
-                let detail = item.detail.isEmpty ? "" : " — " + String(item.detail.prefix(200))
-                text += "\n- [\(item.source.label)] \(item.title)\(detail)"
-            }
-        }
-        return text
-    }
-
-    /// The idea's job, features, price and competitors as prompt lines (shared with "Improve this idea").
-    static func offerText(oneJob: String, keep: [String], leaveOut: [String], price: Double, competitors: [Competitor],
-                          fillsGap: Bool) -> String {
-        var text = ""
-        if !oneJob.isEmpty { text += "\nOne job: \(oneJob)" }
-        if !keep.isEmpty { text += "\nKeeps: " + keep.joined(separator: "; ") }
-        if !leaveOut.isEmpty { text += "\nLeaves out: " + leaveOut.joined(separator: "; ") }
-        if price > 0 { text += "\nRecommended price per month: \(FiveTests.money(price))" }
-        if fillsGap { text += "\nFills a gap: no app does this job yet" }
-        if !competitors.isEmpty {
-            text += "\nCompetitors: " + competitors.map {
-                "\($0.name) (\($0.plan.isEmpty ? "plan unknown" : $0.plan), "
-                    + ($0.monthlyPrice > 0 ? "\(FiveTests.money($0.monthlyPrice))/month" : "price unknown") + ")"
-            }.joined(separator: "; ")
-        }
-        return text
-    }
-
-    /// The projects an idea cites, by their 1-based numbers in the item list.
-    /// - Parameters:
-    ///   - candidate: The idea whose `evidenceNumbers` to resolve.
-    ///   - items: The item list in prompt order.
-    /// - Returns: The cited items. Numbers outside the list are dropped, since AI output is untrusted.
-    static func evidence(for candidate: Candidate, in items: [FetchedItem]) -> [FetchedItem] {
-        candidate.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
-    }
-
-    /// JSON Schema for pass 2. Keep in sync with `parseReviews` and the instructions.
-    static let reviewSchema: [String: Any] = [
-        "type": "object",
-        "properties": [
-            "reviews": [
-                "type": "array",
-                "items": [
-                    "type": "object",
-                    "properties": [
-                        "title": ["type": "string"], "survives": ["type": "boolean"], "objection": ["type": "string"],
-                        "competitors": ["type": "string"], "verdict": ["type": "string"],
-                        "pain": ["type": "integer"], "willing_to_pay": ["type": "integer"], "timing": ["type": "integer"],
-                        "gap": ["type": "integer"], "fit": ["type": "integer"],
-                        "buildability": ["type": "integer"], "channel_score": ["type": "integer"],
-                        "evidence_needed": ["type": "string"],
-                        "build_days": ["type": "integer"], "likely_customers": ["type": "integer"],
-                        "competitors_found": ["type": "array", "items": competitorSchema],
-                        "follow_risk": ["type": "string"], "copy_risk": ["type": "string"], "keep_paying": ["type": "string"],
-                    ],
-                    "required": ["title", "survives", "objection", "competitors", "verdict", "pain", "willing_to_pay",
-                                 "timing", "gap", "fit", "buildability", "channel_score", "evidence_needed",
-                                 "build_days", "likely_customers", "competitors_found", "follow_risk", "copy_risk",
-                                 "keep_paying"],
-                    "additionalProperties": false,
-                ],
-            ],
-        ],
-        "required": ["reviews"],
-        "additionalProperties": false,
-    ]
-
-    /// Longest believable build, in days; longer estimates are capped.
-    static let maxBuildDays = 365
-    /// Most first-year customers believed for a small app; larger estimates are capped.
-    static let maxLikelyCustomers = 100_000
-
-    /// Decodes the pass 2 reply.
-    /// - Parameter data: The raw reply body.
-    /// - Returns: Reviews with every score clamped to 0–5. A missing buildability or channel score (a reply in
-    ///   the older shape) becomes 0, which `survivors` then rejects as a weak spot.
-    /// - Throws: `DecodingError` or `SummarizerError` if the reply doesn't match `reviewSchema`.
-    static func parseReviews(_ data: Data) throws -> [Review] {
-        /// The reply's JSON shape (field names match the schema).
-        struct Out: Decodable {
-            struct R: Decodable {
-                let title, objection, competitors, verdict: String
-                let survives: Bool
-                let pain, willing_to_pay, timing, gap, fit: Int
-                let buildability, channel_score, build_days, likely_customers: Int?
-                let evidence_needed, follow_risk, copy_risk, keep_paying: String?
-                let competitors_found: [CompetitorReply]?
-            }
-            let reviews: [R]
-        }
-        return try JSONDecoder().decode(Out.self, from: try LLMSummarizer.extractJSON(data)).reviews.map {
-            Review(title: $0.title, survives: $0.survives, objection: $0.objection, competitors: $0.competitors,
-                   verdict: $0.verdict, pain: Ranking.clamp($0.pain), willingToPay: Ranking.clamp($0.willing_to_pay),
-                   timing: Ranking.clamp($0.timing), gap: Ranking.clamp($0.gap), fit: Ranking.clamp($0.fit),
-                   buildability: Ranking.clamp($0.buildability ?? 0), channelScore: Ranking.clamp($0.channel_score ?? 0),
-                   evidenceNeeded: $0.evidence_needed ?? "",
-                   buildDays: min(max($0.build_days ?? 0, 0), maxBuildDays),
-                   likelyCustomers: min(max($0.likely_customers ?? 0, 0), maxLikelyCustomers),
-                   competitorsFound: competitors($0.competitors_found),
-                   followRisk: StarterKit.clean($0.follow_risk ?? "", 300), copyRisk: StarterKit.clean($0.copy_risk ?? "", 300),
-                   keepPaying: StarterKit.clean($0.keep_paying ?? "", 300))
+                      competitors: competitors($0.competitors),
+                      salesModel: $0.sales_model.flatMap(SalesModel.init(rawValue:)),
+                      salesModelReason: StarterKit.clean($0.sales_model_reason ?? "", 300))
         }
     }
 }

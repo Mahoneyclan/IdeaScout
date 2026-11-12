@@ -41,15 +41,17 @@ struct IdeaPrinciplesSections: View {
                  ? "Prices with a link were checked on the web."
                  : "Prices are the AI's best knowledge and haven't been checked on the web.")
         }
-        Section("The money") {
-            LabeledContent("Your price", value: idea.monthlyPrice >= FiveTests.minimumPrice ? FiveTests.money(idea.monthlyPrice) + " a month" : "Not given")
-            LabeledContent("Build", value: (idea.buildDays > 0 ? "about \(idea.buildDays) day\(idea.buildDays == 1 ? "" : "s")" : "time not estimated")
-                           + " · " + FiveTests.money(FiveTests.buildCost(days: idea.buildDays, tool: idea.builderTool))
-                           + " of \(idea.builderTool.label)")
-            LabeledContent("Likely customers, first year", value: "\(idea.likelyCustomers)")
-            if let months = FiveTests.paybackMonths(buildCost: FiveTests.buildCost(days: idea.buildDays, tool: idea.builderTool),
-                                                    customers: idea.likelyCustomers, price: idea.monthlyPrice) {
-                LabeledContent("Pays back the build", value: FiveTests.monthsText(months))
+        if let plan = idea.salesPlan {
+            SalesPlanSection(idea: idea, plan: plan)
+        } else {
+            Section("The money") {
+                LabeledContent("Your price", value: idea.monthlyPrice >= FiveTests.minimumPrice ? FiveTests.money(idea.monthlyPrice) + " a month" : "Not given")
+                LabeledContent("Build", value: buildText)
+                LabeledContent("Likely customers, first year", value: "\(idea.likelyCustomers)")
+                if let months = FiveTests.paybackMonths(buildCost: FiveTests.buildCost(days: idea.buildDays, tool: idea.builderTool),
+                                                        customers: idea.likelyCustomers, price: idea.monthlyPrice) {
+                    LabeledContent("Pays back the build", value: FiveTests.monthsText(months))
+                }
             }
         }
         if !idea.followRisk.isEmpty || !idea.copyRisk.isEmpty || !idea.keepPaying.isEmpty {
@@ -59,6 +61,14 @@ struct IdeaPrinciplesSections: View {
                 if !idea.keepPaying.isEmpty { labelled("Will customers keep paying?", idea.keepPaying) }
             }
         }
+    }
+
+    private var buildText: String { IdeaPrinciplesSections.buildText(idea) }
+
+    /// "about 10 days · $20 of Claude Code".
+    static func buildText(_ idea: KillerIdea) -> String {
+        (idea.buildDays > 0 ? "about \(idea.buildDays) day\(idea.buildDays == 1 ? "" : "s")" : "time not estimated")
+            + " · " + FiveTests.money(FiveTests.buildCost(days: idea.buildDays, tool: idea.builderTool)) + " of \(idea.builderTool.label)"
     }
 
     private func labelled(_ title: String, _ text: String) -> some View {
@@ -150,6 +160,38 @@ struct IdeaKindTag: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(colour.opacity(0.15), in: Capsule())
+        }
+    }
+}
+
+/// The money for an idea with a sales plan: how it's sold and why, the costs, and the first year's sums.
+struct SalesPlanSection: View {
+    let idea: KillerIdea
+    let plan: SalesPlan
+
+    var body: some View {
+        let year = PaybackSums.firstYear(plan: plan, monthlyPrice: idea.monthlyPrice, customers: idea.likelyCustomers,
+                                         buildDays: idea.buildDays, tool: idea.builderTool)
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                LabeledContent(plan.model.label, value: idea.monthlyPrice >= FiveTests.minimumPrice ? idea.priceText : "No price given")
+                if !plan.reason.isEmpty { Text(plan.reason).font(.subheadline).foregroundStyle(.secondary) }
+            }
+            LabeledContent("Build", value: IdeaPrinciplesSections.buildText(idea))
+            LabeledContent("Yearly costs", value: FiveTests.money(plan.otherYearlyCosts))
+            LabeledContent("Running cost per customer", value: FiveTests.money(plan.runningCostPerCustomer) + " a month")
+            if plan.model == .subscription {
+                LabeledContent("Customers leaving",
+                               value: "\(max(plan.monthlyChurnPercent, PaybackSums.minimumChurnPercent).formatted())% a month")
+            }
+            LabeledContent("Customers counted, first year",
+                           value: "\(PaybackSums.cautiousCustomers(idea.likelyCustomers)) (half the guess of \(idea.likelyCustomers))")
+            LabeledContent("First-year profit", value: FiveTests.money(year.profit))
+            LabeledContent("Pays back", value: year.paybackMonth.map { "in about \($0) month\($0 == 1 ? "" : "s")" } ?? "Not within the first year")
+        } header: {
+            Text("The money")
+        } footer: {
+            Text("Customers arrive evenly over the year. Sales keep 85% after the store's fee. The costs and customers are the devil's advocate's estimates; to be cautious, the sums count half its customer guess. Apple's developer fee isn't included.")
         }
     }
 }
