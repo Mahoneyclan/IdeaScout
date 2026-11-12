@@ -1,8 +1,9 @@
 // KillerEngine.swift
 // The idea step of a refresh: two cloud AI calls. Pass 1 proposes 5 money-making ideas from the pain clusters,
-// trends and items; pass 2 plays devil's advocate and scores them. Code then applies the evidence rules
-// and keeps up to 3 survivors, which DigestService saves as KillerIdeas. Ideas are aimed at a solo builder
-// who will vibe-code the product, so each must be buildable by one person and have a named sales channel.
+// trends and items; pass 2 plays devil's advocate and scores them. Code then applies the evidence caps and the
+// owner's five principles (FiveTests.swift) and keeps up to 3, which DigestService saves as KillerIdeas. Only
+// "vibe-codable" is a must; the other principles score and rank. Prompts, schemas and parsers are in
+// KillerEngine+Prompts.swift.
 
 import Foundation
 
@@ -37,6 +38,18 @@ struct KillerEngine {
         var replaces = ""
         /// Where a solo builder would find buyers: a named marketplace, community or search phrase.
         var channel = ""
+        /// The one job the app does.
+        var oneJob = ""
+        /// Features to keep, compared with the competitors.
+        var keepFeatures: [String] = []
+        /// Features to leave out, compared with the competitors.
+        var leaveOutFeatures: [String] = []
+        /// The recommended price per customer per month in US dollars (a one-off price ÷ 12).
+        var monthlyPrice: Double = 0
+        /// No app does this job yet.
+        var fillsGap = false
+        /// The competitors the generator believes exist, with their cheapest comparable plan.
+        var competitors: [Competitor] = []
     }
 
     /// The devil's advocate's verdict on one candidate. Scores are clamped to 0–5 when parsed.
@@ -67,16 +80,41 @@ struct KillerEngine {
         var channelScore: Int
         /// The one fact that would most raise the score.
         var evidenceNeeded = ""
+        /// Days one person would take to build a first version people pay for, with their tool.
+        var buildDays = 0
+        /// Paying customers likely in the first year from the named channel, assuming a small user base.
+        var likelyCustomers = 0
+        /// The competitors and prices the critic found (replace the generator's when given).
+        var competitorsFound: [Competitor] = []
+        /// Would the competitors follow with a cheaper or simpler version?
+        var followRisk = ""
+        /// What stops another vibe coder copying it?
+        var copyRisk = ""
+        /// Will customers keep paying, or leave after one use or for the next cheaper app?
+        var keepPaying = ""
     }
 
-    /// A surviving idea with its (evidence-capped) review.
+    /// A kept idea with its (evidence-capped) review, judged on the five principles.
     struct Result: Equatable, Sendable {
         /// The idea as proposed in pass 1.
         var candidate: Candidate
         /// The pass 2 review, after evidence caps.
         var review: Review
-        /// The weighted killer score (see `KillerIdea.killerScore(pain:willingToPay:timing:gap:fit:buildability:channel:)`).
-        var score: Double { KillerEngine.score(review) }
+        /// The builder's tool, for the build cost.
+        var tool = BuilderTool.claudeCode
+        /// How many of the cited items show people paying (proof for "people will pay").
+        var payEvidence = 0
+        /// The critic's competitors, with a known price from the generator where the critic had none; the generator's
+        /// when the critic named none (unless the idea fills a gap, when none is right).
+        var competitors: [Competitor] { KillerEngine.mergedCompetitors(critic: review.competitorsFound, generator: candidate.competitors,
+                                                                        fillsGap: candidate.fillsGap) }
+        /// The five principles, in the owner's order.
+        var outcomes: [TestOutcome] {
+            KillerEngine.outcomes(review: review, price: candidate.monthlyPrice, competitors: competitors,
+                                  fillsGap: candidate.fillsGap, tool: tool, payEvidence: payEvidence)
+        }
+        /// The killer score: the average of the five principles.
+        var score: Double { FiveTests.score(outcomes) }
     }
 
     /// Context passed in from the digest: the trends found, the numbered items, the user's profile
@@ -92,308 +130,85 @@ struct KillerEngine {
         var leaderboard: [String]
         /// The area every idea must be in; empty means any area.
         var interestArea = ""
-        /// The user's coding tool, which decides the kind of app every idea must be.
+        /// The user's coding tool.
         var tool = BuilderTool.claudeCode
+        /// The kind of app every idea must be; `nil` uses the tool's default.
+        var appType: BuilderTool.AppType?
         /// Pain clusters as one-line summaries for the prompt.
         var painClusters: [String] = []
     }
 
-    /// Every idea the devil's advocate didn't kill is kept (up to 3 a day). Whether it counts as a
+    /// Every vibe-codable idea is kept (up to 3 a day); ones the devil's advocate rejected rank last. Whether it counts as a
     /// "killer" or a "near-miss" is decided on screen from the quality bar, so near-misses can come back and climb.
     /// - Parameter context: Trends, numbered items, profile and leaderboard from the trend step.
-    /// - Returns: Up to `maxPerDay` survivors, best first; empty if pass 1 proposed nothing.
+    /// - Returns: Up to `maxPerDay` ideas, best first; empty if pass 1 proposed nothing.
     /// - Throws: Errors from either AI call or the parsers.
     /// - Note: `onCritique` is called between the two passes. Two paid calls are made unless pass 1 returns nothing.
     func run(_ context: Context) async throws -> [Result] {
         let candidates = try await generate(context)
         guard !candidates.isEmpty else { return [] }
         await onCritique()
-        let reviews = try await critique(candidates, items: context.items, aboutMe: context.aboutMe, tool: context.tool)
-        return Self.survivors(candidates: candidates, reviews: reviews, items: context.items)
+        let reviews = try await critique(candidates, items: context.items, aboutMe: context.aboutMe, tool: context.tool,
+                                       appType: context.appType)
+        return Self.survivors(candidates: candidates, reviews: reviews, items: context.items, tool: context.tool)
     }
 
-    /// No single measure may be this low, however good the average.
+    /// Ideas scored before the five principles: no single measure may be this low (still used for older ideas).
     static let minimumSingleScore = 2
     /// At most this many ideas are kept per refresh, so the leaderboard isn't flooded.
     static let maxPerDay = 3
     /// Without matching evidence, pain and willingness to pay can't score above this.
     static let unprovenCap = 3
+    /// A 5 for pain or willingness to pay needs at least this many different evidence items.
+    static let independentItemsForTop = 2
 
-    // MARK: - Pass 1: generate
-
-    /// Pass 1 instructions: someone pays (a business or a consumer), buildable by one person with AI coding tools, a named sales
-    /// channel, at most 1 developer tool, all in the interest area and buildable as the tool's app type, each replacing a named manual task,
-    /// with a one-week test. Field names must match `candidateSchema`.
-    static let generateInstructions = """
-    You are a sharp product strategist finding a software idea that makes money, for a solo builder who will \
-    vibe-code it (build it alone with AI coding tools) and sell it without a sales team. A good idea has real pain, \
-    a specific buyer who will pay, a clear gap, a place where those buyers already look for products like it, and \
-    a good fit for the person described.
-    Using the pain clusters, trends and numbered projects (items tagged Demand show need: "Pain points" are people \
-    complaining or asking for tools that don't exist, "App Store complaints" and "Consumer app complaints" are \
-    1-2 star reviews of business and consumer apps people pay for, which show buyers ready to switch, "AusTender" is government IT spending, and "My pain points" \
-    are the user's own problems, which are strong evidence; "Atlassian Marketplace", "Y Combinator" and \
-    "App Store top paid" show what people and businesses already pay for, and also who the competitors are; "Vibe-coded", "Show HN" \
-    and "GitHub" show what other builders have already made, so treat them as competition, not inspiration; \
-    "AI research" shows new capabilities), propose 5 distinct product ideas. Rules:
-    - Someone must pay for it. The buyer can be a business (small and medium businesses would pay $20 to $500 a \
-    month; larger companies may pay more) or a consumer (for example a subscription of a few \
-    dollars a month, a one-off purchase or usage-based pricing). It needs a clear way to make money: not a hobby \
-    project or a free tool with no income.
-    - One person must be able to build all of it with their AI coding tool (vibe-code it). Avoid products \
-    that need hardware, a team, real-time systems, many deep integrations, holding money or health records, or \
-    government or enterprise procurement.
-    - Each must have a named sales channel where these buyers already look for products like it: an app \
-    marketplace (for example the App Store, Shopify App Store, Atlassian Marketplace, Chrome Web Store, WordPress \
-    plugins, Google Workspace Marketplace), an industry or interest community, or a phrase buyers search for. "Social media" or "cold outreach" alone is not a channel.
-    - Prefer a narrow niche (one type of buyer, one job) over a broad tool: easy-to-build products are easy to \
-    copy, so the builder's protection is the niche, domain knowledge and owning the channel.
-    - At most 1 of the 5 may be a tool for software developers.
-    - If an interest area is given below, every idea must be in it.
-    - Every idea must be the kind of app given below for the builder's tool, and one person must be able to build \
-    all of it with that tool. Don't propose anything that tool can't build.
-    - Each must replace a named manual task, spreadsheet or costly workaround that the buyer does today.
-    - Each must be a concrete product someone could start building this month, not a trend summary.
-    Prefer ideas that solve a pain cluster and are supported by several projects. Cite at least one Demand item for each idea. Only propose ideas you would genuinely back; \
-    quality matters more than variety.
-    For each idea give: a short memorable title; a one-sentence pitch; the buyer (a specific role in a specific \
-    type of business, or a specific type of consumer); pricing (model and price per customer, per month or one-off); replaces (the manual task or workaround \
-    it replaces and roughly what that costs the buyer today); channel (the named place where the first 100 buyers \
-    would be found); why now (what recently became possible); a one-week test (the cheapest way to check demand \
-    in 7 days, with a pass mark); the numbers of the projects that are evidence for it; and same_as: if the idea \
-    is essentially the same as one on the existing leaderboard, copy that title exactly, otherwise an empty string. \
-    Write everything in English.
-    """ + Prompts.untrustedData
-
-    /// Pass 1: asks for 5 candidate ideas (feature "Killer ideas", medium effort).
-    /// - Parameter context: What the prompt is built from.
-    /// - Returns: The candidates as parsed; not yet checked against the evidence.
-    /// - Throws: Errors from the AI call or the parser.
-    func generate(_ context: Context) async throws -> [Candidate] {
-        let data = try await llm.client.complete(system: Self.generateInstructions, prompt: Self.generatePrompt(context),
-                                                 schema: Self.candidateSchema, effort: "medium", feature: "Killer ideas")
-        return try Self.parseCandidates(data)
-    }
-
-    /// The pass 1 prompt: profile, interest area, the builder's tool and app type, pain clusters, trends with variants, numbered items
-    /// (160 characters of detail) and the existing leaderboard.
-    /// - Parameter context: What the prompt is built from.
-    /// - Returns: The prompt text. Contains public text, so it's paired with `Prompts.untrustedData` in the instructions.
-    static func generatePrompt(_ context: Context) -> String {
-        var parts: [String] = []
-        parts.append("About me: " + (context.aboutMe.isEmpty ? "(not provided)" : context.aboutMe))
-        if !context.interestArea.isEmpty { parts.append("Interest area: " + context.interestArea) }
-        parts.append("Builder's tool: \(context.tool.label). Every idea must be \(context.tool.appTypeForAI).")
-        let trends = context.themes.filter { !$0.isCatchAll && !$0.isPainCluster }.map { theme in
-            "- \(theme.title): \(theme.summary)" + (theme.opportunities.isEmpty ? "" : " Variants: " + theme.opportunities.joined(separator: " | "))
-        }
-        if !context.painClusters.isEmpty {
-            parts.append("Pain clusters (demand):\n" + context.painClusters.map { "- \($0)" }.joined(separator: "\n"))
-        }
-        parts.append("Trends in this scan:\n" + trends.joined(separator: "\n"))
-        parts.append("Projects:\n" + Prompts.itemList(context.items, detailLimit: 160))
-        parts.append("Existing leaderboard:\n" + (context.leaderboard.isEmpty ? "(empty)" : context.leaderboard.map { "- \($0)" }.joined(separator: "\n")))
-        return parts.joined(separator: "\n\n")
-    }
-
-    /// JSON Schema for pass 1. Keep in sync with `parseCandidates` and the instructions.
-    static let candidateSchema: [String: Any] = [
-        "type": "object",
-        "properties": [
-            "ideas": [
-                "type": "array",
-                "items": [
-                    "type": "object",
-                    "properties": [
-                        "title": ["type": "string"], "pitch": ["type": "string"], "buyer": ["type": "string"],
-                        "pricing": ["type": "string"], "why_now": ["type": "string"], "one_week_test": ["type": "string"],
-                        "replaces": ["type": "string"], "channel": ["type": "string"],
-                        "evidence_numbers": ["type": "array", "items": ["type": "integer"]], "same_as": ["type": "string"],
-                    ],
-                    "required": ["title", "pitch", "buyer", "pricing", "why_now", "one_week_test", "replaces", "channel",
-                                 "evidence_numbers", "same_as"],
-                    "additionalProperties": false,
-                ],
-            ],
-        ],
-        "required": ["ideas"],
-        "additionalProperties": false,
-    ]
-
-    /// Decodes the pass 1 reply.
-    /// - Parameter data: The raw reply body.
-    /// - Returns: The candidates. `replaces` and `channel` are optional so replies from older prompts still parse.
-    /// - Throws: `DecodingError` or `SummarizerError` if the reply doesn't match `candidateSchema`.
-    static func parseCandidates(_ data: Data) throws -> [Candidate] {
-        /// The reply's JSON shape (field names match the schema).
-        struct Out: Decodable {
-            struct I: Decodable {
-                let title, pitch, buyer, pricing, why_now, one_week_test, same_as: String
-                let replaces, channel: String?
-                let evidence_numbers: [Int]
-            }
-            let ideas: [I]
-        }
-        return try JSONDecoder().decode(Out.self, from: try LLMSummarizer.extractJSON(data)).ideas.map {
-            Candidate(title: $0.title, pitch: $0.pitch, buyer: $0.buyer, pricing: $0.pricing, whyNow: $0.why_now,
-                      oneWeekTest: $0.one_week_test, evidenceNumbers: $0.evidence_numbers, sameAs: $0.same_as,
-                      replaces: $0.replaces ?? "", channel: $0.channel ?? "")
-        }
-    }
-
-    // MARK: - Pass 2: devil's advocate
-
-    /// Pass 2 instructions: try to kill each idea using its evidence, with a defined meaning for every
-    /// score level; no invented competitor prices. Field names must match `reviewSchema`.
-    static let critiqueInstructions = """
-    You are a blunt, experienced investor playing devil's advocate for a solo builder who will vibe-code the \
-    product (build it alone with AI coding tools) and sell it without a sales team. For each product idea, read its \
-    cited evidence and try hard to kill it: name competitors you are confident exist, question whether the \
-    buyer would really pay for it, whether one person could really build all of it with the builder's tool as the \
-    kind of app given, and whether the named channel would \
-    really reach buyers. Give a competitor's price only if you are sure of it; otherwise say "price unknown". Don't invent facts.
-    Score each 1-5 (be strict; 5 is rare):
-    - pain: 1 nice-to-have; 3 a recurring problem people work around; 5 costly and frequent, shown in 2 or more independent evidence items
-    - willing_to_pay: 1 no sign anyone spends money here; 3 people or businesses pay for nearby products; 5 buyers already pay for a worse product or name a budget
-    - timing: 1 could have been built years ago; 3 recent tools make it easier; 5 a new capability, rule or price makes it possible or required now
-    - gap: 1 well served by existing products; 3 options exist but leave a clear segment unhappy; 5 no credible option
-    - fit: 1 needs skills or access the person lacks; 3 unknown or neutral; 5 uses their domain experience or access
-    - buildability: 1 the builder's tool can't build it (it needs a team, hardware, regulated data or many deep \
-    integrations); 3 one person could build it with the tool, but with real difficulty; 5 one person could build all \
-    of it with the tool, simply
-    - channel_score: 1 needs a sales team or cold outreach; 3 buyers are reachable but there is no obvious place they \
-    look; 5 a named marketplace or community where these buyers already shop for tools like this
-    Mark ideas down hard if there is no clear buyer who would pay, or no realistic way for it to make money. For \
-    consumer ideas, also judge whether the channel reaches buyers without a large advertising budget.
-    Judge whether the one-week test would really show demand. survives is true only if the idea is still worth \
-    a one-week test after your objections. Give the single strongest objection, the main competitors (or "none found"), \
-    a one-sentence verdict, and evidence_needed: the one fact that would most raise the score. Copy each title exactly. \
-    Write everything in English.
-    """ + Prompts.untrustedData
-
-    /// Pass 2: the devil's advocate (feature "Devil's advocate"). Uses high effort because judging is where
-    /// quality matters most.
-    /// - Parameters:
-    ///   - candidates: The pass 1 ideas.
-    ///   - items: The numbered items, to attach each idea's cited evidence.
-    ///   - aboutMe: The user's profile, for the fit score.
-    /// - Returns: One review per idea the critic answered; matched to candidates later by title.
-    /// - Throws: Errors from the AI call or the parser.
-    func critique(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String,
-                  tool: BuilderTool = .claudeCode) async throws -> [Review] {
-        let data = try await llm.client.complete(system: Self.critiqueInstructions,
-                                                 prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe, tool: tool),
-                                                 schema: Self.reviewSchema, effort: "high", feature: "Devil's advocate")
-        return try Self.parseReviews(data)
-    }
-
-    /// The pass 2 prompt: each idea with its pitch, buyer, price, what it replaces, why now, one-week test
-    /// and its cited evidence (200 characters each), so the critic can check claims.
-    /// - Parameters:
-    ///   - candidates: The pass 1 ideas.
-    ///   - items: The numbered items the evidence numbers point into.
-    ///   - aboutMe: The user's profile; "(not provided)" when empty.
-    /// - Returns: The prompt text.
-    static func critiquePrompt(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String,
-                               tool: BuilderTool = .claudeCode) -> String {
-        var text = "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe)
-        text += "\nBuilder's tool: \(tool.label). Each idea must be \(tool.appTypeForAI).\n\nIdeas:"
-        for c in candidates {
-            text += "\n\nTitle: \(c.title)\nPitch: \(c.pitch)\nBuyer: \(c.buyer)\nPricing: \(c.pricing)"
-            if !c.replaces.isEmpty { text += "\nReplaces: \(c.replaces)" }
-            if !c.channel.isEmpty { text += "\nSales channel: \(c.channel)" }
-            text += "\nWhy now: \(c.whyNow)\nOne-week test: \(c.oneWeekTest)"
-            let evidence = Self.evidence(for: c, in: items)
-            text += "\nEvidence:" + (evidence.isEmpty ? " (none cited)" : "")
-            for item in evidence {
-                let detail = item.detail.isEmpty ? "" : " — " + String(item.detail.prefix(200))
-                text += "\n- [\(item.source.label)] \(item.title)\(detail)"
-            }
-        }
-        return text
-    }
-
-    /// The projects an idea cites, by their 1-based numbers in the item list.
-    /// - Parameters:
-    ///   - candidate: The idea whose `evidenceNumbers` to resolve.
-    ///   - items: The item list in prompt order.
-    /// - Returns: The cited items. Numbers outside the list are dropped, since AI output is untrusted.
-    static func evidence(for candidate: Candidate, in items: [FetchedItem]) -> [FetchedItem] {
-        candidate.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
-    }
-
-    /// JSON Schema for pass 2. Keep in sync with `parseReviews` and the instructions.
-    static let reviewSchema: [String: Any] = [
-        "type": "object",
-        "properties": [
-            "reviews": [
-                "type": "array",
-                "items": [
-                    "type": "object",
-                    "properties": [
-                        "title": ["type": "string"], "survives": ["type": "boolean"], "objection": ["type": "string"],
-                        "competitors": ["type": "string"], "verdict": ["type": "string"],
-                        "pain": ["type": "integer"], "willing_to_pay": ["type": "integer"], "timing": ["type": "integer"],
-                        "gap": ["type": "integer"], "fit": ["type": "integer"],
-                        "buildability": ["type": "integer"], "channel_score": ["type": "integer"],
-                        "evidence_needed": ["type": "string"],
-                    ],
-                    "required": ["title", "survives", "objection", "competitors", "verdict", "pain", "willing_to_pay",
-                                 "timing", "gap", "fit", "buildability", "channel_score", "evidence_needed"],
-                    "additionalProperties": false,
-                ],
-            ],
-        ],
-        "required": ["reviews"],
-        "additionalProperties": false,
-    ]
-
-    /// Decodes the pass 2 reply.
-    /// - Parameter data: The raw reply body.
-    /// - Returns: Reviews with every score clamped to 0–5. A missing buildability or channel score (a reply in
-    ///   the older shape) becomes 0, which `survivors` then rejects as a weak spot.
-    /// - Throws: `DecodingError` or `SummarizerError` if the reply doesn't match `reviewSchema`.
-    static func parseReviews(_ data: Data) throws -> [Review] {
-        /// The reply's JSON shape (field names match the schema).
-        struct Out: Decodable {
-            struct R: Decodable {
-                let title, objection, competitors, verdict: String
-                let survives: Bool
-                let pain, willing_to_pay, timing, gap, fit: Int
-                let buildability, channel_score: Int?
-                let evidence_needed: String?
-            }
-            let reviews: [R]
-        }
-        return try JSONDecoder().decode(Out.self, from: try LLMSummarizer.extractJSON(data)).reviews.map {
-            Review(title: $0.title, survives: $0.survives, objection: $0.objection, competitors: $0.competitors,
-                   verdict: $0.verdict, pain: Ranking.clamp($0.pain), willingToPay: Ranking.clamp($0.willing_to_pay),
-                   timing: Ranking.clamp($0.timing), gap: Ranking.clamp($0.gap), fit: Ranking.clamp($0.fit),
-                   buildability: Ranking.clamp($0.buildability ?? 0), channelScore: Ranking.clamp($0.channel_score ?? 0),
-                   evidenceNeeded: $0.evidence_needed ?? "")
-        }
-    }
-
-    /// Pairs each candidate with its review and keeps ideas that survived and have no weak spot
-    /// (any measure below 2), after capping scores the evidence doesn't support. Best first, at most three.
+    /// Pairs each candidate with its review, applies the evidence caps, and keeps ideas that are vibe-codable (the one
+    /// must). The other principles only rank them; ideas the devil's advocate rejected are kept but rank below the ones
+    /// it backed (owner, 12 Nov 2026). Best first, at most three.
     /// - Parameters:
     ///   - candidates: The pass 1 ideas.
     ///   - reviews: The pass 2 reviews; a candidate with no matching review is dropped.
     ///   - items: The item list, to check each idea's evidence.
-    /// - Returns: Up to `maxPerDay` results, highest killer score first.
-    static func survivors(candidates: [Candidate], reviews: [Review], items: [FetchedItem] = []) -> [Result] {
+    ///   - tool: The builder's tool, for the build cost.
+    /// - Returns: Up to `maxPerDay` results: the ones the devil's advocate backed first, then highest killer score.
+    static func survivors(candidates: [Candidate], reviews: [Review], items: [FetchedItem] = [],
+                          tool: BuilderTool = .claudeCode) -> [Result] {
         let byKey = Dictionary(reviews.map { (KillerIdea.key(for: $0.title), $0) }, uniquingKeysWith: { first, _ in first })
         return candidates.compactMap { candidate in
-            guard let raw = byKey[KillerIdea.key(for: candidate.title)], raw.survives else { return nil }
-            let review = capped(raw, evidence: evidence(for: candidate, in: items))
-            guard [review.pain, review.willingToPay, review.timing, review.gap, review.fit,
-                   review.buildability, review.channelScore].min() ?? 0 >= minimumSingleScore
-            else { return nil }
-            return Result(candidate: candidate, review: review)
+            guard let raw = byKey[KillerIdea.key(for: candidate.title)],
+                  raw.buildability >= FiveTests.minimumVibeCodable else { return nil }
+            let cited = evidence(for: candidate, in: items)
+            return Result(candidate: candidate, review: capped(raw, evidence: cited), tool: tool,
+                          payEvidence: payEvidenceCount(cited))
         }
-        .sorted { score($0.review) > score($1.review) }
+        .sorted { $0.review.survives != $1.review.survives ? $0.review.survives : $0.score > $1.score }
         .prefix(maxPerDay)
         .map { $0 }
+    }
+
+    /// Merges the critic's competitors with the generator's: the critic decides who competes, but a price the critic
+    /// didn't know is taken from the generator for the same name.
+    static func mergedCompetitors(critic: [Competitor], generator: [Competitor], fillsGap: Bool) -> [Competitor] {
+        guard !critic.isEmpty else { return fillsGap ? [] : generator }
+        return critic.map { found in
+            guard found.monthlyPrice == 0, !found.isFree,
+                  let known = generator.first(where: { KillerIdea.key(for: $0.name) == KillerIdea.key(for: found.name) && $0.monthlyPrice > 0 })
+            else { return found }
+            var merged = found
+            merged.monthlyPrice = known.monthlyPrice
+            return merged
+        }
+    }
+
+    /// The five principles for a review and the idea's prices.
+    static func outcomes(review r: Review, price: Double, competitors: [Competitor], fillsGap: Bool,
+                         tool: BuilderTool, payEvidence: Int) -> [TestOutcome] {
+        FiveTests.outcomes(vibeCodable: r.buildability,
+                           willPay: FiveTests.willPay(score: r.willingToPay, competitors: competitors, payEvidence: payEvidence),
+                           pain: r.pain,
+                           cheaper: FiveTests.cheaper(price: price, competitors: competitors, fillsGap: fillsGap),
+                           coversBuild: FiveTests.coversBuild(buildDays: r.buildDays, customers: r.likelyCustomers,
+                                                              price: price, tool: tool, channelScore: r.channelScore))
     }
 
     /// Sources that count as evidence of pain: complaints and the user's own pain points.
@@ -402,24 +217,35 @@ struct KillerEngine {
     /// marketplace add-ons, government contracts.
     static let payEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .ycombinator, .appStore, .atlassian, .ausTender]
 
-    /// Caps pain at 3 without pain evidence, and willingness to pay at 3 without pay evidence. Enforced
-    /// in code rather than trusted to the prompt, because models tend to score generously.
+    /// How many different cited items show people paying.
+    static func payEvidenceCount(_ cited: [FetchedItem]) -> Int {
+        Set(cited.filter { payEvidence.contains($0.source) }.map(\.key)).count
+    }
+
+    /// Caps pain at 3 without pain evidence, and willingness to pay at 3 without pay evidence; a 5 for either needs
+    /// at least two different evidence items of that kind. Enforced in code rather than trusted to the prompt,
+    /// because models tend to score generously.
     /// - Parameters:
     ///   - review: The critic's review.
     ///   - evidence: The items the idea cites.
     /// - Returns: The review with capped scores.
     static func capped(_ review: Review, evidence: [FetchedItem]) -> Review {
         var r = review
-        let sources = Set(evidence.map(\.source))
-        if sources.isDisjoint(with: painEvidence) { r.pain = min(r.pain, unprovenCap) }
-        if sources.isDisjoint(with: payEvidence) { r.willingToPay = min(r.willingToPay, unprovenCap) }
+        r.pain = min(r.pain, cap(for: evidence.filter { painEvidence.contains($0.source) }))
+        r.willingToPay = min(r.willingToPay, cap(for: evidence.filter { payEvidence.contains($0.source) }))
         return r
     }
 
-    /// The killer score of a review; the weighting lives in one place, on `KillerIdea`.
+    /// The highest score the given supporting items allow: 3 with none, 4 with one, 5 with two or more different ones.
+    private static func cap(for supporting: [FetchedItem]) -> Int {
+        let distinct = Set(supporting.map(\.key)).count
+        return distinct == 0 ? unprovenCap : distinct < independentItemsForTop ? 4 : 5
+    }
+
+    /// The score ideas had before the five principles (still used for older ideas and their improvements).
     /// - Parameter r: A review, normally already capped.
     /// - Returns: 0–5.
-    static func score(_ r: Review) -> Double {
+    static func legacyScore(_ r: Review) -> Double {
         KillerIdea.killerScore(pain: r.pain, willingToPay: r.willingToPay, timing: r.timing, gap: r.gap, fit: r.fit,
                                buildability: r.buildability, channel: r.channelScore)
     }

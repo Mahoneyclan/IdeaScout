@@ -26,7 +26,8 @@ struct KillerIdeaDetailView: View {
                     Spacer()
                     KillerScoreBadge(score: idea.killerScore)
                 }
-                KillerStatusLabel(score: idea.killerScore)
+                KillerStatusLabel(score: idea.killerScore, rejected: idea.criticRejected)
+                IdeaKindTag(idea: idea)
                 if let improved = idea.improvedAt {
                     Label("Improved on \(improved.formatted(date: .abbreviated, time: .omitted))", systemImage: "arrow.up.circle")
                         .foregroundStyle(.secondary)
@@ -82,19 +83,23 @@ struct KillerIdeaDetailView: View {
                 }
                 .frame(minHeight: 44)
             }
-            Section {
-                ForEach(KillerScoreMetrics.metrics, id: \.name) { metric in
-                    let value = idea[keyPath: metric.value]
-                    LabeledContent {
-                        Text(metric.canBeUnscored && value == 0 ? "Not scored" : "\(value)/5").monospacedDigit()
-                    } label: {
-                        Label(metric.name, systemImage: metric.symbol)
+            if idea.engineVersion >= 1 {
+                IdeaPrinciplesSections(idea: idea)
+            } else {
+                Section {
+                    ForEach(KillerScoreMetrics.metrics, id: \.name) { metric in
+                        let value = idea[keyPath: metric.value]
+                        LabeledContent {
+                            Text(metric.canBeUnscored && value == 0 ? "Not scored" : "\(value)/5").monospacedDigit()
+                        } label: {
+                            Label(metric.name, systemImage: metric.symbol)
+                        }
                     }
+                } header: {
+                    Text("Scores")
+                } footer: {
+                    Text("Buildable solo: could one person build all of it with their AI coding tool. Sales channel: can buyers be reached without a sales team. Why now counts half. Fit for me uses your About me in Settings. Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"): \(seenDays).")
                 }
-            } header: {
-                Text("Scores")
-            } footer: {
-                Text("Buildable solo: could one person build all of it with their AI coding tool. Sales channel: can buyers be reached without a sales team. Why now counts half. Fit for me uses your About me in Settings. Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"): \(seenDays).")
             }
             if !idea.evidence.isEmpty {
                 Section("Evidence") {

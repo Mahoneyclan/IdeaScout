@@ -5,8 +5,7 @@
 import Foundation
 import SwiftData
 
-/// A money-making product idea proposed by the AI that survived the devil's-advocate check (shown as Killer or
-/// Near-miss). Independent of digests.
+/// A money-making product idea proposed by the AI (shown as Killer, Near-miss or Rejected by the devil's advocate). Independent of digests.
 /// Kept across days: when the same idea comes back, it's updated and climbs the leaderboard.
 @Model final class KillerIdea {
     /// Normalised title (see `key(for:)`), so the same idea on another day updates this record.
@@ -82,6 +81,36 @@ import SwiftData
     var originalVersionJSON: String = ""
     /// When an improved version was kept; `nil` when the idea shows the AI's original.
     var improvedAt: Date?
+    // Five principles (owner, 11 Nov 2026). Ideas found before have engineVersion 0 and keep their old score.
+    /// 1 for ideas judged on the five principles; 0 for older ideas.
+    var engineVersion = 0
+    /// The one job the app does.
+    var oneJob: String = ""
+    /// Features to keep, compared with the competitors.
+    var keepFeatures: [String] = []
+    /// Features to leave out, compared with the competitors.
+    var leaveOutFeatures: [String] = []
+    /// Recommended price per customer per month, US dollars (0 = unknown).
+    var monthlyPrice: Double = 0
+    /// No app does this job yet.
+    var fillsGap = false
+    /// The competitors and their prices as JSON (see `Competitor` and `competitorList`).
+    var competitorsJSON: String = ""
+    /// Days one person would take to build it with their tool (the devil's advocate's estimate).
+    var buildDays = 0
+    /// Paying customers likely in the first year (the devil's advocate's estimate).
+    var likelyCustomers = 0
+    /// The tool the idea was judged for (`BuilderTool` raw value), for its build cost.
+    var builderToolRaw: String = ""
+    /// The devil's advocate's answers: would competitors follow, what stops copying, will customers keep paying.
+    var followRisk: String = ""
+    var copyRisk: String = ""
+    var keepPaying: String = ""
+    /// The devil's advocate judged it not worth a one-week test. Kept, labelled and ranked below the ideas it backed
+    /// (owner's decision, 12 Nov 2026: only "not vibe-codable" drops an idea).
+    var criticRejected = false
+    /// How many cited items show people paying: with a paid competitor, the proof for "people will pay".
+    var payEvidenceCount = 0
 
     /// Saves or unsaves the idea. The caller saves the database.
     func toggleSaved() {
@@ -102,10 +131,32 @@ import SwiftData
         lastSeen = .now
     }
 
-    /// The weighted killer score of the review scores.
+    /// The killer score: the average of the five principles, or the older weighted score for older ideas.
     var killerScore: Double {
-        Self.killerScore(pain: pain, willingToPay: willingToPay, timing: timing, gap: gap, fit: fit,
-                         buildability: buildability, channel: channelScore)
+        engineVersion >= 1 ? FiveTests.score(principles)
+            : Self.killerScore(pain: pain, willingToPay: willingToPay, timing: timing, gap: gap, fit: fit,
+                               buildability: buildability, channel: channelScore)
+    }
+
+    /// The tool the idea was judged for.
+    var builderTool: BuilderTool { BuilderTool(rawValue: builderToolRaw) ?? .claudeCode }
+
+    /// The five principles, worked out from the stored scores and prices (empty for older ideas).
+    var principles: [TestOutcome] {
+        guard engineVersion >= 1 else { return [] }
+        return FiveTests.outcomes(
+            vibeCodable: buildability,
+            willPay: FiveTests.willPay(score: willingToPay, competitors: competitorList, payEvidence: payEvidenceCount),
+            pain: pain,
+            cheaper: FiveTests.cheaper(price: monthlyPrice, competitors: competitorList, fillsGap: fillsGap),
+            coversBuild: FiveTests.coversBuild(buildDays: buildDays, customers: likelyCustomers, price: monthlyPrice,
+                                               tool: builderTool, channelScore: channelScore))
+    }
+
+    /// The competitors and their prices.
+    var competitorList: [Competitor] {
+        get { Self.decode(competitorsJSON) ?? [] }
+        set { competitorsJSON = newValue.isEmpty ? "" : Self.encode(newValue) }
     }
 
     /// "Why now" counts half as much as the other scores: for a solo builder using AI tools, "AI makes it
@@ -132,6 +183,15 @@ import SwiftData
 
     /// Killer score plus a bonus for coming back on several days (up to +0.6).
     var leaderboardScore: Double { Self.leaderboardScore(killer: killerScore, timesSeen: timesSeen) }
+
+    /// Leaderboard order: ideas judged on the five principles first (owner's default, 11 Nov 2026: older ideas rank
+    /// below new ones until they come back), then ideas the devil's advocate backed before ones it rejected (owner,
+    /// 12 Nov 2026), then by leaderboard score.
+    static func ranksAbove(_ a: KillerIdea, _ b: KillerIdea) -> Bool {
+        if a.engineVersion != b.engineVersion { return a.engineVersion > b.engineVersion }
+        if a.criticRejected != b.criticRejected { return !a.criticRejected }
+        return a.leaderboardScore > b.leaderboardScore
+    }
 
     /// +0.15 for each extra day it was proposed, up to 4 extra days (+0.6), so ideas that keep coming
     /// back rise without outranking a clearly stronger idea.
@@ -167,9 +227,9 @@ import SwiftData
     /// - Parameters:
     ///   - day: Any moment in the day.
     ///   - ideas: The ideas to filter.
-    /// - Returns: The matching ideas, highest killer score first.
+    /// - Returns: The matching ideas in leaderboard order (`ranksAbove`).
     static func seen(on day: Date, in ideas: [KillerIdea]) -> [KillerIdea] {
-        ideas.filter { $0.wasSeen(on: day) }.sorted { $0.killerScore > $1.killerScore }
+        ideas.filter { $0.wasSeen(on: day) }.sorted(by: ranksAbove)
     }
 
     /// The evidence as title and link pairs.

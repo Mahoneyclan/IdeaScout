@@ -92,8 +92,11 @@ struct ImproveIdeaView: View {
                     Spacer()
                     KillerScoreBadge(score: version.score)
                 }
-                if !version.passes {
+                if !version.survives {
                     Label("Rejected by the devil's advocate", systemImage: "xmark.octagon").foregroundStyle(.red)
+                } else if !version.passes {
+                    Label(version.offer == nil ? "Has a weak spot" : "Not vibe-codable", systemImage: "xmark.octagon")
+                        .foregroundStyle(.red)
                 }
                 if index > 0 && version.passes && !isRunning {
                     Button("Keep this version", systemImage: "checkmark.circle") { service.keep(version, for: idea) }

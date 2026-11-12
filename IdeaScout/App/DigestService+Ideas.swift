@@ -15,7 +15,7 @@ extension DigestService {
     /// - Returns: Up to `limit` ideas, highest leaderboard score first; empty if the fetch fails.
     func topKillerIdeas(context: ModelContext, limit: Int) -> [KillerIdea] {
         let all = (try? context.fetch(FetchDescriptor<KillerIdea>())) ?? []
-        return Array(all.sorted { $0.leaderboardScore > $1.leaderboardScore }.prefix(limit))
+        return Array(all.sorted(by: KillerIdea.ranksAbove).prefix(limit))
     }
 
     /// Adds new killer ideas, or updates ones that came back (they climb the leaderboard). An idea matches an
@@ -47,9 +47,18 @@ extension DigestService {
             idea.verdict = r.evidenceNeeded.isEmpty ? r.verdict : "\(r.verdict) Evidence that would raise the score: \(r.evidenceNeeded)"
             idea.pain = r.pain; idea.willingToPay = r.willingToPay; idea.timing = r.timing; idea.gap = r.gap; idea.fit = r.fit
             idea.buildability = r.buildability; idea.channelScore = r.channelScore
+            // The five principles: what they're worked out from.
+            idea.engineVersion = 1
+            idea.oneJob = c.oneJob; idea.keepFeatures = c.keepFeatures; idea.leaveOutFeatures = c.leaveOutFeatures
+            idea.monthlyPrice = c.monthlyPrice; idea.fillsGap = c.fillsGap; idea.competitorList = result.competitors
+            idea.buildDays = r.buildDays; idea.likelyCustomers = r.likelyCustomers; idea.builderToolRaw = result.tool.rawValue
+            idea.followRisk = r.followRisk; idea.copyRisk = r.copyRisk; idea.keepPaying = r.keepPaying
+            idea.criticRejected = !r.survives
+            idea.payEvidenceCount = result.payEvidence
             // The scan's new version replaces any kept improvement, so there's nothing left to undo.
             idea.improvedAt = nil
             idea.originalVersionJSON = ""
+            idea.improvementJSON = ""   // its versions were scored for the old text, maybe on the older scale
             let evidence = c.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
             if !evidence.isEmpty {
                 idea.evidenceTitles = evidence.map(\.title)

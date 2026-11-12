@@ -320,7 +320,7 @@ final class DigestService {
                 await MainActor.run { service.stage = .critique }
             }).run(
                 .init(themes: builtThemes, items: trends.batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard,
-                      interestArea: AppSettings.interestArea, tool: AppSettings.builderTool,
+                      interestArea: AppSettings.interestArea, tool: AppSettings.builderTool, appType: AppSettings.appType,
                       painClusters: builtThemes.filter(\.isPainCluster).map {
                           "\($0.title) (buyer: \($0.buyer); today: \($0.workaround); pays: \($0.paySignals); \($0.items.count) items)"
                       }))

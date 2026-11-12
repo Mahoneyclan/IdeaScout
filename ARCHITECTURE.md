@@ -20,7 +20,7 @@ There is **no server**. Everything runs on the iPhone or iPad; AI calls go direc
 | **History** | `Views/RootView.swift` (`HistoryView`) | One row per day with its best idea and pain clusters |
 | Day view | `Views/DayView.swift` (`DigestContentView`) | That day's ideas, pain clusters, ranked trends with projects, notes |
 | **Saved** | `Views/IdeasView.swift` | Bookmarked ideas, then starred projects (notes, AI variants, prompt) |
-| **Settings** | `Views/SettingsView.swift`, `AdvancedSettingsViews.swift`, `SettingsControls.swift` | About me, interest area, coding tool (`starterKit.tool`, which sets the app type), My pain points (`fieldNotes`), digest time; Advanced: sources, scan and ranking, AI and costs |
+| **Settings** | `Views/SettingsView.swift`, `AdvancedSettingsViews.swift`, `SettingsControls.swift` | About me, interest area, what you'll build (`builder.appType`: iPhone & iPad app or web app) and the coding tool (`starterKit.tool`, limited to tools that can build that type), My pain points (`fieldNotes`), digest time; Advanced: sources, scan and ranking, AI and costs |
 | Welcome / consent | `Views/WelcomeView.swift` | First launch: intro, trial, AI choice; consent before data goes to a cloud AI |
 | Paywall / About | `Views/StoreViews.swift`, `Views/AboutView.swift` | Trial and unlock; version, privacy, source credits |
 
@@ -38,6 +38,7 @@ KillerIdea  – an AI business idea that survived the devil's advocate; updated 
 ```
 - Deleting or replacing a Digest deletes its Themes and their Items (cascade). Idea and KillerIdea are independent and survive.
 - A KillerIdea can hold one starter kit: `starterKitJSON` (a `StarterKit` as JSON, whose property names are stored too), `starterKitMadeAt` and `starterKitModel`. The chosen coding tool is the setting `starterKit.tool`.
+- The five principles (owner, 11 Nov 2026) are worked out in code by `AI/FiveTests.swift` from the devil's advocate's scores and the idea's prices; `KillerEngine.swift` holds the types and rules, `KillerEngine+Prompts.swift` the instructions, schemas and parsers. A KillerIdea judged on them has `engineVersion` 1 and stores `oneJob`, `keepFeatures`, `leaveOutFeatures`, `monthlyPrice`, `fillsGap`, `competitorsJSON` (`Competitor` as JSON), `buildDays`, `likelyCustomers`, `builderToolRaw`, `followRisk`, `copyRisk` and `keepPaying` (all stored names are permanent). Older ideas have `engineVersion` 0 and keep the older weighted score. The principles are shown by `Views/PrinciplesViews.swift`.
 - "Improve this idea" (`IdeaImprover` for the rules and prompts, `DigestService+Improve` for the paid calls) saves its last run on the idea as `improvementJSON` (an `IdeaImprover.Run` of `IdeaVersion`s, whose property names are stored too). Keeping a version copies it onto the idea and saves the earlier text in `originalVersionJSON` for undo, with `improvedAt`; a refresh that proposes the idea again clears both.
 - A KillerIdea records every day it was proposed (`daysSeen`), so History can show each day's ideas. Dismissing hides it; saving bookmarks it.
 - Settings live in UserDefaults (`Support/AppSettings.swift`); API keys live in the Keychain (`Support/Keychain.swift`); the cost ledger is JSON in UserDefaults (`Support/UsageTracker.swift`).

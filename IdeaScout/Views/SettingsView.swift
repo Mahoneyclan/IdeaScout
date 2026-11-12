@@ -1,5 +1,5 @@
 // SettingsView.swift
-// The Settings tab: About me, interest area, coding tool, My pain points, the daily digest time, and links to
+// The Settings tab: About me, interest area, what you'll build and with which tool, My pain points, the daily digest time, and links to
 // the Advanced pages (AdvancedSettingsViews.swift). Settings are UserDefaults keys from AppSettings.Keys,
 // edited via @AppStorage; API keys go to the Keychain (SecretField in SettingsControls.swift).
 
@@ -14,6 +14,8 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Keys.fieldNotes) private var fieldNotes = ""
     @AppStorage(AppSettings.Keys.interestArea) private var interestArea = ""
     @AppStorage(AppSettings.Keys.starterKitTool) private var toolRaw = BuilderTool.claudeCode.rawValue
+    /// Empty until chosen; then the tool's default app type applies (see `AppSettings.appType`).
+    @AppStorage(AppSettings.Keys.appType) private var appTypeRaw = ""
     @AppStorage(AppSettings.Keys.notifyHour) private var notifyHour = 7
     /// Spending summary for the "AI & costs" row; refreshed when the screen appears.
     @State private var usage = UsageTracker.summary()
@@ -21,6 +23,10 @@ struct SettingsView: View {
     @State private var notificationsAllowed: Bool?
     /// Whether a text field has the keyboard (the Done button clears it).
     @FocusState private var keyboardOpen: Bool
+
+    /// The chosen app type (the tool's default before one is chosen) and a tool that can build it.
+    private var appType: BuilderTool.AppType { AppSettings.choice(toolRaw: toolRaw, appTypeRaw: appTypeRaw).appType }
+    private var tool: BuilderTool { AppSettings.choice(toolRaw: toolRaw, appTypeRaw: appTypeRaw).tool }
 
     var body: some View {
         NavigationStack {
@@ -48,15 +54,33 @@ struct SettingsView: View {
 
                 Section {
                     FlowLayout(spacing: 8) {
-                        ForEach(BuilderTool.allCases) { option in
-                            ChoiceChip(title: option.label, isSelected: option.rawValue == toolRaw) { toolRaw = option.rawValue }
+                        ForEach(BuilderTool.AppType.allCases) { option in
+                            ChoiceChip(title: option.label, isSelected: option == appType) {
+                                appTypeRaw = option.rawValue
+                                toolRaw = AppSettings.builderTool(tool, for: option).rawValue   // keep a tool that can build it
+                            }
                         }
                     }
                     .padding(.vertical, 4)
                 } header: {
-                    Text("Your AI coding tool")
+                    Text("What you'll build")
                 } footer: {
-                    Text((BuilderTool(rawValue: toolRaw) ?? .claudeCode).appTypeText + " Starter kits are worded for this tool.")
+                    Text(appType.screenText)
+                }
+
+                Section {
+                    FlowLayout(spacing: 8) {
+                        ForEach(appType.tools) { option in
+                            ChoiceChip(title: option.label, isSelected: option == tool) { toolRaw = option.rawValue }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Built with")
+                } footer: {
+                    Text("The AI coding tool you'll build ideas with, not the AI IdeaScout uses. Starter kits are worded for it, "
+                         + "and its plan (about \(FiveTests.money(FiveTests.toolMonthlyCost(tool))) a month) is the build cost."
+                         + (appType == .onDevice ? " Replit and Lovable make web apps only." : ""))
                 }
 
                 Section {

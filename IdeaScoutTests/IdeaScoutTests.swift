@@ -307,10 +307,12 @@ struct KillerEngineTests {
         let out = KillerEngine.survivors(candidates: [cand("A"), cand("B"), cand("C"), cand("D"), cand("E"), cand("F")],
                                          reviews: [rev("a", true, 3), rev("B", false, 5), rev("C", true, 3), rev("D", true, 2),
                                                    rev("E", true, 3), rev("F", true, 1)])
-        // B was killed, F has a weak spot; the rest are kept, at most three.
-        #expect(out.count == 3)
-        #expect(!out.map(\.candidate.title).contains("B"))
-        #expect(!out.map(\.candidate.title).contains("F"))
+        // The devil's advocate rejected B, so it ranks below the ideas it backed; F isn't vibe-codable. At most three.
+        #expect(Set(out.map(\.candidate.title)) == ["A", "C", "E"])
+        // When few ideas are left, a rejected idea is kept, last, whatever its score.
+        let few = KillerEngine.survivors(candidates: [cand("B"), cand("D"), cand("F")],
+                                         reviews: [rev("B", false, 5), rev("D", true, 3), rev("F", true, 1)])
+        #expect(few.map(\.candidate.title) == ["D", "B"])
     }
 
     @Test func promptIncludesProfileAndLeaderboard() {
@@ -386,13 +388,14 @@ struct EnglishOnlyTests {
     }
 }
 
-/// Near-misses are kept, weak spots dropped, and trends hidden below the bar.
+/// Near-misses are kept, the principles rank rather than drop (only vibe-codable is a must), and trends hidden below the bar.
 struct QualityBarTests {
     private func cand(_ t: String) -> KillerEngine.Candidate {
         .init(title: t, pitch: "", buyer: "", pricing: "", whyNow: "", oneWeekTest: "", evidenceNumbers: [], sameAs: "")
     }
 
-    @Test func keepsNearMissesButDropsWeakSpots() {
+    /// Owner's decision (11 Nov 2026): the five principles score and rank; only "vibe-codable" drops an idea.
+    @Test func principlesRankButOnlyVibeCodableDrops() {
         let strong = KillerEngine.Review(title: "Strong", survives: true, objection: "", competitors: "", verdict: "",
                                          pain: 4, willingToPay: 4, timing: 4, gap: 4, fit: 4,
                                          buildability: 4, channelScore: 4)
@@ -402,10 +405,14 @@ struct QualityBarTests {
         let weakSpot = KillerEngine.Review(title: "Weak spot", survives: true, objection: "", competitors: "", verdict: "",
                                            pain: 5, willingToPay: 1, timing: 5, gap: 5, fit: 5,
                                            buildability: 5, channelScore: 5)
-        let out = KillerEngine.survivors(candidates: [cand("Strong"), cand("Average"), cand("Weak spot")],
-                                         reviews: [strong, average, weakSpot])
+        var hard = strong
+        hard.title = "Hard to build"
+        hard.buildability = 2
+        let out = KillerEngine.survivors(candidates: [cand("Strong"), cand("Average"), cand("Weak spot"), cand("Hard to build")],
+                                         reviews: [strong, average, weakSpot, hard])
+        #expect(Set(out.map(\.candidate.title)) == ["Strong", "Average", "Weak spot"], "a weak spot no longer drops an idea")
+        #expect(out.first?.candidate.title == "Strong")
         // Without pain-point evidence, pain and willingness to pay are capped at 3.
-        #expect(out.map(\.candidate.title) == ["Strong", "Average"])
         #expect(out[0].review.pain == 3 && out[0].review.willingToPay == 3)
     }
 
@@ -633,10 +640,14 @@ struct BestIdeaTests {
                                          pain: 5, willingToPay: 5, timing: 4, gap: 4, fit: 4,
                                          buildability: 4, channelScore: 4)
         let items = [item("p", .painPoints), item("y", .ycombinator), item("g", .github)]
+        // One supporting item allows a 4; a 5 needs two different ones.
         let withPain = KillerEngine.survivors(candidates: [cand("A", evidence: [1])], reviews: [review], items: items)
-        #expect(withPain.first?.review.pain == 5 && withPain.first?.review.willingToPay == 5)
+        #expect(withPain.first?.review.pain == 4 && withPain.first?.review.willingToPay == 4)
+        let twoItems = items + [item("p2", .appReviews)]
+        let withTwo = KillerEngine.survivors(candidates: [cand("A", evidence: [1, 4])], reviews: [review], items: twoItems)
+        #expect(withTwo.first?.review.pain == 5 && withTwo.first?.review.willingToPay == 5)
         let withYC = KillerEngine.survivors(candidates: [cand("A", evidence: [2])], reviews: [review], items: items)
-        #expect(withYC.first?.review.pain == 3 && withYC.first?.review.willingToPay == 5)
+        #expect(withYC.first?.review.pain == 3 && withYC.first?.review.willingToPay == 4)
         let supplyOnly = KillerEngine.survivors(candidates: [cand("A", evidence: [3, 99])], reviews: [review], items: items)
         #expect(supplyOnly.first?.review.pain == 3 && supplyOnly.first?.review.willingToPay == 3)
     }
@@ -650,7 +661,7 @@ struct BestIdeaTests {
         #expect(prompt.contains("- [Pain points] Our rostering is a spreadsheet nightmare"))
         #expect(prompt.contains("One-week test: check"))
         #expect(prompt.contains("Replaces: Weekly spreadsheet rostering"))
-        #expect(KillerEngine.critiqueInstructions.contains("price unknown"))
+        #expect(KillerEngine.critiqueInstructions.contains("Give a price only if you are sure of it, otherwise 0"))
     }
 
     @Test func ideasAreListedOnEveryDayTheyWereSeen() {
@@ -859,10 +870,10 @@ struct DemandSourceTests {
         let review = KillerEngine.Review(title: "A", survives: true, objection: "", competitors: "", verdict: "",
                                          pain: 5, willingToPay: 5, timing: 4, gap: 4, fit: 4,
                                          buildability: 4, channelScore: 4)
-        let capped = KillerEngine.capped(review, evidence: [item("r", .appReviews)])
+        let capped = KillerEngine.capped(review, evidence: [item("r", .appReviews), item("r2", .appReviews)])
         #expect(capped.pain == 5 && capped.willingToPay == 5)
         let tender = KillerEngine.capped(review, evidence: [item("t", .ausTender)])
-        #expect(tender.pain == 3 && tender.willingToPay == 5)
+        #expect(tender.pain == 3 && tender.willingToPay == 4)
     }
 
     @Test func demandItemsKeepMoreText() {
@@ -1372,11 +1383,13 @@ struct SoloBuilderTests {
     private let candidate = KillerEngine.Candidate(title: "A", pitch: "", buyer: "", pricing: "", whyNow: "",
                                                    oneWeekTest: "", evidenceNumbers: [1], sameAs: "")
 
-    @Test func weakBuildabilityOrChannelIsDropped() {
+    /// Vibe-codable is a must; a weak sales channel only holds back "sales cover the build cost".
+    @Test func notVibeCodableIsDroppedButAWeakChannelIsNot() {
         let items = [item("r", .appReviews)]
-        #expect(KillerEngine.survivors(candidates: [candidate], reviews: [review(build: 1, channel: 4)], items: items).isEmpty)
-        #expect(KillerEngine.survivors(candidates: [candidate], reviews: [review(build: 4, channel: 1)], items: items).isEmpty)
-        #expect(KillerEngine.survivors(candidates: [candidate], reviews: [review(build: 4, channel: 4)], items: items).count == 1)
+        #expect(KillerEngine.survivors(candidates: [candidate], reviews: [review(build: 2, channel: 4)], items: items).isEmpty)
+        let weakChannel = KillerEngine.survivors(candidates: [candidate], reviews: [review(build: 4, channel: 1)], items: items)
+        #expect(weakChannel.count == 1)
+        #expect(KillerEngine.survivors(candidates: [candidate], reviews: [review(build: 3, channel: 4)], items: items).count == 1)
     }
 
     @Test func whyNowCountsHalfAndOlderIdeasKeepTheirScore() {
@@ -1390,7 +1403,7 @@ struct SoloBuilderTests {
         let idea = KillerIdea(key: "a", title: "A")
         idea.pain = 4; idea.willingToPay = 4; idea.timing = 4; idea.gap = 4; idea.fit = 4
         #expect(idea.killerScore == 4)
-        #expect(KillerEngine.score(review(build: 4, channel: 4)) == 4)
+        #expect(KillerEngine.legacyScore(review(build: 4, channel: 4)) == 4)
     }
 
     @Test func unscoredMeasuresAreLeftOutOfTheWeakestScore() {
@@ -1421,22 +1434,36 @@ struct SoloBuilderTests {
 }
 
 /// Owner's decisions (11 Nov 2026): every idea is in the user's interest area (replacing "at least two in the industry
-/// focus"), and the user's coding tool decides the kind of app.
+/// focus"); 12 Nov 2026: the user chooses the kind of app first, then a tool that can build it.
 struct InterestAreaAndToolTests {
-    @Test(arguments: [(BuilderTool.claudeCode, "runs entirely on the device"), (.cursor, "runs entirely on the device"),
-                      (.replit, "web app"), (.lovable, "web app")])
-    func everyPromptAsksForTheToolsAppType(tool: BuilderTool, phrase: String) {
-        #expect(tool.appTypeForAI.contains(phrase))
+    @Test(arguments: [(BuilderTool.claudeCode, nil, "runs entirely on the device"), (.cursor, .onDevice, "runs entirely on the device"),
+                      (.claudeCode, .web, "web app on low-cost managed hosting"), (.replit, nil, "hosted on Replit"),
+                      (.lovable, .web, "hosted on Lovable")] as [(BuilderTool, BuilderTool.AppType?, String)])
+    func everyPromptAsksForTheChosenAppType(tool: BuilderTool, appType: BuilderTool.AppType?, phrase: String) {
+        let wording = tool.forAI(appType)
+        #expect(wording.contains(phrase))
         let generate = KillerEngine.generatePrompt(.init(themes: [], items: [], aboutMe: "", leaderboard: [],
-                                                         interestArea: "fitness coaching", tool: tool))
+                                                         interestArea: "fitness coaching", tool: tool, appType: appType))
         #expect(generate.contains("Interest area: fitness coaching"))
-        #expect(generate.contains("Builder's tool: \(tool.label)") && generate.contains(tool.appTypeForAI))
-        #expect(KillerEngine.critiquePrompt([], items: [], aboutMe: "", tool: tool).contains(tool.appTypeForAI))
+        #expect(generate.contains("Builder's tool: \(tool.label)") && generate.contains(wording))
+        #expect(KillerEngine.critiquePrompt([], items: [], aboutMe: "", tool: tool, appType: appType).contains(wording))
         let idea = KillerIdea(key: "a", title: "A")
-        #expect(StarterKitPrompts.prompt(.init(idea, aboutMe: "", tool: tool)).contains(tool.appTypeForAI))
+        #expect(StarterKitPrompts.prompt(.init(idea, aboutMe: "", tool: tool, appType: appType)).contains(wording))
         let version = IdeaVersion(idea)
-        #expect(IdeaImprover.rewritePrompt(version, title: "A", evidence: [], aboutMe: "", tool: tool).contains(tool.appTypeForAI))
-        #expect(IdeaImprover.reviewPrompt(version, title: "A", evidence: [], aboutMe: "", tool: tool).contains(tool.appTypeForAI))
+        #expect(IdeaImprover.rewritePrompt(version, title: "A", evidence: [], aboutMe: "", tool: tool, appType: appType).contains(wording))
+        #expect(IdeaImprover.reviewPrompt(version, title: "A", evidence: [], aboutMe: "", tool: tool, appType: appType).contains(wording))
+    }
+
+    /// The app type is chosen first; existing users keep the type their tool gave them; a tool that can't build the
+    /// chosen type is swapped for one that can.
+    @Test func appTypeComesFirstAndTheToolMustFit() {
+        #expect(AppSettings.choice(toolRaw: "replit", appTypeRaw: "") == (.web, .replit), "existing users keep what they had")
+        #expect(AppSettings.choice(toolRaw: "", appTypeRaw: "") == (.onDevice, .claudeCode))
+        #expect(AppSettings.choice(toolRaw: "lovable", appTypeRaw: "onDevice") == (.onDevice, .claudeCode))
+        #expect(AppSettings.choice(toolRaw: "cursor", appTypeRaw: "web") == (.web, .cursor))
+        #expect(BuilderTool.AppType.onDevice.tools == [.claudeCode, .cursor])
+        #expect(AppSettings.Keys.appType == "builder.appType" && BuilderTool.AppType.onDevice.rawValue == "onDevice"
+                && BuilderTool.AppType.web.rawValue == "web", "stored: never rename")
     }
 
     @Test func interestAreaReplacesTheIndustryRule() {

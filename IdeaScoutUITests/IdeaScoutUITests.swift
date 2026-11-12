@@ -152,4 +152,19 @@ final class IdeaScoutUITests: XCTestCase {
         for _ in 0..<4 where !undo.exists { app.swipeDown() }
         XCTAssertTrue(undo.exists, "keeping a version should offer undo")
     }
+
+    /// Ideas are judged on the five principles: the idea screen lists them, with the competitor and price.
+    func testIdeaShowsTheFivePrinciples() {
+        let app = launch("-ui-skip-welcome")
+        let idea = element(app, containing: "InvoiceChaser")
+        XCTAssertTrue(idea.waitForExistence(timeout: 20))
+        XCTAssertTrue(element(app, containing: "Undercuts Chaser").exists, "the card should say which competitor it undercuts")
+        idea.tap()
+        let cheaper = element(app, containing: "Materially cheaper")
+        for _ in 0..<5 where !cheaper.exists { app.swipeUp() }
+        XCTAssertTrue(cheaper.exists, "the five principles should be listed")
+        let competitor = element(app, containing: "Chaser")
+        for _ in 0..<3 where !competitor.exists { app.swipeUp() }
+        XCTAssertTrue(competitor.exists, "the competitor should be listed")
+    }
 }

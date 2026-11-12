@@ -46,6 +46,8 @@ enum AppSettings {
         static let onboarded = "onboarded"
         /// The AI coding tool the starter kit is worded for (`BuilderTool` raw value).
         static let starterKitTool = "starterKit.tool"
+        /// The kind of app ideas are for (`BuilderTool.AppType` raw value).
+        static let appType = "builder.appType"
         /// Whether the user agreed to share data with this provider.
         /// - Parameter provider: The cloud provider.
         /// - Returns: The key name, e.g. "consent.claude".
@@ -128,10 +130,29 @@ enum AppSettings {
         defaults.string(forKey: Keys.interestArea)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
-    /// The user's AI coding tool (chosen in Settings, also used to word the starter kit). It decides the app type.
-    static var builderTool: BuilderTool {
-        defaults.string(forKey: Keys.starterKitTool).flatMap(BuilderTool.init(rawValue:)) ?? .claudeCode
+    /// The kind of app every idea is for (chosen in Settings). Before one is chosen, the tool's default, so existing
+    /// users keep what they had.
+    static var appType: BuilderTool.AppType { choice(toolRaw: storedToolRaw, appTypeRaw: storedAppTypeRaw).appType }
+
+    /// The user's AI coding tool (chosen in Settings, used to word the starter kit and for the build cost). Always one
+    /// that can build the chosen kind of app.
+    static var builderTool: BuilderTool { choice(toolRaw: storedToolRaw, appTypeRaw: storedAppTypeRaw).tool }
+
+    /// The app type and tool from their stored raw values (also used by the screens, which observe them): an unset app
+    /// type is the tool's default, and a tool that can't build the app type is replaced by one that can.
+    static func choice(toolRaw: String, appTypeRaw: String) -> (appType: BuilderTool.AppType, tool: BuilderTool) {
+        let tool = BuilderTool(rawValue: toolRaw) ?? .claudeCode
+        let appType = BuilderTool.AppType(rawValue: appTypeRaw) ?? tool.defaultAppType
+        return (appType, builderTool(tool, for: appType))
     }
+
+    /// The tool, or the first that can build the app type when it can't (Replit and Lovable can't build iPhone apps).
+    static func builderTool(_ tool: BuilderTool, for appType: BuilderTool.AppType) -> BuilderTool {
+        appType.tools.contains(tool) ? tool : appType.tools.first ?? .claudeCode
+    }
+
+    private static var storedToolRaw: String { defaults.string(forKey: Keys.starterKitTool) ?? "" }
+    private static var storedAppTypeRaw: String { defaults.string(forKey: Keys.appType) ?? "" }
 
     /// Work problems the owner has seen, one per line. Each becomes a demand item.
     static var fieldNotes: String { defaults.string(forKey: Keys.fieldNotes) ?? "" }

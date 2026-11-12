@@ -79,7 +79,7 @@ struct HistoryRow: View {
                 HStack(alignment: .firstTextBaseline) {
                     Label(best.title, systemImage: "flame").font(.subheadline.weight(.medium))
                     Spacer()
-                    KillerStatusLabel(score: best.killerScore)
+                    KillerStatusLabel(score: best.killerScore, rejected: best.criticRejected)
                 }
             }
             if !clusters.isEmpty {

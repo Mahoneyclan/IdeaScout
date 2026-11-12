@@ -12,33 +12,57 @@ enum BuilderTool: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    /// The kind of app a tool builds (owner's decision, 11 Nov 2026).
-    enum AppType: Sendable { case onDevice, web }
+    /// The kind of app every idea is for, chosen in Settings before the tool (owner's decision, 12 Nov 2026; it
+    /// replaces "the tool decides the app type"). Raw values are stored: never rename.
+    enum AppType: String, CaseIterable, Identifiable, Sendable {
+        case onDevice, web
 
-    /// Claude Code and Cursor build iPhone and iPad apps that run on the device; Replit and Lovable build hosted web apps.
-    var appType: AppType {
-        switch self {
-        case .claudeCode, .cursor: .onDevice
-        case .replit, .lovable: .web
+        var id: String { rawValue }
+
+        /// The name on screen.
+        var label: String {
+            switch self {
+            case .onDevice: "iPhone & iPad app"
+            case .web: "Web app"
+            }
+        }
+
+        /// The tools that can build this kind of app: only Claude Code and Cursor build native iPhone and iPad apps.
+        var tools: [BuilderTool] {
+            switch self {
+            case .onDevice: [.claudeCode, .cursor]
+            case .web: BuilderTool.allCases
+            }
+        }
+
+        /// What it means, for the screen.
+        var screenText: String {
+            switch self {
+            case .onDevice: "Ideas will be apps that run on the iPhone and iPad, sold on the App Store, with no hosting costs."
+            case .web: "Ideas will be web apps people use in a browser, with hosting as a running cost."
+            }
+        }
+
+        /// The app type in words, for AI prompts.
+        func forAI(_ tool: BuilderTool) -> String {
+            switch self {
+            case .onDevice: "an iPhone and iPad app built in Swift and SwiftUI that runs entirely on the device, with no "
+                + "server or hosting (iCloud can sync data between the user's devices), sold on the App Store"
+            case .web: (tool.hostsApps ? "a web app hosted on \(tool.label)'s own hosting" : "a web app on low-cost managed hosting")
+                + " (hosting and any paid services count as running costs)"
+            }
         }
     }
 
-    /// The app type in words, for AI prompts.
-    var appTypeForAI: String {
-        switch appType {
-        case .onDevice: "an iPhone and iPad app built in Swift and SwiftUI that runs entirely on the device, with no "
-            + "server or hosting (iCloud can sync data between the user's devices), sold on the App Store"
-        case .web: "a web app hosted on \(label)'s own hosting (hosting and any paid services count as running costs)"
-        }
-    }
+    /// The app type to use before one is chosen: what the tool is best known for (existing users keep what they had).
+    var defaultAppType: AppType { hostsApps ? .web : .onDevice }
 
-    /// The app type in words, for the screen.
-    var appTypeText: String {
-        switch appType {
-        case .onDevice: "Ideas will be iPhone and iPad apps that run on the device, with no hosting costs."
-        case .web: "Ideas will be web apps, with hosting counted in the running costs."
-        }
-    }
+    /// Replit and Lovable host the apps they build.
+    private var hostsApps: Bool { self == .replit || self == .lovable }
+
+    /// The tool and app type in words, for AI prompts.
+    /// - Parameter appType: The chosen app type; `nil` uses `defaultAppType`.
+    func forAI(_ appType: AppType?) -> String { (appType ?? defaultAppType).forAI(self) }
 
     /// The tool's name on screen.
     var label: String {
@@ -104,19 +128,30 @@ enum StarterKitPrompts {
         var title, pitch, buyer, pricing, replaces, channel, whyNow, oneWeekTest, objection, competitors: String
         /// The user's profile, so the stack suits their skills; empty when not given.
         var aboutMe: String
-        /// The user's coding tool, which decides the kind of app.
+        /// The user's coding tool.
         var tool: BuilderTool = .claudeCode
+        /// The kind of app; `nil` uses the tool's default.
+        var appType: BuilderTool.AppType?
+        /// The job, features, price and competitors (empty for ideas found before the five principles).
+        var offer = ""
 
         /// Copies the fields the kit needs from a saved idea.
         /// - Parameters:
         ///   - idea: The saved idea.
         ///   - aboutMe: The user's profile.
-        init(_ idea: KillerIdea, aboutMe: String, tool: BuilderTool = .claudeCode) {
+        ///   - tool: The user's coding tool.
+        ///   - appType: The kind of app; `nil` uses the tool's default.
+        init(_ idea: KillerIdea, aboutMe: String, tool: BuilderTool = .claudeCode, appType: BuilderTool.AppType? = nil) {
             title = idea.title; pitch = idea.pitch; buyer = idea.buyer; pricing = idea.pricing; replaces = idea.replaces
             channel = idea.channel; whyNow = idea.whyNow; oneWeekTest = idea.oneWeekTest; objection = idea.objection
             competitors = idea.competitors
             self.aboutMe = aboutMe
             self.tool = tool
+            self.appType = appType
+            if idea.engineVersion >= 1 {
+                offer = KillerEngine.offerText(oneJob: idea.oneJob, keep: idea.keepFeatures, leaveOut: idea.leaveOutFeatures,
+                                               price: idea.monthlyPrice, competitors: idea.competitorList, fillsGap: idea.fillsGap)
+            }
         }
     }
 
@@ -125,9 +160,10 @@ enum StarterKitPrompts {
     /// - Returns: The prompt. The idea was written by an AI from public posts, so the instructions end with
     ///   `Prompts.untrustedData`.
     static func prompt(_ request: Request) -> String {
-        var lines = ["Build with: \(request.tool.label), as \(request.tool.appTypeForAI)", "Idea: \(request.title)", "Pitch: \(request.pitch)", "Customer: \(request.buyer)", "Pricing: \(request.pricing)"]
+        var lines = ["Build with: \(request.tool.label), as \(request.tool.forAI(request.appType))", "Idea: \(request.title)", "Pitch: \(request.pitch)", "Customer: \(request.buyer)", "Pricing: \(request.pricing)"]
         if !request.replaces.isEmpty { lines.append("Replaces: \(request.replaces)") }
         if !request.channel.isEmpty { lines.append("Where customers are found: \(request.channel)") }
+        if !request.offer.isEmpty { lines += request.offer.split(separator: "\n").map(String.init) }
         lines += ["Why now: \(request.whyNow)", "One-week demand test: \(request.oneWeekTest)",
                   "Strongest objection: \(request.objection)", "Known competitors: \(request.competitors)",
                   "About me: " + (request.aboutMe.isEmpty ? "(not provided)" : request.aboutMe)]

@@ -10,6 +10,7 @@ struct StarterKitView: View {
     @Bindable var idea: KillerIdea
     @Environment(DigestService.self) private var service
     @AppStorage(AppSettings.Keys.starterKitTool) private var toolRaw = BuilderTool.claudeCode.rawValue
+    @AppStorage(AppSettings.Keys.appType) private var appTypeRaw = ""
     @AppStorage(AppSettings.Keys.dailyCap) private var dailyCap = AppSettings.defaultDailyCap
     /// Estimated cost of one kit; `nil` when no paid cloud AI is set up. Read when the screen appears.
     @State private var cost: Double?
@@ -18,7 +19,10 @@ struct StarterKitView: View {
     /// Shows the "Make it again?" confirmation.
     @State private var confirmAgain = false
 
-    private var tool: BuilderTool { BuilderTool(rawValue: toolRaw) ?? .claudeCode }
+    private var choice: (appType: BuilderTool.AppType, tool: BuilderTool) {
+        AppSettings.choice(toolRaw: toolRaw, appTypeRaw: appTypeRaw)
+    }
+    private var tool: BuilderTool { choice.tool }
     private var isMaking: Bool { service.makingStarterKitFor == idea.key }
     private var costText: String { cost.map { " · " + AppSettings.approximateCostText($0) } ?? "" }
 
@@ -26,10 +30,10 @@ struct StarterKitView: View {
         Form {
             if let kit = idea.starterKit {
                 Section {
-                    LabeledContent("Worded for", value: tool.label)
+                    LabeledContent("Worded for", value: "\(tool.label) · \(choice.appType.label)")
                 } footer: {
-                    Text("Change your AI coding tool in Settings. It also decides the kind of app ideas are for, so a kit "
-                         + "made for another tool may need making again.")
+                    Text("Change what you'll build, or the tool, in Settings. A kit made for another kind of app may need "
+                         + "making again.")
                 }
                 kitSections(kit)
                 Section {

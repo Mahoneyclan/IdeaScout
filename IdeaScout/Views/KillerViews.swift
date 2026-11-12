@@ -56,18 +56,27 @@ struct KillerScoreBadge: View {
     }
 }
 
-/// Labels an idea "Killer" (score at or above the quality bar, which the user can change) or "Near-miss".
+/// Labels an idea "Killer" (score at or above the quality bar, which the user can change), "Near-miss", or
+/// "Not worth testing" when the devil's advocate rejected it, whatever its score.
 /// Recomputed on screen, so changing the bar relabels saved ideas at once.
 struct KillerStatusLabel: View {
     /// The killer score (0–5).
     let score: Double
+    /// The devil's advocate judged it not worth a one-week test.
+    var rejected = false
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
 
     var body: some View {
-        let killer = score >= qualityBar
-        Label(killer ? "Killer" : "Near-miss", systemImage: killer ? "flame.fill" : "scope")
-            .font(.caption2.bold())
-            .foregroundStyle(killer ? Color.orange : Color.secondary)
+        if rejected {
+            Label("Not worth testing, says the devil's advocate", systemImage: "xmark.octagon")
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+        } else {
+            let killer = score >= qualityBar
+            Label(killer ? "Killer" : "Near-miss", systemImage: killer ? "flame.fill" : "scope")
+                .font(.caption2.bold())
+                .foregroundStyle(killer ? Color.orange : Color.secondary)
+        }
     }
 }
 
@@ -85,7 +94,7 @@ struct KillerIdeaCard: View {
                 KillerScoreBadge(score: idea.killerScore)
             }
             HStack {
-                KillerStatusLabel(score: idea.killerScore)
+                KillerStatusLabel(score: idea.killerScore, rejected: idea.criticRejected)
                 if idea.isSaved {
                     Image(systemName: "bookmark.fill").font(.caption2).foregroundStyle(.indigo)
                         .accessibilityLabel("Saved")
@@ -93,11 +102,18 @@ struct KillerIdeaCard: View {
                 Text("Last seen \(idea.lastSeen.formatted(date: .abbreviated, time: .omitted))")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            IdeaKindTag(idea: idea)
             Text(idea.pitch).font(.subheadline)
-            Text("\(idea.buyer) · \(idea.pricing)").font(.caption).foregroundStyle(.secondary)
+            Text("\(idea.buyer) · " + (idea.engineVersion >= 1 && idea.monthlyPrice >= FiveTests.minimumPrice
+                                         ? FiveTests.money(idea.monthlyPrice) + " a month" : idea.pricing))
+                .font(.caption).foregroundStyle(.secondary)
             HStack {
-                let weakest = KillerScoreMetrics.weakest(idea)
-                Text("Weakest: \(weakest.name) \(weakest.value)/5").font(.caption).foregroundStyle(.secondary)
+                if let weakest = idea.principles.min(by: { $0.score < $1.score }) {
+                    Text("Weakest: \(weakest.name) " + (weakest.known ? "\(weakest.score)/5" : "unproven")).font(.caption).foregroundStyle(.secondary)
+                } else {
+                    let weakest = KillerScoreMetrics.weakest(idea)
+                    Text("Weakest: \(weakest.name) \(weakest.value)/5 · older scoring").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
                 if idea.timesSeen > 1 {
                     Label("\(idea.timesSeen) days", systemImage: "arrow.clockwise")
@@ -123,12 +139,13 @@ struct LeaderboardView: View {
     /// The idea waiting for "Dismiss" confirmation.
     @State private var pendingDismiss: KillerIdea?
 
-    /// Ideas not dismissed, best leaderboard score first.
-    private var ranked: [KillerIdea] { ideas.filter { !$0.isDismissed }.sorted { $0.leaderboardScore > $1.leaderboardScore } }
+    /// Ideas not dismissed: those judged on the five principles first, then best leaderboard score.
+    private var ranked: [KillerIdea] { ideas.filter { !$0.isDismissed }.sorted(by: KillerIdea.ranksAbove) }
 
     var body: some View {
-        let killers = ranked.filter { $0.killerScore >= qualityBar }
-        let nearMisses = ranked.filter { $0.killerScore < qualityBar }
+        let killers = ranked.filter { !$0.criticRejected && $0.killerScore >= qualityBar }
+        let nearMisses = ranked.filter { !$0.criticRejected && $0.killerScore < qualityBar }
+        let rejected = ranked.filter(\.criticRejected)
         NavigationStack {
             List {
                 Section { TodayStatus(today: digests.first { Calendar.current.isDateInToday($0.day) }, ideas: ideas) }
@@ -142,6 +159,15 @@ struct LeaderboardView: View {
                         Text("Near-misses")
                     } footer: {
                         Text("Survived the devil's advocate but scored below your quality bar (\(qualityBar.formatted()) / 5). They can climb if they come back on later days.")
+                    }
+                }
+                if !rejected.isEmpty {
+                    Section {
+                        rows(rejected, offset: killers.count + nearMisses.count)
+                    } header: {
+                        Text("Not worth testing")
+                    } footer: {
+                        Text("The devil's advocate didn't think these worth a one-week test; its reason is on each idea. You can still improve them or disagree.")
                     }
                 }
             }

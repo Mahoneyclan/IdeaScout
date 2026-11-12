@@ -44,7 +44,8 @@ extension DigestService {
         guard let llm = dependencies.makeSummarizer() as? LLMSummarizer else { throw ImproveError.needsCloudAI }
         if dependencies.isOverDailyCap() { throw SummarizerError.overDailyLimit }
 
-        let title = idea.title, evidence = idea.evidenceTitles, aboutMe = AppSettings.aboutMe, tool = AppSettings.builderTool
+        let title = idea.title, evidence = idea.evidenceTitles, aboutMe = AppSettings.aboutMe, tool = AppSettings.builderTool,
+            appType = AppSettings.appType
         let client = llm.client
         var round = 1
         _ = try await IdeaImprover.run(
@@ -54,7 +55,7 @@ extension DigestService {
                 improveStep = "Round \(round) of \(IdeaImprover.maxRounds): rewriting the idea…"
                 let data = try await client.complete(
                     system: IdeaImprover.rewriteInstructions,
-                    prompt: IdeaImprover.rewritePrompt(version, title: title, evidence: evidence, aboutMe: aboutMe, tool: tool),
+                    prompt: IdeaImprover.rewritePrompt(version, title: title, evidence: evidence, aboutMe: aboutMe, tool: tool, appType: appType),
                     schema: IdeaImprover.rewriteSchema, effort: "medium", feature: "Improve idea")
                 return try IdeaImprover.parseRewrite(data, from: version)
             },
@@ -62,7 +63,7 @@ extension DigestService {
                 improveStep = "Round \(round) of \(IdeaImprover.maxRounds): the devil's advocate is judging it…"
                 let data = try await client.complete(
                     system: KillerEngine.critiqueInstructions,
-                    prompt: IdeaImprover.reviewPrompt(version, title: title, evidence: evidence, aboutMe: aboutMe, tool: tool),
+                    prompt: IdeaImprover.reviewPrompt(version, title: title, evidence: evidence, aboutMe: aboutMe, tool: tool, appType: appType),
                     schema: KillerEngine.reviewSchema, effort: "high", feature: "Improve idea: devil's advocate")
                 guard let review = try KillerEngine.parseReviews(data).first else {
                     throw SummarizerError.badResponse("the devil's advocate gave no review")
