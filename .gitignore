@@ -11,3 +11,6 @@ build/
 
 # Local code-quality scorecards (not published)
 docs/scorecards/
+
+# Local exports of the owner's own app data (never committed)
+local-data/

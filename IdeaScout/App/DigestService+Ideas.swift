@@ -1,14 +1,14 @@
 // DigestService+Ideas.swift
 // The leaderboard side of a refresh: the top ideas sent to the idea step, and merging the step's survivors
-// into saved ideas (a returning idea is updated and climbs the leaderboard).
+// into saved ideas (a returning idea is updated; a dismissed one comes back only with new evidence).
 
 import Foundation
 import SwiftData
 
 @MainActor
 extension DigestService {
-    /// The leaderboard's top ideas (including dismissed ones), best first. Sent to the idea step so a
-    /// returning idea keeps its title.
+    /// The leaderboard's top ideas (including dismissed ones), best first. Sent to the idea step, which is asked
+    /// for new ideas, and so a returning idea keeps its title.
     /// - Parameters:
     ///   - context: The database context.
     ///   - limit: How many to return.
@@ -18,9 +18,18 @@ extension DigestService {
         return Array(all.sorted(by: KillerIdea.ranksAbove).prefix(limit))
     }
 
-    /// Adds new killer ideas, or updates ones that came back (they climb the leaderboard). An idea matches an
-    /// existing one by the AI's `same_as` title or by its own title. Coming back un-dismisses it and records the day,
-    /// and the new text replaces any kept improvement.
+    /// How an earlier idea is listed for the idea step; dismissed ones are marked so the AI doesn't repeat them
+    /// without new evidence.
+    /// - Parameter idea: An idea from the leaderboard.
+    /// - Returns: "Title: pitch", plus " [dismissed by the user]" if dismissed.
+    static func leaderboardLine(_ idea: KillerIdea) -> String {
+        "\(idea.title): \(idea.pitch)" + (idea.isDismissed ? " [dismissed by the user]" : "")
+    }
+
+    /// Adds new killer ideas, or updates ones that came back. An idea matches an existing one by the AI's `same_as`
+    /// title or by its own title. A dismissed idea is left alone unless the new proposal cites evidence it didn't
+    /// have; then it returns, labelled "Back with new evidence" (owner's decision, 13 Nov 2026). Coming back records
+    /// the day, and the new text replaces any kept improvement.
     /// Two results with the same title in one batch become one idea (the later one updates the earlier), because the
     /// key is unique and a second insert would silently replace the first.
     func mergeKillerIdeas(_ results: [KillerEngine.Result], items: [FetchedItem], context: ModelContext) {
@@ -32,8 +41,13 @@ extension DigestService {
         for result in results {
             let c = result.candidate, r = result.review
             let matchKey = KillerIdea.key(for: c.sameAs.isEmpty ? c.title : c.sameAs)
+            let evidence = c.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
             let idea: KillerIdea
             if let existing = all.first(where: { $0.key == matchKey || $0.key == KillerIdea.key(for: c.title) }) {
+                let returning = existing.isDismissed
+                if returning && !KillerIdea.returnsFromDismissal(saved: existing.evidenceURLs,
+                                                                  cited: evidence.map(\.url.absoluteString)) { continue }
+                existing.backWithNewEvidence = returning
                 idea = existing
                 if !Calendar.current.isDateInToday(existing.lastSeen) { idea.timesSeen += 1 }
             } else {
@@ -60,13 +74,12 @@ extension DigestService {
             idea.improvedAt = nil
             idea.originalVersionJSON = ""
             idea.improvementJSON = ""   // its versions were scored for the old text, maybe on the older scale
-            let evidence = c.evidenceNumbers.map { $0 - 1 }.filter { items.indices.contains($0) }.map { items[$0] }
             if !evidence.isEmpty {
                 idea.evidenceTitles = evidence.map(\.title)
                 idea.evidenceURLs = evidence.map(\.url.absoluteString)
             }
             idea.recordSeen(on: .now)
-            idea.isDismissed = false   // proposed again, so it returns to the leaderboard
+            idea.isDismissed = false   // new, still listed, or back with new evidence
             idea.lastSeen = .now
             idea.scoreHistory.append(idea.killerScore)
         }

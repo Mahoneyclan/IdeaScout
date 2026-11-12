@@ -121,6 +121,17 @@ extension IdeaVersion {
                     payEvidence: idea.payEvidenceCount, salesPlan: idea.salesPlan, appTypeRaw: idea.appTypeRaw) : nil)
     }
 
+    /// Whether this version is the one the idea uses now: the original until a version is kept, then the kept
+    /// version (matched by its text, since a kept version's text is copied onto the idea).
+    /// - Parameters:
+    ///   - idea: The idea.
+    ///   - isOriginal: Whether this is the run's first version (the idea before improving).
+    /// - Returns: `true` if the idea shows this version.
+    func isInUse(by idea: KillerIdea, isOriginal: Bool) -> Bool {
+        if isOriginal { return idea.improvedAt == nil }
+        return idea.improvedAt != nil && pitch == idea.pitch && buyer == idea.buyer && pricing == idea.pricing
+    }
+
     /// Copies this version's text and scores onto the idea (the title, evidence and history stay).
     func apply(to idea: KillerIdea) {
         idea.pitch = pitch; idea.buyer = buyer; idea.pricing = pricing; idea.whyNow = whyNow

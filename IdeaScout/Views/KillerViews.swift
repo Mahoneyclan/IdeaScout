@@ -102,6 +102,10 @@ struct KillerIdeaCard: View {
                 Text("Last seen \(idea.lastSeen.formatted(date: .abbreviated, time: .omitted))")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            if idea.backWithNewEvidence {
+                Label("Back with new evidence", systemImage: "arrow.uturn.up")
+                    .font(.caption2.bold()).foregroundStyle(.teal)
+            }
             IdeaKindTag(idea: idea)
             Text(idea.pitch).font(.subheadline)
             Text("\(idea.buyer) · " + (idea.engineVersion >= 1 && idea.monthlyPrice >= FiveTests.minimumPrice
@@ -129,7 +133,7 @@ struct KillerIdeaCard: View {
 // MARK: - Ideas tab
 
 /// Every idea so far, best first: killers (at or above the quality bar), then near-misses.
-/// Ideas that come back on several days get a bonus.
+/// Ideas that come back on several days show how many days, without a ranking bonus.
 struct LeaderboardView: View {
     @Environment(\.modelContext) private var context
     @Environment(DigestService.self) private var service
@@ -139,7 +143,7 @@ struct LeaderboardView: View {
     /// The idea waiting for "Dismiss" confirmation.
     @State private var pendingDismiss: KillerIdea?
 
-    /// Ideas not dismissed: those judged on the five principles first, then best leaderboard score.
+    /// Ideas not dismissed: those judged on the five principles first, then best killer score.
     private var ranked: [KillerIdea] { ideas.filter { !$0.isDismissed }.sorted(by: KillerIdea.ranksAbove) }
 
     var body: some View {

@@ -65,7 +65,9 @@ extension KillerEngine {
     today); channel (the named place where the first buyers would be found); why now (what recently became \
     possible); a one-week test (the cheapest way to check demand in 7 days, with a pass mark); the numbers of the \
     projects that are evidence for it; and same_as: if the idea is essentially the same as one on the existing \
-    leaderboard, copy that title exactly, otherwise an empty string. Write everything in English.
+    leaderboard, copy that title exactly, otherwise an empty string. Propose new ideas: repeat one from the existing \
+    leaderboard only if today's projects add evidence it didn't have, and never repeat one marked [dismissed by the \
+    user] without such new evidence. Write everything in English.
     """ + Prompts.untrustedData
 
     /// Pass 1: asks for 5 candidate ideas (feature "Killer ideas", medium effort).

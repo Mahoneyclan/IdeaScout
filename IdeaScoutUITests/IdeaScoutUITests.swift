@@ -160,14 +160,22 @@ final class IdeaScoutUITests: XCTestCase {
         let improve = button(app, startingWith: "Improve this idea")
         for _ in 0..<4 where !improve.isHittable { app.swipeUp() }
         improve.tap()
+        // The idea screen's link and the Improve screen's start button share a name: wait for the Improve screen.
+        XCTAssertTrue(element(app, containing: "Each round, the AI rewrites").waitForExistence(timeout: 5))
         let start = button(app, startingWith: "Improve this idea")
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
-        XCTAssertTrue(element(app, containing: "Round 1").waitForExistence(timeout: 10), "a round should finish")
+        XCTAssertTrue(button(app, startingWith: "Improve again").waitForExistence(timeout: 10), "the run should finish")
+        let round = element(app, containing: "Round 1")
+        for _ in 0..<4 where !round.exists { app.swipeUp() }
+        XCTAssertTrue(round.exists, "a round should be listed")
         let keep = button(app, startingWith: "Keep this version")
         for _ in 0..<4 where !keep.exists { app.swipeUp() }
         XCTAssertTrue(keep.exists)
         keep.tap()
+        let kept = element(app, containing: "Kept round 1")
+        for _ in 0..<4 where !kept.exists { app.swipeDown() }
+        XCTAssertTrue(kept.exists, "keeping a version should say so")
         let undo = button(app, startingWith: "Undo improvement")
         for _ in 0..<4 where !undo.exists { app.swipeDown() }
         XCTAssertTrue(undo.exists, "keeping a version should offer undo")

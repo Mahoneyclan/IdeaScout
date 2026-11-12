@@ -321,11 +321,34 @@ struct KillerEngineTests {
         #expect(p.contains("- Shift Meals: p"))
     }
 
-    @Test func leaderboardRewardsReturningIdeas() {
-        #expect(KillerIdea.leaderboardScore(killer: 3.0, timesSeen: 1) == 3.0)
-        #expect(KillerIdea.leaderboardScore(killer: 3.0, timesSeen: 3) == 3.3)
-        #expect(KillerIdea.leaderboardScore(killer: 3.0, timesSeen: 20) == 3.6)
+    /// Returning on more days earns no ranking bonus (owner, 13 Nov 2026): a stronger new idea stays on top.
+    @Test func returningIdeasGetNoRankingBonus() {
+        let old = KillerIdea(key: "old", title: "Old"), new = KillerIdea(key: "new", title: "New")
+        old.engineVersion = 1; new.engineVersion = 1
+        old.pain = 3; old.willingToPay = 3; old.timing = 3; old.gap = 3; old.fit = 3; old.buildability = 3; old.channelScore = 3
+        new.pain = 4; new.willingToPay = 4; new.timing = 4; new.gap = 4; new.fit = 4; new.buildability = 4; new.channelScore = 4
+        old.timesSeen = 20
+        #expect(KillerIdea.ranksAbove(new, old) == (new.killerScore > old.killerScore))
+        #expect(!KillerIdea.ranksAbove(old, new) || old.killerScore > new.killerScore)
         #expect(KillerIdea.key(for: "Shift Meals!") == KillerIdea.key(for: "shift meals"))
+    }
+
+    /// A dismissed idea comes back only with evidence it didn't have before.
+    @Test(arguments: [([String](), ["a"], true), (["a"], ["a"], false), (["a"], [String](), false), (["a"], ["a", "b"], true)])
+    func dismissedIdeasNeedNewEvidence(saved: [String], cited: [String], returns: Bool) {
+        #expect(KillerIdea.returnsFromDismissal(saved: saved, cited: cited) == returns)
+    }
+
+    /// The Improve screen marks the version in use: the original until one is kept, then the kept round.
+    @Test func versionInUseFollowsWhatWasKept() {
+        let idea = KillerIdea(key: "k", title: "T")
+        idea.pitch = "old pitch"; idea.buyer = "b"; idea.pricing = "$2"
+        let original = IdeaVersion(idea)
+        var round = original
+        round.pitch = "new pitch"
+        #expect(original.isInUse(by: idea, isOriginal: true) && !round.isInUse(by: idea, isOriginal: false))
+        round.apply(to: idea); idea.improvedAt = .now
+        #expect(!original.isInUse(by: idea, isOriginal: true) && round.isInUse(by: idea, isOriginal: false))
     }
 
     @Test func parsesPainPointComment() throws {
@@ -1325,6 +1348,27 @@ struct RefreshRoutineTests {
         #expect(ideas.count == 2)
         #expect(earlier.timesSeen == 2 && earlier.pitch == "p" && earlier.title == "Chase My Invoices")
         #expect(other.pitch == "unchanged")
+    }
+
+    /// A dismissed idea proposed again with the same evidence stays dismissed and unchanged; with new evidence it
+    /// returns, labelled. The idea step is told which ideas were dismissed.
+    @Test func dismissedIdeaReturnsOnlyWithNewEvidence() async throws {
+        let llm = ScriptedLLM(replies: ["Trends": .success(Self.trends), "Killer ideas": .success(Self.ideas),
+                                        "Devil's advocate": .success(Self.reviews)])
+        let h = try harness(llm: llm)
+        await h.service.refresh(force: true, notify: false)
+        let idea = try #require(try h.context.fetch(FetchDescriptor<KillerIdea>()).first)
+        idea.isDismissed = true; idea.pitch = "kept as dismissed"
+        try h.context.save()
+
+        await h.service.refresh(force: true, notify: false)
+        #expect(idea.isDismissed && idea.pitch == "kept as dismissed" && !idea.backWithNewEvidence)
+        #expect(DigestService.leaderboardLine(idea).hasSuffix("[dismissed by the user]"))
+
+        idea.evidenceURLs = []
+        try h.context.save()
+        await h.service.refresh(force: true, notify: false)
+        #expect(!idea.isDismissed && idea.pitch == "p" && idea.backWithNewEvidence)
     }
 
     @Test func aiFailureFallsBackToKeywordsWithAPlainWarning() async throws {

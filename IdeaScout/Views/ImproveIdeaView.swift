@@ -1,6 +1,7 @@
 // ImproveIdeaView.swift
 // The "Improve this idea" screen: start a run (cost shown first), watch the rounds, compare each version with the
-// original, keep one, or undo a kept improvement. Starting again asks first, because it's another paid run.
+// original, keep one (a confirmation says so, and the version in use is marked), or undo a kept improvement.
+// Starting again asks first, because it's another paid run.
 
 import SwiftUI
 import SwiftData
@@ -15,6 +16,8 @@ struct ImproveIdeaView: View {
     /// The last error: a plain message and any technical detail.
     @State private var failure: (message: String, details: String?)?
     @State private var confirmAgain = false
+    /// What the last keep or undo did, shown at the top until the next action.
+    @State private var notice: String?
 
     private var isRunning: Bool { service.improvingIdea == idea.key }
     private var costText: String { cost.map { " · up to " + AppSettings.approximateCostText($0) } ?? "" }
@@ -30,11 +33,19 @@ struct ImproveIdeaView: View {
 
     var body: some View {
         Form {
+            if let notice {
+                Section {
+                    Label(notice, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                }
+            }
             Section {
                 Text(intro)
                 startButton
                 if idea.originalVersion != nil && !isRunning {
-                    Button("Undo improvement", systemImage: "arrow.uturn.backward") { service.undoImprovement(of: idea) }
+                    Button("Undo improvement", systemImage: "arrow.uturn.backward") {
+                        service.undoImprovement(of: idea)
+                        announce("Original put back. The idea uses the version the daily scan proposed.")
+                    }
                         .frame(minHeight: 44)
                         .accessibilityHint("Puts back the idea as the daily scan proposed it")
                 }
@@ -87,8 +98,14 @@ struct ImproveIdeaView: View {
     @ViewBuilder private func versionSections(_ run: IdeaImprover.Run) -> some View {
         ForEach(Array(run.versions.enumerated()), id: \.offset) { index, version in
             Section {
+                let inUse = version.isInUse(by: idea, isOriginal: index == 0)
                 HStack {
                     Text(index == 0 ? "Original" : "Round \(index)").font(.headline)
+                    if inUse {
+                        Label("In use", systemImage: "checkmark.seal.fill")
+                            .font(.caption.bold()).foregroundStyle(.green)
+                            .accessibilityLabel("This version is in use")
+                    }
                     Spacer()
                     KillerScoreBadge(score: version.score)
                 }
@@ -98,8 +115,8 @@ struct ImproveIdeaView: View {
                     Label(version.offer == nil ? "Has a weak spot" : "Not vibe-codable", systemImage: "xmark.octagon")
                         .foregroundStyle(.red)
                 }
-                if index > 0 && version.passes && !isRunning {
-                    Button("Keep this version", systemImage: "checkmark.circle") { service.keep(version, for: idea) }
+                if index > 0 && version.passes && !isRunning && !inUse {
+                    Button("Keep this version", systemImage: "checkmark.circle") { keep(version, round: index) }
                         .frame(minHeight: 44)
                 }
                 if !version.changes.isEmpty { labelled("What changed", version.changes) }
@@ -137,9 +154,24 @@ struct ImproveIdeaView: View {
         return "This makes more paid AI requests\(price) and replaces these versions. Spent today: \(spent)\(limit)."
     }
 
+    /// Keeps a version and says so, with the score change.
+    private func keep(_ version: IdeaVersion, round: Int) {
+        let before = idea.killerScore
+        service.keep(version, for: idea)
+        let score = { (s: Double) in s.formatted(.number.precision(.fractionLength(1))) }
+        announce("Kept round \(round): score \(score(before)) → \(score(idea.killerScore)). The idea now uses this version.")
+    }
+
+    /// Shows a notice at the top and reads it out with VoiceOver.
+    private func announce(_ text: String) {
+        notice = text
+        AccessibilityNotification.Announcement(text).post()
+    }
+
     /// Starts a run; errors show on screen. Runs in its own task, so leaving the screen doesn't waste paid calls.
     private func start() {
         failure = nil
+        notice = nil
         Task {
             do {
                 try await service.improve(idea)

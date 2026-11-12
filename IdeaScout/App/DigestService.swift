@@ -322,7 +322,7 @@ final class DigestService {
             return
         }
         do {
-            let leaderboard = topKillerIdeas(context: context, limit: 10).map { "\($0.title): \($0.pitch)" }
+            let leaderboard = topKillerIdeas(context: context, limit: 10).map(Self.leaderboardLine)
             stage = .ideas
             // `onCritique` is called from the engine off the main actor; it hops back to update `stage`,
             // which drives the progress row ("Step … · Devil's advocate").

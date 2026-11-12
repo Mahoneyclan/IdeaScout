@@ -1,5 +1,5 @@
 // KillerIdeaDetailView.swift
-// The idea detail screen: the opportunity, one-week test, devil's advocate (with "Improve this idea"), scores and
+// The idea detail screen: "Improve this idea" up top, the opportunity, one-week test, devil's advocate, scores and
 // evidence links, with the starter kit as the main action.
 
 import SwiftUI
@@ -29,10 +29,19 @@ struct KillerIdeaDetailView: View {
                 KillerStatusLabel(score: idea.killerScore, rejected: idea.criticRejected)
                 IdeaKindTag(idea: idea)
                 if let improved = idea.improvedAt {
-                    Label("Improved on \(improved.formatted(date: .abbreviated, time: .omitted))", systemImage: "arrow.up.circle")
-                        .foregroundStyle(.secondary)
+                    Label("Using the improved version, kept \(improved.formatted(date: .abbreviated, time: .omitted))",
+                          systemImage: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
                 }
                 Text(idea.pitch)
+                NavigationLink {
+                    ImproveIdeaView(idea: idea)
+                } label: {
+                    Label(idea.improvedAt == nil ? "Improve this idea" : "Improve again or undo", systemImage: "arrow.up.circle")
+                        .font(.headline)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityHint("AI rewrites answer the devil's advocate; you choose which version to keep")
             }
             Section("The opportunity") {
                 VStack(alignment: .leading, spacing: 4) {
@@ -76,12 +85,6 @@ struct KillerIdeaDetailView: View {
                     Text("Verdict").font(.subheadline.bold())
                     Text(idea.verdict)
                 }
-                NavigationLink {
-                    ImproveIdeaView(idea: idea)
-                } label: {
-                    Label("Improve this idea", systemImage: "arrow.up.circle")
-                }
-                .frame(minHeight: 44)
             }
             if idea.engineVersion >= 1 {
                 IdeaPrinciplesSections(idea: idea)

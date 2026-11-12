@@ -1,5 +1,5 @@
 // KillerIdea.swift
-// The saved killer idea (SwiftData) and its scoring: killer score, leaderboard bonus and days seen.
+// The saved killer idea (SwiftData) and its scoring: killer score, leaderboard order and days seen.
 // Independent of digests, so it survives when the digest it came from is replaced or deleted.
 
 import Foundation
@@ -59,7 +59,7 @@ import SwiftData
     var firstSeen: Date = Date.now
     /// When it was last proposed.
     var lastSeen: Date = Date.now
-    /// On how many different days it was proposed; adds a leaderboard bonus.
+    /// On how many different days it was proposed (shown as "N days"; no ranking bonus since 13 Nov 2026).
     var timesSeen = 1
     /// Start of each day the idea was proposed.
     var daysSeen: [Date] = []
@@ -67,8 +67,12 @@ import SwiftData
     var isSaved = false
     /// When it was saved (Saved tab order), or `nil`.
     var savedAt: Date?
-    /// Hidden from the leaderboard by the user. Cleared if the idea is proposed again.
+    /// Hidden from the leaderboard by the user. Cleared only if a later scan proposes it with evidence it didn't
+    /// have before (owner's decision, 13 Nov 2026).
     var isDismissed = false
+    /// It was dismissed, then came back because a scan cited new evidence; shown as "Back with new evidence" until
+    /// the next scan that proposes it.
+    var backWithNewEvidence = false
     /// The starter kit as JSON (see `StarterKit` and `starterKit`), or empty when none has been made.
     var starterKitJSON: String = ""
     /// When the starter kit was made.
@@ -203,27 +207,22 @@ import SwiftData
         return total / (6 + timingWeight)
     }
 
-    /// Killer score plus a bonus for coming back on several days (up to +0.6).
-    var leaderboardScore: Double { Self.leaderboardScore(killer: killerScore, timesSeen: timesSeen) }
-
     /// Leaderboard order: ideas judged on the five principles first (owner's default, 11 Nov 2026: older ideas rank
     /// below new ones until they come back), then ideas the devil's advocate backed before ones it rejected (owner,
-    /// 12 Nov 2026), then by leaderboard score.
+    /// 12 Nov 2026), then by killer score. Coming back on more days earns no bonus (owner, 13 Nov 2026), so a
+    /// returning idea can't push a stronger new one down.
     static func ranksAbove(_ a: KillerIdea, _ b: KillerIdea) -> Bool {
         if a.engineVersion != b.engineVersion { return a.engineVersion > b.engineVersion }
         if a.criticRejected != b.criticRejected { return !a.criticRejected }
-        return a.leaderboardScore > b.leaderboardScore
+        return a.killerScore > b.killerScore
     }
 
-    /// +0.15 for each extra day it was proposed, up to 4 extra days (+0.6), so ideas that keep coming
-    /// back rise without outranking a clearly stronger idea.
+    /// Whether a dismissed idea may come back: only if the scan cites evidence it didn't have before.
     /// - Parameters:
-    ///   - killer: The killer score (0–5).
-    ///   - timesSeen: Days it has been proposed (1 or more).
-    /// - Returns: The leaderboard score (0–5.6).
-    static func leaderboardScore(killer: Double, timesSeen: Int) -> Double {
-        killer + Double(min(max(timesSeen - 1, 0), 4)) * 0.15
-    }
+    ///   - saved: The dismissed idea's evidence links.
+    ///   - cited: The links the new proposal cites.
+    /// - Returns: `true` if any cited link is new.
+    static func returnsFromDismissal(saved: [String], cited: [String]) -> Bool { !Set(cited).subtracting(saved).isEmpty }
 
     /// Whether the idea was proposed on the given day. Ideas saved before days were recorded
     /// fall back to their first and last day.
