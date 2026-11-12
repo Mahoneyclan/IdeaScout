@@ -59,7 +59,7 @@ extension KillerEngine {
     /// - Throws: Errors from the AI call or the parser.
     func critique(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String,
                   tool: BuilderTool = .claudeCode, appType: BuilderTool.AppType? = nil) async throws -> [Review] {
-        let data = try await llm.client.complete(system: Self.critiqueInstructions,
+        let data = try await (judge ?? llm.client).complete(system: Self.critiqueInstructions,
                                                  prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe, tool: tool, appType: appType),
                                                  schema: Self.reviewSchema, effort: "high", feature: "Devil's advocate")
         return try Self.parseReviews(data)

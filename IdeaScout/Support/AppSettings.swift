@@ -113,6 +113,24 @@ enum AppSettings {
     /// Room for about four refreshes a day with Claude Sonnet at 300 items, or about two with Opus (measured
     /// costs in README; the in-app estimate, `estimatedRefreshCost`, gives similar figures).
     static let defaultDailyCap = 1.00
+    /// The limits offered in Settings, besides "No limit" (owner's decision, 13 Nov 2026: $1 to $10 a day).
+    static let dailyCapChoices: [Double] = [1, 2, 3, 5, 10]
+
+    /// Moves a limit saved from the older choices ($0.20–$2) onto the current ones, so Settings never shows a blank
+    /// choice. "No limit" (0) stays; anything else goes up to the next choice, at most $10.
+    /// - Parameter cap: The saved limit.
+    /// - Returns: 0 or one of `dailyCapChoices`.
+    static func currentCapChoice(_ cap: Double) -> Double {
+        guard cap > 0 else { return 0 }
+        return dailyCapChoices.first { $0 >= cap } ?? dailyCapChoices[dailyCapChoices.count - 1]
+    }
+
+    /// Rewrites a saved limit that isn't one of the current choices. Called once at launch.
+    static func moveDailyCapToCurrentChoices() {
+        guard let saved = defaults.object(forKey: Keys.dailyCap) as? Double else { return }
+        let current = currentCapChoice(saved)
+        if current != saved { defaults.set(current, forKey: Keys.dailyCap) }
+    }
 
     /// Whether today's recorded spending has reached the limit.
     static var isOverDailyCap: Bool { overCap(spent: UsageTracker.summary().today.cost, cap: dailyCap) }
@@ -215,13 +233,28 @@ enum AppSettings {
     }
 
     /// A client for a cloud provider, with its chosen model and price.
+    /// - Parameters:
+    ///   - provider: The provider.
+    ///   - step: The scan step, which picks the model when Claude's "Mixed" is chosen; writing by default.
     /// - Returns: `nil` if the provider is Apple or has no API key saved.
-    static func makeClient(for provider: AIProvider) -> (any LLMClient)? {
+    static func makeClient(for provider: AIProvider, step: ScanStep = .writing) -> (any LLMClient)? {
         guard let keyName = provider.keychainKey, let key = Keychain.get(keyName) else { return nil }
-        let model = model(for: provider)
+        let chosen = model(for: provider)
+        let model = provider == .claude ? step.model(chosen: chosen) : chosen
         let price = price(for: provider, model: model)
         if provider == .claude { return ClaudeClient(apiKey: key, model: model, price: price) }
         return OpenAICompatibleClient(provider: provider, apiKey: key, model: model, price: price)
+    }
+
+    /// Whether Claude is chosen with "Mixed": a model for each scan step.
+    static var usesMixedModels: Bool { provider == .claude && model(for: .claude) == ScanStep.mixedModel }
+
+    /// The client for one scan step when "Mixed" is chosen and agreed to.
+    /// - Parameter step: The scan step.
+    /// - Returns: A client on that step's model, or `nil` when every step uses the same model (or there's no key).
+    static func stepClient(_ step: ScanStep) -> (any LLMClient)? {
+        guard usesMixedModels, hasConsent(.claude) else { return nil }
+        return makeClient(for: .claude, step: step)
     }
 
     /// The model chosen for a provider (the recommended one unless the user picked another).

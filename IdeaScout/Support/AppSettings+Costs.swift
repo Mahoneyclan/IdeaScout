@@ -9,24 +9,39 @@ extension AppSettings {
     /// the refresh button. Fitted to measured Claude Opus costs (about $0.29 at 150 items, $0.40–0.45 at 300) so the
     /// high end isn't below them (owner's choice, 31 Oct 2026), and scaled by how the model's price compares with
     /// Opus's, so dearer models show more and cheaper ones less.
+    /// With "Mixed", the reading share (per item) is priced as Haiku, and the fixed share is split evenly between
+    /// writing (Sonnet) and judging (Opus).
     /// - Parameters:
     ///   - items: Items the AI reads per refresh.
     ///   - price: The chosen model's price.
+    ///   - mixed: Whether Claude's "Mixed" is chosen (`price` is then ignored).
     /// - Returns: Low and high estimates; the high end is 1.5× the low.
-    static func estimatedRefreshCost(items: Int, price: ModelPrice) -> ClosedRange<Double> {
-        let base = (0.11 + Double(items) * 0.00064) * refreshPriceScale(price)
+    static func estimatedRefreshCost(items: Int, price: ModelPrice, mixed: Bool = false) -> ClosedRange<Double> {
+        let perItem = Double(items) * 0.00064
+        let base = mixed
+            ? perItem * refreshPriceScale(stepPrice(.reading))
+                + 0.055 * (refreshPriceScale(stepPrice(.writing)) + refreshPriceScale(stepPrice(.judging)))
+            : (0.11 + perItem) * refreshPriceScale(price)
         return base...(base * 1.5)
+    }
+
+    /// The list price of the model "Mixed" uses for a step.
+    /// - Parameter step: The scan step.
+    /// - Returns: That model's price.
+    static func stepPrice(_ step: ScanStep) -> ModelPrice {
+        price(for: .claude, model: step.mixedModelID)
     }
 
     /// Claude Opus's price when the refresh costs above were measured (the 4.x and 5.5 list price).
     static let refreshReferencePrice = ModelPrice(input: 4, output: 20)
 
     /// How a model's price compares with `refreshReferencePrice`, for a refresh's token mix. A refresh reads far
-    /// more than it writes; 5 input tokens per output token is a round figure close to the measured runs.
+    /// more than it writes; 5 input tokens per output token is a round figure close to the measured runs. Priced
+    /// as one call under 100,000 prompt tokens, the size of a refresh's calls, so a long-prompt rate doesn't apply.
     /// - Parameter price: The model's price.
     /// - Returns: The multiplier: 1 for Opus, 2.5 for a model at $10/$50, 0 for a free model.
     static func refreshPriceScale(_ price: ModelPrice) -> Double {
-        price.cost(input: 500_000, output: 100_000) / refreshReferencePrice.cost(input: 500_000, output: 100_000)
+        price.cost(input: 50_000, output: 10_000) / refreshReferencePrice.cost(input: 50_000, output: 10_000)
     }
 
     /// The price of the cloud model a refresh would use: the chosen provider when it has a key. Consent isn't
@@ -43,9 +58,9 @@ extension AppSettings {
     ///   - items: Items the AI reads per refresh.
     ///   - price: The chosen model's price, or `nil` when the refresh is free.
     /// - Returns: "Free", or the high estimate as in `approximateCostText` ("~$0.45").
-    static func refreshCostText(items: Int, price: ModelPrice?) -> String {
+    static func refreshCostText(items: Int, price: ModelPrice?, mixed: Bool = false) -> String {
         guard let price else { return "Free" }
-        return approximateCostText(estimatedRefreshCost(items: items, price: price).upperBound)
+        return approximateCostText(estimatedRefreshCost(items: items, price: price, mixed: mixed).upperBound)
     }
 
     /// Rough cost of one "Suggest variants" request, in US dollars. Assumes 1,500 input tokens (instructions,
@@ -96,7 +111,9 @@ extension AppSettings {
     /// - Note: Reads the Keychain, so call it on demand rather than in every view update.
     static func improveCost() -> Double? {
         guard hasConsent(provider), let price = chosenModelPrice() else { return nil }
-        return estimatedImproveCost(price: price)
+        // With "Mixed", Sonnet rewrites and Opus judges: about half the run at each price.
+        guard usesMixedModels else { return estimatedImproveCost(price: price) }
+        return (estimatedImproveCost(price: stepPrice(.writing)) + estimatedImproveCost(price: stepPrice(.judging))) / 2
     }
 
     /// A cost for buttons and confirmations: "~$0.02", or "<$0.01" when it would round to nothing.

@@ -174,7 +174,7 @@ struct ModelChooser: View {
                            value: "\(known.price.input.formatted(.currency(code: "USD"))) in · \(known.price.output.formatted(.currency(code: "USD"))) out")
                 .font(.caption)
         } else {
-            TextField("Model name, e.g. \(provider.recommendedModel)", text: $model)
+            TextField("Model name, e.g. \(provider == .claude ? ScanStep.writing.mixedModelID : provider.recommendedModel)", text: $model)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($typing)

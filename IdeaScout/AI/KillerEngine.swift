@@ -11,8 +11,10 @@ import Foundation
 /// sceptical pass try to kill them. Up to 3 survivors a day are kept. Needs a cloud AI:
 /// Apple's on-device model is too small for this kind of reasoning.
 struct KillerEngine {
-    /// The cloud AI to use (only its client is needed).
+    /// The cloud AI that writes the ideas (only its client is needed).
     let llm: LLMSummarizer
+    /// The devil's advocate's AI, when it differs from the writer's ("Mixed"); `nil` uses `llm`.
+    var judge: (any LLMClient)?
     /// Called when the devil's-advocate step starts (for progress on screen).
     var onCritique: @Sendable () async -> Void = {}
 

@@ -69,7 +69,7 @@ struct RefreshBar: View {
 
     /// The estimated cost of one refresh, shown on the button: "~$0.45", or "Free".
     private var costText: String {
-        AppSettings.refreshCostText(items: maxItems, price: price)
+        AppSettings.refreshCostText(items: maxItems, price: price, mixed: AppSettings.usesMixedModels)
     }
 
     var body: some View {

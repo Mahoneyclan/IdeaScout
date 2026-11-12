@@ -47,6 +47,7 @@ extension DigestService {
         let title = idea.title, evidence = idea.evidenceTitles, aboutMe = AppSettings.aboutMe, tool = AppSettings.builderTool,
             appType = AppSettings.appType
         let client = llm.client
+        let judge = dependencies.stepClient(.judging) ?? client
         var round = 1
         _ = try await IdeaImprover.run(
             from: IdeaVersion(idea), bar: AppSettings.qualityBar,
@@ -61,7 +62,7 @@ extension DigestService {
             },
             review: { version in
                 improveStep = "Round \(round) of \(IdeaImprover.maxRounds): the devil's advocate is judging it…"
-                let data = try await client.complete(
+                let data = try await judge.complete(
                     system: KillerEngine.critiqueInstructions,
                     prompt: IdeaImprover.reviewPrompt(version, title: title, evidence: evidence, aboutMe: aboutMe, tool: tool, appType: appType),
                     schema: KillerEngine.reviewSchema, effort: "high", feature: "Improve idea: devil's advocate")

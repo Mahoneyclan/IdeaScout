@@ -16,16 +16,24 @@ struct ModelPrice: Equatable, Sendable {
     var output: Double
     /// Input tokens read from the provider's cache.
     var cachedInput: Double
+    /// Prompts longer than this many tokens (input, cache writes and cache reads together) cost more; `nil` if never.
+    var longPromptTokens: Int?
+    /// What every price is multiplied by for a prompt over `longPromptTokens`.
+    var longPromptMultiplier = 1.0
 
     /// Creates a price. If no cache price is given, assumes the common 10% of the input price.
     /// - Parameters:
     ///   - input: Dollars per million uncached input tokens.
     ///   - output: Dollars per million output tokens.
     ///   - cachedInput: Dollars per million cached input tokens; `nil` means 10% of `input`.
-    init(input: Double, output: Double, cachedInput: Double? = nil) {
+    ///   - longPromptTokens: Prompts longer than this cost `longPromptMultiplier` times as much; `nil` if never.
+    ///   - longPromptMultiplier: The multiplier for long prompts.
+    init(input: Double, output: Double, cachedInput: Double? = nil, longPromptTokens: Int? = nil, longPromptMultiplier: Double = 1) {
         self.input = input
         self.output = output
         self.cachedInput = cachedInput ?? input / 10
+        self.longPromptTokens = longPromptTokens
+        self.longPromptMultiplier = longPromptMultiplier
     }
 
     /// Dollar cost of one call.
@@ -36,8 +44,10 @@ struct ModelPrice: Equatable, Sendable {
     ///   - cacheRead: Tokens read from the cache.
     /// - Returns: US dollars.
     func cost(input inTokens: Int, output outTokens: Int, cacheWrite: Int = 0, cacheRead: Int = 0) -> Double {
-        (Double(inTokens) * input + Double(outTokens) * output
-         + Double(cacheWrite) * input * 1.25 + Double(cacheRead) * cachedInput) / 1_000_000
+        let isLong = longPromptTokens.map { inTokens + cacheWrite + cacheRead > $0 } ?? false
+        return (Double(inTokens) * input + Double(outTokens) * output
+                + Double(cacheWrite) * input * 1.25 + Double(cacheRead) * cachedInput) / 1_000_000
+            * (isLong ? longPromptMultiplier : 1)
     }
 }
 
@@ -174,11 +184,17 @@ enum AIProvider: String, CaseIterable, Identifiable, Sendable {
     /// and Fable 5.2's against Anthropic's pricing page on 10 Nov 2026. On 11 Nov 2026 every price was rechecked against
     /// each provider's pricing page, and the cached-input prices of Sonnet 5.5, GPT-6.1 Sol, Grok 4.3 and Qwen 3.8 Max
     /// were corrected or filled in (DeepSeek's peak price is kept as a safe upper guide).
-    /// Labels compare cost with the default model. Any other model can be typed in with its own price.
+    /// Haiku 5.5's price was checked against Anthropic's pricing page on 13 Nov 2026 (prompts over 100,000 tokens cost 5×).
+    /// Claude's first option, "Mixed", uses a model per step (`ScanStep`) and is priced as its writing model.
+    /// Labels compare cost with Sonnet 5.5. Any other model can be typed in with its own price.
     var models: [ModelOption] {
         switch self {
         case .claude:
-            [ModelOption(id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", price: ModelPrice(input: 2, output: 10, cachedInput: 0.1)),
+            [ModelOption(id: ScanStep.mixedModel, label: "Mixed: Haiku reads, Sonnet writes, Opus judges",
+                         price: ModelPrice(input: 2, output: 10, cachedInput: 0.1)),
+             ModelOption(id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", price: ModelPrice(input: 2, output: 10, cachedInput: 0.1)),
+             ModelOption(id: "claude-haiku-5-5", label: "Claude Haiku 5.5 (cheapest, about 1/20 the cost)",
+                         price: ModelPrice(input: 0.1, output: 0.5, cachedInput: 0.01, longPromptTokens: 100_000, longPromptMultiplier: 5)),
              ModelOption(id: "claude-opus-5-5", label: "Claude Opus 5.5 (sharper, 2× cost)", price: ModelPrice(input: 4, output: 20, cachedInput: 0.2)),
              ModelOption(id: "claude-fable-5-2", label: "Claude Fable 5.2 (most capable, 4× cost)",
                          price: ModelPrice(input: 8, output: 40, cachedInput: 0.2))]

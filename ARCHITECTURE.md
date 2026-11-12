@@ -50,6 +50,7 @@ KillerIdea  – an AI business idea that survived the devil's advocate; updated 
 | Fetchers | `Sources/` (one file per source family; shared helpers in `SourceSupport.swift`) | One per source; keyless public APIs; return `FetchedItem`s |
 | `Summarizer` implementations | `AI/LLMSummarizer.swift`, `AI/AppleSummarizer.swift`, `AI/Summarizer.swift` | Cloud AI, Apple on-device, keyword fallback |
 | AI clients | `AI/LLMSummarizer.swift` (`ClaudeClient`), `AI/OpenAICompatibleClient.swift` | Claude (streamed) and every other provider; shared retries |
+| Model per scan step | `AI/ScanStep.swift`, `AppSettings.stepClient` | Claude's "Mixed": Haiku reads, Sonnet writes, Opus judges |
 | Provider catalogue | `AI/AIProviders.swift` | Providers, models, prices, countries, API details |
 | `KillerEngine` | `AI/KillerEngine.swift` | Idea generation, devil's advocate, evidence caps |
 | `StoreManager` | `Store/StoreManager.swift` | Free trial and one-off unlock (StoreKit 2) |

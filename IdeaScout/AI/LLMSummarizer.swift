@@ -257,7 +257,7 @@ struct ClaudeClient: LLMClient {
     /// The user's Anthropic key, from the Keychain. Only ever sent to Anthropic in the `x-api-key` header.
     let apiKey: String
     /// Model ID (Sonnet by default).
-    var model = AIProvider.claude.recommendedModel
+    var model = ScanStep.writing.mixedModelID
     /// Price used for cost tracking.
     var price = AIProvider.claude.models[0].price
 
@@ -291,7 +291,9 @@ struct ClaudeClient: LLMClient {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         // Lets the API retry a declined request on a suitable fallback model.
-        request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
+        if Self.usesServerFallback(model) {
+            request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
+        }
         request.httpBody = payload
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
@@ -349,19 +351,26 @@ struct ClaudeClient: LLMClient {
     ///   - model: API model ID.
     /// - Returns: The JSON body, without `stream` (the caller adds it).
     static func requestBody(system: String, prompt: String, schema: [String: Any], effort: String = "medium",
-                            model: String = AIProvider.claude.recommendedModel) -> [String: Any] {
-        [
+                            model: String = ScanStep.writing.mixedModelID) -> [String: Any] {
+        var body: [String: Any] = [
             "model": model,
             "max_tokens": 32000,
             "system": system,
-            "fallbacks": "default",
             "output_config": [
                 "effort": effort,
                 "format": ["type": "json_schema", "schema": schema],
             ],
             "messages": [["role": "user", "content": prompt]],
         ]
+        if usesServerFallback(model) { body["fallbacks"] = "default" }
+        return body
     }
+
+    /// Whether a model can use server-side fallback. Anthropic's refusals page (checked 13 Nov 2026) says Claude
+    /// Haiku 5.5 has no server-side fallback, so Haiku requests don't ask for it.
+    /// - Parameter model: API model ID.
+    /// - Returns: `false` for Haiku models.
+    static func usesServerFallback(_ model: String) -> Bool { !model.hasPrefix("claude-haiku") }
 }
 
 // MARK: - Retries (shared by every provider)
@@ -430,16 +439,23 @@ struct LLMHTTPError: LocalizedError, Equatable {
     /// A plain message for the user. Security/UX: never includes the provider's raw reply, which can
     /// contain internal details (request IDs, organisation names); that goes in `technicalDetail`.
     var errorDescription: String? {
-        switch status {
+        if needsCredit {
+            return "Your \(provider) account is out of credit. Add credit on the provider's billing page, then try again."
+        }
+        return switch status {
         case 401, 403: "\(provider) rejected the API key (error \(status)). Check it in Settings."
         case 404: "\(provider) doesn't recognise the model (error 404). Check the model name in Settings."
-        case 400: "\(provider) couldn't accept the request (error 400). Check the model name, or try again later."
+        case 400: "\(provider) couldn't accept the request (error 400). Details below say why; try again later."
         case 402: "\(provider) says the account needs credit or billing set up (error 402)."
         case 429: "\(provider) is limiting requests right now (error 429). Try again in a few minutes."
         case 500...599: "\(provider) is busy or having problems right now (error \(status)). Try again later."
         default: "\(provider) couldn't complete the request (error \(status)). Try again later."
         }
     }
+
+    /// Whether the reply says the account has run out of credit. Anthropic sends this as a plain 400
+    /// `invalid_request_error`, so only its message tells it apart (recorded reply, 13 Nov 2026).
+    var needsCredit: Bool { detail.lowercased().contains("credit balance is too low") }
 
     /// The raw status and start of the reply, shown only behind "Details" for diagnosis. This text is
     /// stored with the day's digest, so anything that looks like a key or token is hidden first.

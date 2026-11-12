@@ -77,7 +77,7 @@ struct ScanRankingSettings: View {
                 Picker("Items Claude reads", selection: $maxItems) {
                     ForEach(AppSettings.maxItemChoices, id: \.self) { count in
                         if let price {
-                            let cost = AppSettings.estimatedRefreshCost(items: count, price: price)
+                            let cost = AppSettings.estimatedRefreshCost(items: count, price: price, mixed: AppSettings.usesMixedModels)
                             Text("\(count) · ~\(cost.lowerBound.formatted(.currency(code: "USD")))–\(cost.upperBound.formatted(.currency(code: "USD")))").tag(count)
                         } else {
                             Text("\(count) · free").tag(count)
@@ -179,7 +179,7 @@ struct AISettings: View {
                 LabeledContent("This month", value: usage.thisMonth.cost.formatted(.currency(code: "USD")))
                 LabeledContent("All time", value: usage.allTime.cost.formatted(.currency(code: "USD")))
                 Picker("Daily limit", selection: $dailyCap) {
-                    ForEach([0.2, 0.4, 0.6, 1.0, 2.0], id: \.self) { Text($0.formatted(.currency(code: "USD"))).tag($0) }
+                    ForEach(AppSettings.dailyCapChoices, id: \.self) { Text($0.formatted(.currency(code: "USD"))).tag($0) }
                     Text("No limit").tag(0.0)
                 }
                 DisclosureGroup("Details") {

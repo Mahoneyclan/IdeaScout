@@ -42,6 +42,8 @@ final class DigestService {
         var needsConsent: @MainActor () -> Bool
         /// Posts the "ideas are ready" notification.
         var notify: @MainActor (_ themes: Int, _ items: Int) async -> Void
+        /// A client for one scan step when Claude's "Mixed" is chosen; `nil` uses the summariser's own client.
+        var stepClient: @MainActor (ScanStep) -> (any LLMClient)? = { _ in nil }
 
         /// The real app: settings, Keychain, StoreKit and notifications.
         static let live = Dependencies(
@@ -56,7 +58,8 @@ final class DigestService {
             },
             isOverDailyCap: { AppSettings.isOverDailyCap },
             needsConsent: { AppSettings.needsConsent },
-            notify: { themes, items in await Notifier.digestReady(themes: themes, items: items) })
+            notify: { themes, items in await Notifier.digestReady(themes: themes, items: items) },
+            stepClient: { AppSettings.stepClient($0) })
     }
 
     /// What this instance uses for sources, AI, trial state and notifications.
@@ -241,6 +244,7 @@ final class DigestService {
     /// - Returns: The result, or `nil` if the refresh was cancelled (nothing should be saved).
     private func findTrends(in items: [FetchedItem], warnings fetchWarnings: [String]) async -> TrendResult? {
         var summarizer = dependencies.makeSummarizer()
+        if summarizer is LLMSummarizer, let reader = dependencies.stepClient(.reading) { summarizer = LLMSummarizer(client: reader) }
         let hadCloudAI = summarizer is LLMSummarizer
         var warnings = fetchWarnings
         var killerNote: String?
@@ -323,7 +327,8 @@ final class DigestService {
             // `onCritique` is called from the engine off the main actor; it hops back to update `stage`,
             // which drives the progress row ("Step … · Devil's advocate").
             let service = self
-            let results = try await KillerEngine(llm: llm, onCritique: {
+            let writer = dependencies.stepClient(.writing).map { LLMSummarizer(client: $0) } ?? llm
+            let results = try await KillerEngine(llm: writer, judge: dependencies.stepClient(.judging), onCritique: {
                 await MainActor.run { service.stage = .critique }
             }).run(
                 .init(themes: builtThemes, items: trends.batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard,

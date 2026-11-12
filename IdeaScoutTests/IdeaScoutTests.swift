@@ -574,6 +574,15 @@ struct ReliabilityTests {
         #expect(LLMRetry.retryDelay(attempt: 0, retryAfter: 120, jitter: 0) == 30)
     }
 
+    /// An empty Anthropic account is a plain 400; the message must say "out of credit", not blame the model name.
+    @Test func outOfCreditSaysSo() {
+        let reply = #"{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."},"request_id":"req_x"}"#
+        let message = LLMHTTPError(status: 400, retryAfter: nil, detail: reply).errorDescription ?? ""
+        #expect(message.contains("out of credit"))
+        #expect(!message.contains("model name"))
+        #expect(LLMHTTPError(status: 400, retryAfter: nil, detail: "bad field").errorDescription?.contains("out of credit") == false)
+    }
+
     @Test func neverReplacesABetterDigest() {
         #expect(!DigestService.shouldReplace(existing: "Claude", with: "Keywords"))
         #expect(!DigestService.shouldReplace(existing: "Claude", with: "Apple on-device"))
@@ -587,6 +596,12 @@ struct ReliabilityTests {
         #expect(AppSettings.overCap(spent: 0.41, cap: 0.40))
         #expect(!AppSettings.overCap(spent: 0.39, cap: 0.40))
         #expect(!AppSettings.overCap(spent: 5, cap: 0))   // 0 = no limit
+    }
+
+    /// Money: limits saved from the older $0.20–$2 choices move up onto $1–$10; "No limit" stays.
+    @Test(arguments: [(0.0, 0.0), (0.2, 1.0), (0.6, 1.0), (1.0, 1.0), (2.0, 2.0), (4.0, 5.0), (25.0, 10.0)])
+    func oldDailyLimitsMoveToCurrentChoices(saved: Double, expected: Double) {
+        #expect(AppSettings.currentCapChoice(saved) == expected)
     }
 
     /// Money: "Suggest variants" shows an honest price before the paid request.
@@ -898,8 +913,9 @@ struct ProviderChoiceTests {
             #expect(provider.keychainKey != nil)
             if provider != .claude { #expect(provider.chatURL != nil) }
         }
-        #expect(AIProvider.claude.recommendedModel == "claude-sonnet-5-5")
-        #expect(AIProvider.claude.models.map(\.id) == ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"])
+        #expect(AIProvider.claude.recommendedModel == ScanStep.mixedModel, "Mixed is the default (owner, 13 Nov 2026)")
+        #expect(AIProvider.claude.models.map(\.id)
+                == [ScanStep.mixedModel, "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5", "claude-fable-5-2"])
         #expect(AIProvider.openai.recommendedModel == "gpt-6.1-sol")
         #expect(Set(AIProvider.allCases.compactMap(\.keychainKey)).count == 9)
         #expect(AIProvider.grok.recommendedModel == "grok-4.3")
@@ -1224,7 +1240,7 @@ struct RefreshRoutineTests {
     final class Box { var count = 0 }
 
     private func harness(llm: ScriptedLLM?, access: StoreManager.Access = .unlocked, overCap: Bool = false,
-                         needsConsent: Bool = false) throws -> Harness {
+                         needsConsent: Bool = false, steps: [ScanStep: ScriptedLLM] = [:]) throws -> Harness {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let box = Box()
@@ -1240,13 +1256,26 @@ struct RefreshRoutineTests {
             access: { access },
             isOverDailyCap: { overCap },
             needsConsent: { needsConsent },
-            notify: { _, _ in box.count += 1 })
+            notify: { _, _ in box.count += 1 },
+            stepClient: { steps[$0] })
         let service = DigestService(dependencies: deps)
         service.container = container
         return Harness(service: service, context: container.mainContext, notified: box)
     }
 
     private func digests(_ h: Harness) throws -> [Digest] { try h.context.fetch(FetchDescriptor<Digest>()) }
+
+    /// With "Mixed", each step goes to its own model: a step sent to the wrong one finds no scripted reply and fails.
+    @Test func mixedSendsEachStepToItsOwnModel() async throws {
+        let h = try harness(llm: ScriptedLLM(replies: [:]), steps: [
+            .reading: ScriptedLLM(replies: ["Trends": .success(Self.trends)]),
+            .writing: ScriptedLLM(replies: ["Killer ideas": .success(Self.ideas)]),
+            .judging: ScriptedLLM(replies: ["Devil's advocate": .success(Self.reviews)]),
+        ])
+        await h.service.refresh(force: true, notify: false)
+        #expect(try digests(h).first?.themeList.contains { $0.title == "Invoice automation" } == true)
+        #expect(try h.context.fetch(FetchDescriptor<KillerIdea>()).map(\.title) == ["InvoiceChaser"])
+    }
 
     @Test func fullRefreshSavesTrendsClustersAndIdeas() async throws {
         let h = try harness(llm: ScriptedLLM(replies: ["Trends": .success(Self.trends), "Killer ideas": .success(Self.ideas),

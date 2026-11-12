@@ -17,6 +17,7 @@ struct IdeaScoutApp: App {
     /// Also runs the one-time clean-up of removed sources (Product Hunt).
     init() {
         TestMode.prepare()
+        AppSettings.moveDailyCapToCurrentChoices()
         container = Self.openDatabase()
         CloudSync.start()
         SyncHousekeeping.mergeDuplicates(in: container.mainContext)
