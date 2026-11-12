@@ -43,7 +43,7 @@ struct DigestContentView: View {
     var body: some View {
         let starred = Set(ideas.map(\.key))
         let clusters = gamesFilter ? [] : digest.sortedThemes.filter(\.isPainCluster)
-        let withItems = Theme.ranked(digest.themes.filter { !$0.isPainCluster }, weights: weights).filter { !visibleItems($0).isEmpty }
+        let withItems = Theme.ranked(digest.themeList.filter { !$0.isPainCluster }, weights: weights).filter { !visibleItems($0).isEmpty }
         let themes = showBelowBar ? withItems : withItems.filter { $0.clears(qualityBar, weights: weights) }
         let hiddenCount = withItems.count - themes.count
         let dayIdeas = KillerIdea.seen(on: digest.day, in: killerIdeas)
@@ -77,7 +77,7 @@ struct DigestContentView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(cluster.title).font(.subheadline.bold())
-                                Text("\(cluster.buyer) · \(cluster.items.count) item\(cluster.items.count == 1 ? "" : "s")")
+                                Text("\(cluster.buyer) · \(cluster.itemList.count) item\(cluster.itemList.count == 1 ? "" : "s")")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }

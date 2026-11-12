@@ -6,7 +6,8 @@
 import Foundation
 
 /// Records what each cloud AI call cost, from the token counts in its reply.
-/// Stored in UserDefaults as a small ledger of daily totals (Apple's on-device AI is free and not tracked).
+/// Stored in UserDefaults as a small ledger of daily totals (Apple's on-device AI is free and not tracked), and shared
+/// with the user's other devices through iCloud (see CloudSync).
 enum UsageTracker {
     /// Claude Opus 5.5 list prices, in US dollars per million tokens, used for entries recorded
     /// before prices were stored per call. Thinking tokens are billed as output.
@@ -94,6 +95,13 @@ enum UsageTracker {
         let day = dayKey(date)
         ledger[day, default: [:]][feature] = (ledger[day]?[feature] ?? Usage()) + usage
         save(ledger)
+        CloudSync.publish(ledger: ledger)
+    }
+
+    /// This device's spending plus what the user's other devices shared through iCloud: what the daily limit and
+    /// the cost screen use, so the limit covers all devices together.
+    static func combinedLedger() -> Ledger {
+        CloudSync.combined(load(), others: CloudSync.otherLedgers(in: CloudSync.store))
     }
 
     /// Reads the whole ledger. Returns an empty ledger if none is saved or it can't be decoded.
@@ -112,6 +120,7 @@ enum UsageTracker {
     static func reset() {
         lock.lock(); defer { lock.unlock() }
         AppSettings.defaults.removeObject(forKey: storageKey)
+        CloudSync.publish(ledger: [:])
     }
 
     /// The ledger key for a date, in the phone's time zone with a fixed Gregorian "yyyy-MM-dd" format,
@@ -157,7 +166,7 @@ enum UsageTracker {
     ///   - now: "Today" for the calculation.
     ///   - days: How many recent days to list.
     /// - Returns: Today, month, all-time and per-feature totals.
-    static func summary(_ ledger: Ledger = load(), now: Date = .now, days: Int = 7) -> Summary {
+    static func summary(_ ledger: Ledger = combinedLedger(), now: Date = .now, days: Int = 7) -> Summary {
         let today = dayKey(now)
         let month = String(today.prefix(7))
         var s = Summary()

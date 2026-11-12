@@ -100,3 +100,8 @@ Merge into KillerIdeas (new, or update returning ones) ─▶ screens update aut
 
 ## Threading
 `DigestService` and `StoreManager` are `@MainActor` and `@Observable` (they drive the UI and use the main SwiftData context; views read them with `@Environment`). Network and AI work is `async` and awaited, so the UI stays responsive. Pure helpers that tests call are marked `nonisolated`.
+
+## iCloud sync (12 Nov 2026)
+- The database syncs through SwiftData's CloudKit support to the user's private iCloud database (`IdeaScoutApp.openDatabase`; falls back to device-only, with a note in About & privacy, if iCloud can't be opened). iCloud needs every stored field to have a default, relationships to be optional (`Digest.themes`, `Theme.items`: read through `themeList`, `itemList`) and no unique fields.
+- Because iCloud can't enforce "one per key", `SyncHousekeeping` merges copies of the same idea, starred project or day's scan at launch, when the app returns, and when changes arrive.
+- `CloudSync` uses iCloud key-value storage for the shared settings, each device's recent AI spending (added together for the daily limit) and a "today's scan has started" note: an automatic scan waits 30 minutes for another device's. API keys and consents never sync. Tests never touch iCloud.

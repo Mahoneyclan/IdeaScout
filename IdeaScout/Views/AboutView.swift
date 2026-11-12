@@ -56,8 +56,14 @@ struct AboutView: View {
                 }
             }
             Section {
-                Text("IdeaScout has no server and no tracking. Your settings, history and keys stay on this device. When you use a cloud AI, your About me, interest area, pain points and the collected public posts are sent directly to the provider you chose, using your own key.")
+                Text("IdeaScout has no server and no tracking. Your scans, ideas, saved projects, main settings and AI spending sync between your devices through your own iCloud account; I can't see them. Your API keys stay on each device. When you use a cloud AI, your About me, interest area, pain points and the collected public posts are sent directly to the provider you chose, using your own key.")
                     .font(.subheadline)
+                if CloudSync.databaseSyncFailed {
+                    Label("iCloud sync isn't working, so your scans and ideas are on this device only. Check you're signed in to iCloud, then restart IdeaScout.",
+                          systemImage: "icloud.slash")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                }
             } header: {
                 Text("Privacy")
             }
@@ -80,13 +86,13 @@ struct AboutView: View {
                     .confirmationDialog("Delete all your IdeaScout data?", isPresented: $confirmDelete, titleVisibility: .visible) {
                         Button("Delete everything", role: .destructive) { deleteBlocked = !service.deleteAllData() }
                     } message: {
-                        Text("This can't be undone. Your API keys will need to be entered again. Purchases are kept and can be restored.")
+                        Text("This can't be undone. It also deletes your IdeaScout data from iCloud and your other devices. Your API keys will need to be entered again. Purchases are kept and can be restored.")
                     }
                 if deleteBlocked {
                     Text("A refresh is running. Try again when it finishes.").font(.caption).foregroundStyle(.red)
                 }
             } footer: {
-                Text("Removes your history, ideas, saved projects, settings, API keys and cost records from this device. Purchases are kept.")
+                Text("Removes your history, ideas, saved projects, settings and cost records from this device, iCloud and your other devices, and your API keys from this device. Purchases are kept.")
             }
         }
         .readableList()

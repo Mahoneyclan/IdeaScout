@@ -85,6 +85,26 @@ final class IdeaScoutUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Welcome to IdeaScout"].waitForExistence(timeout: 10))
     }
 
+    /// Settings is a short list: a text setting opens its own screen, and its row then shows the value.
+    func testSettingsRowOpensItsScreenAndShowsTheValue() {
+        let app = launch("-ui-skip-welcome")
+        tab(app, "Settings").tap()
+        let row = element(app, containing: "Interest area")
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, containing: "Any area").exists, "blank shows as any area")
+        row.tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Fitness coaching")
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(element(app, containing: "Fitness coaching").waitForExistence(timeout: 5))
+        let shot = XCTAttachment(screenshot: app.screenshot())   // kept, to review the layout
+        shot.name = "Settings"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     /// iPad only: the main screen keeps working in landscape and back in portrait (iPhone stays portrait).
     func testIPadRotationKeepsTheMainScreenWorking() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPhone is portrait-only")

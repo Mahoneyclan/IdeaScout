@@ -9,30 +9,30 @@ import SwiftData
 /// Kept across days: when the same idea comes back, it's updated and climbs the leaderboard.
 @Model final class KillerIdea {
     /// Normalised title (see `key(for:)`), so the same idea on another day updates this record.
-    @Attribute(.unique) var key: String
+    var key: String = ""
     /// Short, memorable name, as the AI wrote it.
-    var title: String
+    var title: String = ""
     /// One-sentence pitch.
-    var pitch: String
+    var pitch: String = ""
     /// Who pays: a role in a type of business, or a type of consumer.
-    var buyer: String
+    var buyer: String = ""
     /// Pricing model and monthly price per customer.
-    var pricing: String
+    var pricing: String = ""
     /// What recently made it possible.
-    var whyNow: String
+    var whyNow: String = ""
     /// The cheapest way to test demand in a week, with a pass mark.
-    var oneWeekTest: String
+    var oneWeekTest: String = ""
     /// The manual task or costly workaround the product replaces.
     var replaces: String = ""
     /// Where a solo builder would find the first buyers (a marketplace, community or search phrase); empty
     /// for ideas found before sales channels were asked for.
     var channel: String = ""
     /// The devil's advocate's strongest objection.
-    var objection: String
+    var objection: String = ""
     /// Competitors named by the devil's advocate, or "none found".
-    var competitors: String
+    var competitors: String = ""
     /// One-sentence verdict, plus "Evidence that would raise the score" when given.
-    var verdict: String
+    var verdict: String = ""
     /// Titles and links of the items cited as evidence (parallel arrays; SwiftData stores arrays of plain values).
     var evidenceTitles: [String] = []
     /// Links matching `evidenceTitles`, by position.
@@ -56,9 +56,9 @@ import SwiftData
     /// The killer score each time the idea was proposed.
     var scoreHistory: [Double] = []
     /// When it was first proposed.
-    var firstSeen: Date
+    var firstSeen: Date = Date.now
     /// When it was last proposed.
-    var lastSeen: Date
+    var lastSeen: Date = Date.now
     /// On how many different days it was proposed; adds a leaderboard bonus.
     var timesSeen = 1
     /// Start of each day the idea was proposed.
@@ -120,7 +120,7 @@ import SwiftData
 
     /// Creates an empty idea; DigestService fills in the rest from the AI's reply.
     /// - Parameters:
-    ///   - key: `KillerIdea.key(for: title)`; unique, so the same idea matches across days.
+    ///   - key: `KillerIdea.key(for: title)`, so the same idea matches across days and devices.
     ///   - title: The AI's title.
     init(key: String, title: String) {
         self.key = key

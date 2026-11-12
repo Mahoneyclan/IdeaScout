@@ -33,7 +33,7 @@ struct SourcesSettings: View {
             } footer: {
                 Text("Comma-separated. Steers GitHub search (first \(GitHubFetcher.maxTopics) topics).")
             }
-            let counts = Dictionary(grouping: digests.first?.themes.flatMap(\.items) ?? [], by: \.source).mapValues(\.count)
+            let counts = Dictionary(grouping: digests.first?.themeList.flatMap(\.itemList) ?? [], by: \.source).mapValues(\.count)
             ForEach(Signal.allCases, id: \.self) { signal in
                 Section(signal.label) {
                     ForEach(SourceKind.allCases.filter { $0.signal == signal }) { kind in

@@ -74,6 +74,7 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 - The trends are saved as soon as they're ready, before the idea step, so a later failure can't lose them.
 - A good digest is never replaced by a weaker one (Claude > Apple > keywords) on the same day; the failure is noted on the kept digest instead.
 - Background refreshes stop cleanly when iOS ends the app's background time.
+- **Works across your iPhone and iPad:** scans, ideas, starred projects, the main settings and AI spending sync through your own iCloud account. API keys stay on each device. An automatic scan waits if your other device has just started today's, so it isn't paid for twice.
 - If the database can't save, the app shows a plain message instead of failing silently (the error is logged on the device, with details kept private).
 
 ## Secrets and configuration

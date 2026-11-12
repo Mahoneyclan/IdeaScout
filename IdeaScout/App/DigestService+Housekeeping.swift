@@ -10,7 +10,8 @@ import UserNotifications
 extension DigestService {
     // MARK: - Delete all my data
 
-    /// Security/privacy: erases everything IdeaScout keeps about the user on this iPhone: history, ideas,
+    /// Security/privacy: erases everything IdeaScout keeps about the user on this device and in their iCloud (so on
+    /// their other devices too): history, ideas,
     /// saved projects, settings and consents, API keys, the cost ledger, cached downloads, pending
     /// notifications and the scheduled background refresh. Purchases aren't touched (Apple holds them;
     /// "Restore purchases" brings them back). The welcome screens show again afterwards.
@@ -22,7 +23,7 @@ extension DigestService {
         guard !isRefreshing, let context = container?.mainContext else { return false }
         let complete = Self.eraseAll(context: context, defaults: AppSettings.defaults,
                                      defaultsDomain: TestMode.isUITesting ? TestMode.defaultsSuite : (Bundle.main.bundleIdentifier ?? ""),
-                                     keychainService: Keychain.service)
+                                     keychainService: Keychain.service, cloudStore: CloudSync.store)
         URLCache.shared.removeAllCachedResponses()
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
@@ -41,23 +42,27 @@ extension DigestService {
     ///   - defaults: Settings store to clear.
     ///   - defaultsDomain: Its domain name (the bundle ID for the real app).
     ///   - keychainService: Keychain service whose secrets are removed.
+    ///   - cloudStore: iCloud key-value storage to empty (shared settings and spending), or `nil` in tests.
     /// - Returns: `true` if the database was fully emptied and saved; `false` if any step failed.
     @discardableResult
     nonisolated static func eraseAll(context: ModelContext, defaults: UserDefaults, defaultsDomain: String,
-                                     keychainService: String) -> Bool {
+                                     keychainService: String, cloudStore: KeyValueStore? = nil) -> Bool {
         // Security/privacy: every step runs even if an earlier one fails, so a database error never
         // leaves API keys or settings behind, and the failure is reported instead of claiming success.
         var complete = true
+        // One by one rather than in bulk: bulk deletes aren't sent to iCloud, so the copies there and on the user's
+        // other devices would come back.
+        func deleteEach<T: PersistentModel>(_ type: T.Type) throws { try context.fetch(FetchDescriptor<T>()).forEach(context.delete) }
         let deleteSteps: [() throws -> Void] = [
-            { try context.delete(model: Digest.self) }, { try context.delete(model: Theme.self) },
-            { try context.delete(model: Item.self) }, { try context.delete(model: Idea.self) },
-            { try context.delete(model: KillerIdea.self) },
+            { try deleteEach(Item.self) }, { try deleteEach(Theme.self) }, { try deleteEach(Digest.self) },
+            { try deleteEach(Idea.self) }, { try deleteEach(KillerIdea.self) },
         ]
         for deleteStep in deleteSteps {
             do { try deleteStep() } catch { complete = false }
         }
         if context.saveOrReport("the deletion") != nil { complete = false }
         Keychain.removeAll(service: keychainService)
+        CloudSync.eraseAll(in: cloudStore)
         // Remove keys one by one first so screens using @AppStorage update immediately, then the whole domain.
         for key in (defaults.persistentDomain(forName: defaultsDomain) ?? [:]).keys { defaults.removeObject(forKey: key) }
         defaults.removePersistentDomain(forName: defaultsDomain)

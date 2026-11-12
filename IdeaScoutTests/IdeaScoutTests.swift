@@ -1135,7 +1135,7 @@ struct PlainErrorTests {
 struct DeleteAllDataTests {
     @Test @MainActor func erasesDatabaseSettingsAndKeys() throws {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
-                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let context = container.mainContext
         let digest = Digest(day: .now, summarizer: "Claude")
         context.insert(digest)
@@ -1226,7 +1226,7 @@ struct RefreshRoutineTests {
     private func harness(llm: ScriptedLLM?, access: StoreManager.Access = .unlocked, overCap: Bool = false,
                          needsConsent: Bool = false) throws -> Harness {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
-                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let box = Box()
         let fetchers: [any ItemFetcher] = [
             StubFetcher(kind: .painPoints, items: [item("p1", .painPoints, title: "I wish there was an invoice chaser")]),
@@ -1254,8 +1254,8 @@ struct RefreshRoutineTests {
         await h.service.refresh(force: true, notify: true)
         let digest = try #require(try digests(h).first)
         #expect(digest.summarizer == "Claude")
-        #expect(digest.themes.contains { $0.isPainCluster && $0.title == "Chasing invoices" })
-        #expect(digest.themes.contains { $0.title == "Invoice automation" && $0.items.count == 2 })
+        #expect(digest.themeList.contains { $0.isPainCluster && $0.title == "Chasing invoices" })
+        #expect(digest.themeList.contains { $0.title == "Invoice automation" && $0.itemList.count == 2 })
         let ideas = try h.context.fetch(FetchDescriptor<KillerIdea>())
         #expect(ideas.map(\.title) == ["InvoiceChaser"])
         #expect(ideas.first?.pain == 4)   // pain-point evidence allows a pain score above 3
@@ -1349,7 +1349,7 @@ struct RefreshRoutineTests {
         h.context.insert(Digest(day: Calendar.current.startOfDay(for: .now), summarizer: "Claude"))
         try h.context.save()
         await h.service.refresh(force: false)
-        #expect(try digests(h).count == 1 && (try digests(h).first?.themes.isEmpty ?? false))
+        #expect(try digests(h).count == 1 && (try digests(h).first?.themeList.isEmpty ?? false))
         #expect(DigestService.needsRebuild(existing: [], aiAvailable: false))
         #expect(DigestService.needsRebuild(existing: ["Keywords"], aiAvailable: true))
         #expect(!DigestService.needsRebuild(existing: ["Keywords"], aiAvailable: false))
@@ -1361,7 +1361,7 @@ struct RefreshRoutineTests {
 struct PersistenceTests {
     @Test @MainActor func successfulSaveReportsNothing() throws {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
-                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         container.mainContext.insert(KillerIdea(key: "k", title: "K"))
         #expect(container.mainContext.saveOrReport("a test") == nil)
         #expect(try container.mainContext.fetchCount(FetchDescriptor<KillerIdea>()) == 1)

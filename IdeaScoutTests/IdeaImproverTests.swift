@@ -118,7 +118,7 @@ struct ImproveServiceTests {
     private func setUp(llm: ScriptedLLM?, access: StoreManager.Access = .unlocked,
                        overCap: Bool = false) throws -> (DigestService, KillerIdea) {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
-                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let service = DigestService(dependencies: .init(
             makeFetchers: { [] },
             makeSummarizer: { llm.map { LLMSummarizer(client: $0) as any Summarizer } ?? KeywordSummarizer(topics: []) },

@@ -3,18 +3,18 @@
 Last reviewed: 27 October 2026. Covers version 1.0 (build 1).
 
 ## Summary
-IdeaScout has **no server, no accounts, no analytics and no third-party code**. Everything it stores stays on the user's iPhone. The only data that leaves the phone goes to **the AI provider the user chooses, using the user's own API key, after the user agrees**, plus ordinary read-only requests to public data sources.
+IdeaScout has **no server, no accounts, no analytics and no third-party code**. What it stores stays on the user's devices and syncs between them through **the user's own iCloud account** (private database and key-value storage; the developer can't see it). API keys never sync. The only other data that leaves the device goes to **the AI provider the user chooses, using the user's own API key, after the user agrees**, plus ordinary read-only requests to public data sources.
 
 ## What data the app holds, and where
 | Data | Where it's stored | Protection |
 |---|---|---|
 | AI provider API keys | iOS **Keychain**, one entry per provider (`Support/Keychain.swift`) | `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: encrypted by iOS, never synced, never included in backups or restored to another phone. Only the last 4 characters are ever shown. A key is saved when the user finishes typing (not per keystroke), and replacing one updates it in place, so a failed save keeps the old key |
-| About me, interest area, My pain points, settings, consents | UserDefaults (app container) | iOS file encryption (available after first unlock). Included in the user's own encrypted device backup. Not secrets |
-| Digests, themes, items, saved projects, killer ideas | SwiftData database (app container) | iOS file encryption, as above (the default class, readable after the first unlock since restart). Not tightened further because the daily background refresh may write to it while the phone is locked. Public content plus the user's notes |
-| AI cost ledger | UserDefaults (JSON) | As above. Token counts and dollar amounts only |
+| About me, interest area, My pain points, settings, consents | UserDefaults (app container); About me, interest area, pain points, app type and tool also in **iCloud key-value storage** (`Support/CloudSync.swift`) | iOS file encryption (available after first unlock). Included in the user's own encrypted device backup. iCloud data is encrypted by Apple in the user's account. Consents stay per device. Not secrets |
+| Digests, themes, items, saved projects, killer ideas | SwiftData database (app container), synced to the user's **private iCloud database** (`iCloud.com.mahoney.IdeaScout`) | iOS file encryption, as above (the default class, readable after the first unlock since restart). Not tightened further because the daily background refresh may write to it while the phone is locked. iCloud: Apple's encryption in the user's own account. Public content plus the user's notes |
+| AI cost ledger | UserDefaults (JSON); the last 62 days also in iCloud key-value storage, one entry per device | As above. Token counts and dollar amounts only |
 | Purchases (trial, unlock) | Apple (StoreKit) | Verified, unrevoked transactions only; nothing stored by the app |
 
-Removing data: **Settings → About & privacy → Delete all my data** erases the database, settings, consents, every Keychain key, the cost ledger, cached downloads, pending notifications and the scheduled background refresh (`DigestService.deleteAllData`). Every step runs even if one fails; if any part of the database can't be deleted, the user is told to try again rather than shown a false success. Deleting the app removes everything except Keychain entries; those are cleared automatically on the next fresh install (`Keychain.prepareOnLaunch`).
+Removing data: **Settings → About & privacy → Delete all my data** erases the database (one record at a time, so the deletions reach iCloud and the user's other devices), the iCloud key-value entries, settings, consents, every Keychain key, the cost ledger, cached downloads, pending notifications and the scheduled background refresh (`DigestService.deleteAllData`). Every step runs even if one fails; if any part of the database can't be deleted, the user is told to try again rather than shown a false success. Deleting the app removes everything except Keychain entries; those are cleared automatically on the next fresh install (`Keychain.prepareOnLaunch`).
 
 ## What leaves the phone
 | Destination | What's sent | When |
@@ -22,6 +22,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 | The chosen AI provider (Anthropic, OpenAI, Google, xAI, DeepSeek, Alibaba (US region), Z.ai, Moonshot, Xiaomi) | About me, interest area, pain points, the collected public items, a saved project's notes when asking for variants, and an idea's details when making its starter kit or improving it | Only after the user agrees on the consent screen **for that provider**. HTTPS directly to the provider, with the user's key |
 | Public sources (Hacker News/Algolia, GitHub, Apple App Store feeds, AusTender, Atlassian Marketplace, yc-oss on GitHub Pages, Hugging Face; optionally DEV, Lobsters, itch.io, Steam) | Nothing personal: plain GET requests with an "IdeaScout" User-Agent | Each refresh |
 | Apple | Purchases (StoreKit) and notifications (local only) | As used |
+| Apple iCloud (the user's own account) | Scans, ideas, starred projects, the shared settings above and recent AI spending. Never API keys or consents | Continuously, when the user is signed in to iCloud. If iCloud can't be opened, the app works on the device only and says so in About & privacy |
 
 ## How it's protected
 **Secrets**

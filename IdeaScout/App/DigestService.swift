@@ -137,6 +137,12 @@ final class DigestService {
         let existing = (try? context.fetch(FetchDescriptor<Digest>(predicate: #Predicate { $0.day == today }))) ?? []
         guard force || Self.needsRebuild(existing: existing.map(\.summarizer),
                                          aiAvailable: !(dependencies.makeSummarizer() is KeywordSummarizer)) else { return }
+        // iCloud sync: an automatic scan waits when the user's other device has just started today's, so it isn't paid
+        // for twice; its results arrive through iCloud. Tapping refresh still runs one here.
+        if !force && CloudSync.otherDeviceIsScanning(CloudSync.scanNote()) {
+            lastError = "Your other device is finding today's ideas. They'll appear here when it's done."
+            return
+        }
 
         // After the free trial, new refreshes need the one-off unlock. Saved history stays readable.
         let access = await dependencies.access()
@@ -150,6 +156,7 @@ final class DigestService {
         isRefreshing = true
         stage = .fetching
         lastError = nil
+        CloudSync.noteScanStarted()
         defer { isRefreshing = false; stage = nil }
 
         let (items, fetchWarnings) = await collectItems()
@@ -183,7 +190,7 @@ final class DigestService {
         if let message = context.saveOrReport("today's ideas") { lastError = message }
 
         if notify && !Task.isCancelled {
-            await dependencies.notify(digest.themes.count, digest.itemCount)
+            await dependencies.notify(digest.themeList.count, digest.itemCount)
         }
     }
 

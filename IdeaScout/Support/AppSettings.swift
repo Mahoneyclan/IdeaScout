@@ -263,6 +263,11 @@ enum Notifier {
         (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
+    /// Whether notifications are already allowed (without asking).
+    static func isAllowed() async -> Bool {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .authorized
+    }
+
     /// Posts "Today's ideas are ready" immediately. Contains counts only, no idea text.
     /// - Parameters:
     ///   - themes: Number of themes in the digest.

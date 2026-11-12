@@ -1,5 +1,6 @@
 // StoredModels.swift
-// The SwiftData models saved on the iPhone and shown on screen.
+// The SwiftData models saved on the device, synced through the user's own iCloud between their devices, and shown on
+// screen. iCloud sync needs every field to have a default, every relationship to be optional, and no unique fields.
 //
 // Ownership and deletion:
 // - A Digest owns its Themes, and each Theme owns its Items (cascade delete): replacing or deleting a
@@ -17,15 +18,16 @@ import SwiftData
 /// Deleting a digest deletes its themes and their items.
 @Model final class Digest {
     /// Start of the day the digest is for (used to find "today's" digest and to match ideas to days).
-    var day: Date
+    var day: Date = Date.now
     /// When the refresh finished saving it (shown as "Updated 7:02 am").
-    var createdAt: Date
+    var createdAt: Date = Date.now
     /// Which AI built it ("Claude", "Apple on-device", "Keywords"…), used to rank digests.
-    var summarizer: String
+    var summarizer: String = ""
     /// Notes about the refresh, shown to the user (source failures, limit reached, no ideas…).
     var warnings: [String] = []
-    /// The day's themes, pain clusters and "Other projects". Deleted with the digest.
-    @Relationship(deleteRule: .cascade, inverse: \Theme.digest) var themes: [Theme] = []
+    /// The day's themes, pain clusters and "Other projects". Deleted with the digest. Optional because iCloud sync
+    /// requires it; read through `themeList`.
+    @Relationship(deleteRule: .cascade, inverse: \Theme.digest) var themes: [Theme]? = []
 
     /// Creates a digest stamped with the current time.
     /// - Parameters:
@@ -40,20 +42,22 @@ import SwiftData
     }
 
     /// Themes in the order the AI returned them (catch-all last).
-    var sortedThemes: [Theme] { themes.sorted { $0.order < $1.order } }
+    var sortedThemes: [Theme] { themeList.sorted { $0.order < $1.order } }
+    /// The themes (none until they've synced).
+    var themeList: [Theme] { themes ?? [] }
     /// Total items across all themes.
-    var itemCount: Int { themes.reduce(0) { $0 + $1.items.count } }
+    var itemCount: Int { themeList.reduce(0) { $0 + $1.itemList.count } }
 }
 
 /// A group of items in one digest: a trend (things being built), a pain cluster (complaints from one
 /// type of buyer), or the "Other projects" catch-all. Belongs to one Digest; owns its Items.
 @Model final class Theme {
     /// Short name, from the AI.
-    var title: String
+    var title: String = ""
     /// One or two sentences, from the AI.
-    var summary: String
+    var summary: String = ""
     /// Position in the AI's reply, used as a tie-breaker when ranking.
-    var order: Int
+    var order: Int = 0
     /// Ways to extend the theme's ideas or build a differentiated version.
     var opportunities: [String] = []
     /// Scores 1–5 (0 = not scored): see ThemeScores. Stored as separate fields because SwiftData stores
@@ -85,8 +89,8 @@ import SwiftData
     var paySignals = ""
     /// The digest this theme belongs to.
     var digest: Digest?
-    /// The items in this theme. Deleted with the theme.
-    @Relationship(deleteRule: .cascade, inverse: \Item.theme) var items: [Item] = []
+    /// The items in this theme. Deleted with the theme. Optional because iCloud sync requires it; read through `itemList`.
+    @Relationship(deleteRule: .cascade, inverse: \Item.theme) var items: [Item]? = []
 
     /// Creates a theme; scores and cluster fields are set afterwards.
     /// - Parameters:
@@ -102,7 +106,9 @@ import SwiftData
     }
 
     /// Items with the most traction first.
-    var sortedItems: [Item] { items.sorted { $0.score > $1.score } }
+    var sortedItems: [Item] { itemList.sorted { $0.score > $1.score } }
+    /// The items (none until they've synced).
+    var itemList: [Item] { items ?? [] }
 
     /// The four scores as one value.
     var scores: ThemeScores {
@@ -153,19 +159,19 @@ import SwiftData
 /// Starring it copies it into an Idea so it outlives the digest. Fields mirror FetchedItem.
 @Model final class Item {
     /// Stable ID from the source (see FetchedItem.key).
-    var key: String
+    var key: String = ""
     /// Headline (see FetchedItem.title).
-    var title: String
+    var title: String = ""
     /// Supporting text.
-    var detail: String
+    var detail: String = ""
     /// The original link, stored as text.
-    var urlString: String
+    var urlString: String = ""
     /// SourceKind raw value; read through `source`.
-    var sourceRaw: String
+    var sourceRaw: String = ""
     /// Traction within its source (see FetchedItem.score).
-    var score: Int
+    var score: Int = 0
     /// When it was posted.
-    var postedAt: Date
+    var postedAt: Date = Date.now
     /// The theme this item belongs to.
     var theme: Theme?
 
@@ -191,20 +197,21 @@ import SwiftData
 /// A starred project ("Saved projects" in the Saved tab): a copy of an Item, independent of digests so it
 /// survives refreshes. The user can add notes and ask the AI for money-making variants.
 @Model final class Idea {
-    /// The starred item's key; unique, so starring twice can't create duplicates.
-    @Attribute(.unique) var key: String
+    /// The starred item's key. Not marked unique, because iCloud sync can't enforce that: duplicates from two devices
+    /// are merged by `SyncHousekeeping`.
+    var key: String = ""
     /// The project's title.
-    var title: String
+    var title: String = ""
     /// Its description.
-    var detail: String
+    var detail: String = ""
     /// Link to the original.
-    var urlString: String
+    var urlString: String = ""
     /// SourceKind raw value; read through `source`.
-    var sourceRaw: String
+    var sourceRaw: String = ""
     /// The user's own notes, included in variant suggestions and the "flesh out" prompt.
     var note: String = ""
     /// When it was starred (default sort order).
-    var starredAt: Date
+    var starredAt: Date = Date.now
     /// AI-suggested extensions and differentiators.
     var extensions: [String] = []
     /// Title and scores of the trend it was starred from (empty for "Other projects"), copied at that time.
