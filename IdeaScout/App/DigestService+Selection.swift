@@ -11,6 +11,8 @@ extension DigestService {
     static func enabledFetchers() -> [any ItemFetcher] {
         var fetchers: [any ItemFetcher] = []
         if AppSettings.isEnabled(.fieldNotes) { fetchers.append(FieldNotesFetcher(notes: AppSettings.fieldNotes)) }
+        let area = AppSettings.interestArea.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !area.isEmpty && AppSettings.isEnabled(.areaDiscussion) { fetchers.append(AreaDiscussionFetcher(area: area)) }
         if AppSettings.isEnabled(.appReviews) { fetchers.append(AppReviewsFetcher()) }
         if AppSettings.isEnabled(.consumerReviews) { fetchers.append(AppReviewsFetcher(kind: .consumerReviews)) }
         if AppSettings.isEnabled(.ausTender) { fetchers.append(AusTenderFetcher()) }
@@ -39,18 +41,20 @@ extension DigestService {
 
     /// Fills the AI's quota by signal: the user's pain points first, then 40% demand, 40% supply and 20% timing,
     /// each shared fairly between its sources. Unused share rolls over. The result interleaves the
-    /// signals so a summariser that reads only the first few items still sees each kind.
+    /// signals so a summariser that reads only the first few items still sees each kind. Within each source,
+    /// items that mention the interest area's words come first (owner's decision, 13 Nov 2026).
     /// - Parameters:
     ///   - items: Candidates from every source.
     ///   - maxItems: The AI's item limit.
+    ///   - areaWords: The interest area's words (`AreaFocus.words`); empty means no preference.
     /// - Returns: At most `maxItems` items (plus all of the user's pain points).
-    nonisolated static func selectBySignal(_ items: [FetchedItem], maxItems: Int) -> [FetchedItem] {
+    nonisolated static func selectBySignal(_ items: [FetchedItem], maxItems: Int, areaWords: [String] = []) -> [FetchedItem] {
         let notes = items.filter { $0.source == .fieldNotes }
         let rest = items.filter { $0.source != .fieldNotes }
         let budget = max(maxItems - notes.count, 0)
         // Each signal's items in fair per-source order (best of each source first).
         let ordered = Dictionary(uniqueKeysWithValues: Signal.allCases.map { signal in
-            (signal, select(rest.filter { $0.source.signal == signal }, perSource: budget))
+            (signal, select(rest.filter { $0.source.signal == signal }, perSource: budget, areaWords: areaWords))
         })
         // Safe to unwrap below: `ordered` and `taken` get an entry for every `Signal` case before they're read.
         var taken: [Signal: Int] = [:]
@@ -71,14 +75,21 @@ extension DigestService {
         return result
     }
 
-    /// Takes the highest-scoring items from each source so no single source dominates.
+    /// Takes the best items from each source so no single source dominates: those mentioning the interest area
+    /// first, then the highest-scoring.
     /// - Parameters:
     ///   - items: Candidates.
     ///   - perSource: Most items to take from any one source.
+    ///   - areaWords: The interest area's words; empty means score order only.
     /// - Returns: The best of each source, interleaved (1st of each source, then 2nd of each, …).
-    nonisolated static func select(_ items: [FetchedItem], perSource: Int) -> [FetchedItem] {
+    nonisolated static func select(_ items: [FetchedItem], perSource: Int, areaWords: [String] = []) -> [FetchedItem] {
         let bySource = Dictionary(grouping: items, by: \.source)
-        let tops = SourceKind.allCases.map { (bySource[$0] ?? []).sorted { $0.score > $1.score }.prefix(perSource) }
+        let tops = SourceKind.allCases.map { kind in
+            (bySource[kind] ?? []).sorted { a, b in
+                let (am, bm) = (AreaFocus.mentions(a, areaWords), AreaFocus.mentions(b, areaWords))
+                return am != bm ? am : a.score > b.score
+            }.prefix(perSource)
+        }
         // Interleave so that if a summariser can only take N items, each source is represented.
         var result: [FetchedItem] = []
         for i in 0..<perSource {

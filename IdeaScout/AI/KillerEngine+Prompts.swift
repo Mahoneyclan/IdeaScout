@@ -26,7 +26,9 @@ extension KillerEngine {
     already look, pay back the build and keep making money.
     Using the pain clusters, trends and numbered projects (items tagged Demand show need: "Pain points" are people \
     complaining or asking for tools that don't exist, "App Store complaints" and "Consumer app complaints" are \
-    1-2 star reviews of business and consumer apps people pay for, which show buyers ready to switch, "AusTender" is government IT spending, and "My pain points" \
+    1-2 star reviews of business and consumer apps people pay for, which show buyers ready to switch, "Hacker News on \
+    your area" are recent posts and comments about the user's interest area (read them for complaints and needs), \
+    "AusTender" is government IT spending, and "My pain points" \
     are the user's own problems, which are strong evidence; "Atlassian Marketplace", "Y Combinator" and \
     "App Store top paid" show what people and businesses already pay for, and also who the competitors are; "Vibe-coded", "Show HN" \
     and "GitHub" show what other builders have already made, so treat them as competition, not inspiration; \

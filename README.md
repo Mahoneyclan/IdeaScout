@@ -35,6 +35,7 @@ All output is in English. Non-English items are translated by Claude, or filtere
 | My pain points | Problems you type in Settings, one per line; treated as strong demand evidence |
 | App Store complaints | 1–2 star reviews (last 60 days) of 12 top-grossing business, finance and productivity apps a day, AU and US stores |
 | Consumer app complaints | The same for 12 top-grossing health and fitness, education, food and drink, and travel apps a day (on by default) |
+| Hacker News on your area | Up to 40 recent stories and comments matching your **Interest area**, over the complaints window (on by default; skipped when the interest area is blank). The interest area is the only text of yours sent to a source. From every source, items that mention the interest area's words are read first. The App Store's own search isn't used: Apple's terms limit it to promoting the store |
 | AusTender | The 15 largest Australian government IT contracts in the window |
 | Atlassian Marketplace | Trending and new Jira/Confluence add-ons |
 | Pain points | HN comments such as "I wish there was…", "too expensive", "alternative to", plus Ask HN (own window, default 14 days) |

@@ -137,6 +137,39 @@ struct PainPointsFetcher: ItemFetcher {
     }
 }
 
+// MARK: - Hacker News on the interest area
+
+/// Recent Hacker News stories and comments that mention the user's interest area. The interest area is the only
+/// user text sent anywhere by a source (to Hacker News search, run by Algolia); see the privacy policy.
+struct AreaDiscussionFetcher: ItemFetcher {
+    /// Which source this is.
+    let kind = SourceKind.areaDiscussion
+    /// The interest area from Settings (not empty; the source is skipped when it is).
+    let area: String
+    /// Stories and comments read per scan.
+    static let hits = 40
+
+    /// The search address: stories and comments matching the interest area, most upvoted first.
+    /// - Parameters:
+    ///   - area: The interest area.
+    ///   - since: Start of the window.
+    /// - Returns: The Algolia search address.
+    static func searchURL(area: String, since: Date) -> URL {
+        HackerNewsFetcher.searchURL(tags: "(story,comment)", query: TextCleaner.clean(area, max: 100), since: since, hits: hits)
+    }
+
+    /// One search for the interest area.
+    /// - Parameters:
+    ///   - since: Start of the look-back window (the longer complaints window).
+    ///   - topics: The user's topics (not used by this source).
+    /// - Returns: Up to `hits` stories and comments, each comment cut to the part around the area's words.
+    /// - Throws: Network, HTTP or decoding errors.
+    func fetch(since: Date, topics: [String]) async throws -> [FetchedItem] {
+        let data = try await HTTP.get(Self.searchURL(area: area, since: since))
+        return try HackerNewsFetcher.parse(data, as: .areaDiscussion, around: AreaFocus.words(in: area))
+    }
+}
+
 // MARK: - Vibe-coded projects (mentions of AI app builders on HN and GitHub)
 
 /// Projects built with AI app builders: Hacker News stories mentioning them, and GitHub repos that say

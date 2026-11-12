@@ -142,6 +142,16 @@ struct SourceFetchTests {
         await #expect(throws: FetchError.self) { try await PainPointsFetcher().fetch(since: since, topics: []) }
     }
 
+    /// The interest area is the search text (stories and comments); items carry the area source's label.
+    @Test func areaSearchSendsOnlyTheInterestArea() async throws {
+        StubWeb.serve([("hn.algolia.com", .init(body: Samples.hn))])
+        let items = try await AreaDiscussionFetcher(area: "invoice chasing").fetch(since: since, topics: ["secret topic"])
+        let address = try #require(StubWeb.requests.first?.url?.absoluteString.removingPercentEncoding)
+        #expect(address.contains("query=invoice chasing") && address.contains("tags=(story,comment)"))
+        #expect(!address.contains("secret topic"))
+        #expect(!items.isEmpty && items.allSatisfy { $0.source == .areaDiscussion })
+    }
+
     @Test func vibeCodeCombinesHackerNewsAndGitHub() async throws {
         StubWeb.serve([("hn.algolia.com", .init(body: Samples.hn)), ("api.github.com", .init(body: Samples.github))])
         let items = try await VibeCodeFetcher().fetch(since: since, topics: [])

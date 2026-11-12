@@ -78,6 +78,21 @@ struct DigestSelectionTests {
         #expect(DigestService.select(items, perSource: 2).map(\.key) == ["g2", "h1", "g3"])
     }
 
+    /// Within a source, items mentioning the interest area come first, then by score.
+    @Test func itemsAboutTheInterestAreaAreReadFirst() {
+        let items = [item("g1", .github, score: 9, title: "A chat bot"), item("g2", .github, score: 1, title: "Quote builder for electricians"),
+                     item("g3", .github, score: 5, title: "Another bot")]
+        let words = AreaFocus.words(in: "Electrician quoting")
+        #expect(DigestService.select(items, perSource: 2, areaWords: words).map(\.key) == ["g2", "g1"])
+        #expect(DigestService.select(items, perSource: 2).map(\.key) == ["g1", "g3"])
+    }
+
+    @Test(arguments: [("Electrician quoting", ["electrician", "quot"]), ("", []), ("Apps for small business", []),
+                      ("Home cooks, home cooks!", ["home", "cook"])])
+    func interestAreaWords(area: String, words: [String]) {
+        #expect(AreaFocus.words(in: area) == words)
+    }
+
     @Test func nextOccurrenceIsInTheFuture() {
         let now = Date.now
         let next = DigestService.nextOccurrence(ofHour: 7, after: now)

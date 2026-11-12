@@ -1,6 +1,6 @@
 // SourceSupport.swift
 // Shared plumbing for every source: the ItemFetcher protocol, source errors, the HTTP helper, text
-// cleaning, the "product-shaped" filter and date parsing. Individual sources live in the other files
+// cleaning, the "product-shaped" filter, date parsing and interest-area matching. Individual sources live in the other files
 // in this folder.
 
 import Foundation
@@ -147,5 +147,41 @@ enum ISODates {
             return date
         }
         return decoder
+    }
+}
+
+// MARK: - Interest area matching
+
+/// Matches items against the interest area's words, on the phone, so items about the area are read first.
+enum AreaFocus {
+    /// Words too common to say what an item is about.
+    static let ignored: Set<String> = ["with", "from", "that", "this", "your", "their", "into", "apps", "tool", "tools",
+                                       "software", "small", "business", "businesses", "people", "online"]
+
+    /// The interest area's meaningful words, cut to a rough stem ("quoting" → "quot") so plurals and other forms match.
+    /// - Parameter area: The interest area from Settings.
+    /// - Returns: Lowercased stems of words with 4 or more letters, without common words; empty for a blank area.
+    static func words(in area: String) -> [String] {
+        let words = area.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        var seen = Set<String>()
+        return words.filter { $0.count >= 4 && !ignored.contains($0) }.map(stem).filter { seen.insert($0).inserted }
+    }
+
+    /// Whether an item's title or detail mentions any of the words.
+    /// - Parameters:
+    ///   - item: A fetched item.
+    ///   - words: From `words(in:)`.
+    /// - Returns: `false` when `words` is empty.
+    static func mentions(_ item: FetchedItem, _ words: [String]) -> Bool {
+        guard !words.isEmpty else { return false }
+        let text = (item.title + " " + item.detail).lowercased()
+        return words.contains { text.contains($0) }
+    }
+
+    /// Drops one common ending: "ing", "ers" or "es" from words of 6 or more letters, a plural "s" from 5 or more.
+    private static func stem(_ word: String) -> String {
+        if word.count >= 6, let ending = ["ing", "ers", "es"].first(where: word.hasSuffix) { return String(word.dropLast(ending.count)) }
+        if word.count >= 5, word.hasSuffix("s"), !word.hasSuffix("ss") { return String(word.dropLast()) }
+        return word
     }
 }

@@ -218,7 +218,8 @@ final class DigestService {
         let painSince = Self.windowStart(days: AppSettings.painWindowDays)
         let (fetched, warnings) = await fetchAll(since: since, painSince: painSince, topics: AppSettings.topics)
         let useful = fetched.filter { $0.source == .fieldNotes || ProductFilter.isProductShaped($0) }
-        return (Self.selectBySignal(useful, maxItems: AppSettings.claudeMaxItems), warnings)
+        return (Self.selectBySignal(useful, maxItems: AppSettings.claudeMaxItems,
+                                    areaWords: AreaFocus.words(in: AppSettings.interestArea)), warnings)
     }
 
     /// What the trend step produced, carried through to saving and the idea step.
@@ -401,7 +402,7 @@ final class DigestService {
         let results = await withTaskGroup(of: (Int, Result<[FetchedItem], Error>).self) { group in
             for (index, fetcher) in fetchers.enumerated() {
                 group.addTask {
-                    let start = [.painPoints, .appReviews, .consumerReviews].contains(fetcher.kind) ? painSince : since
+                    let start = [.painPoints, .appReviews, .consumerReviews, .areaDiscussion].contains(fetcher.kind) ? painSince : since
                     do { return (index, .success(try await fetcher.fetch(since: start, topics: topics))) }
                     catch { return (index, .failure(error)) }
                 }

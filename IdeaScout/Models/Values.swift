@@ -16,6 +16,8 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case fieldNotes, appReviews, atlassian, ausTender
     /// Consumer source (10 Nov 2026): 1–2 star reviews of top-grossing consumer apps.
     case consumerReviews
+    /// Hacker News stories and comments found by searching the user's interest area (13 Nov 2026).
+    case areaDiscussion
 
     /// Identity for SwiftUI lists.
     var id: String { rawValue }
@@ -38,6 +40,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .fieldNotes: "My pain points"
         case .appReviews: "App Store complaints"
         case .consumerReviews: "Consumer app complaints"
+        case .areaDiscussion: "Hacker News on your area"
         case .atlassian: "Atlassian Marketplace"
         case .ausTender: "AusTender"
         }
@@ -60,6 +63,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .fieldNotes: "note.text"
         case .appReviews: "star.slash"
         case .consumerReviews: "hand.thumbsdown"
+        case .areaDiscussion: "text.magnifyingglass"
         case .atlassian: "puzzlepiece.extension"
         case .ausTender: "building.2"
         }
@@ -69,7 +73,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     /// so builder-heavy sources can't crowd out evidence of demand.
     var signal: Signal {
         switch self {
-        case .painPoints, .fieldNotes, .appReviews, .consumerReviews, .ausTender: .demand
+        case .painPoints, .fieldNotes, .appReviews, .consumerReviews, .ausTender, .areaDiscussion: .demand
         case .ycombinator, .research: .timing
         default: .supply
         }

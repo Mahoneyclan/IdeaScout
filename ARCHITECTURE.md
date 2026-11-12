@@ -67,7 +67,7 @@ StoreManager: trial/unlock allows it? ── no ──▶ message, stop
 Fetch all enabled sources in parallel ──▶ remove duplicates and non-products
    │
    ▼
-selectBySignal: up to N items (default 300) — 40% demand, 40% supply, 20% timing
+selectBySignal: up to N items (default 300) — 40% demand, 40% supply, 20% timing; within each source, items mentioning the interest area first (AreaFocus)
    │
    ▼
 AppSettings.makeSummarizer: chosen cloud AI (if key + consent, under the daily limit)
