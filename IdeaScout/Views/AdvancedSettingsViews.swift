@@ -77,7 +77,8 @@ struct ScanRankingSettings: View {
                 Picker("Items Claude reads", selection: $maxItems) {
                     ForEach(AppSettings.maxItemChoices, id: \.self) { count in
                         if let price {
-                            let cost = AppSettings.estimatedRefreshCost(items: count, price: price, mixed: AppSettings.usesMixedModels)
+                            let cost = AppSettings.estimatedRefreshCost(items: count, price: price, mixed: AppSettings.usesMixedModels,
+                                                                            priceCheck: AppSettings.provider == .claude)
                             Text("\(count) · ~\(cost.lowerBound.formatted(.currency(code: "USD")))–\(cost.upperBound.formatted(.currency(code: "USD")))").tag(count)
                         } else {
                             Text("\(count) · free").tag(count)

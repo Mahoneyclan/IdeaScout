@@ -246,6 +246,15 @@ enum AppSettings {
         return OpenAICompatibleClient(provider: provider, apiKey: key, model: model, price: price)
     }
 
+    /// The web price check's client: Claude Haiku 5.5 with the user's Claude key, when Claude is the chosen provider
+    /// and agreed to (owner's decision, 13 Nov 2026). Other providers have no web search here, so it's skipped.
+    /// - Returns: The client, or `nil`.
+    static func priceCheckClient() -> ClaudeClient? {
+        guard provider == .claude, hasConsent(.claude), let key = Keychain.get(.claudeAPIKey) else { return nil }
+        let model = ScanStep.reading.mixedModelID
+        return ClaudeClient(apiKey: key, model: model, price: price(for: .claude, model: model))
+    }
+
     /// Whether Claude is chosen with "Mixed": a model for each scan step.
     static var usesMixedModels: Bool { provider == .claude && model(for: .claude) == ScanStep.mixedModel }
 

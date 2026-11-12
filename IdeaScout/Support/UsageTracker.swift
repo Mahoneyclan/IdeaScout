@@ -85,10 +85,13 @@ enum UsageTracker {
     ///   - feature: Ledger label, e.g. "Trends", "Killer ideas", "Devil's advocate".
     ///   - price: The model's price; if `nil`, cost is worked out later at legacy Opus prices.
     ///   - date: The day to record against (tests pass a fixed date).
-    static func record(response data: Data, feature: String, price: ModelPrice? = nil, on date: Date = .now) {
+    ///   - extraDollars: Charges on top of tokens, such as web searches; needs `price`.
+    static func record(response data: Data, feature: String, price: ModelPrice? = nil, on date: Date = .now,
+                       extraDollars: Double = 0) {
         guard var usage = parseUsage(data) else { return }
         if let price {
             usage.dollars = price.cost(input: usage.input, output: usage.output, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead)
+                + extraDollars
         }
         lock.lock(); defer { lock.unlock() }
         var ledger = load()

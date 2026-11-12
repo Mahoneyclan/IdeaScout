@@ -33,3 +33,19 @@ struct ScriptedLLM: LLMClient {
         }
     }
 }
+
+/// A price checker that replies from a script: one search reply and one formatted reply for every idea.
+struct ScriptedPriceChecker: WebSearchClient, LLMClient {
+    let provider = AIProvider.claude
+    let model = "test-haiku"
+    var search: Result<WebSearchReply, LLMHTTPError>
+    var formatted: String
+
+    func searchWeb(system: String, prompt: String, maxSearches: Int, feature: String) async throws -> WebSearchReply {
+        try search.get()
+    }
+
+    func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": formatted]], "stop_reason": "end_turn"])
+    }
+}

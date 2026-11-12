@@ -83,6 +83,10 @@ Save the Digest immediately
 Idea step (cloud AI only, 2 calls): 5 ideas ─▶ devil's advocate ─▶ evidence caps ─▶ up to 3 survivors
    │
    ▼
+Web price check (Claude only; Haiku 5.5, 2 calls per idea: web search, then format) ─▶ confirmed competitor
+prices where the link is a returned page (PriceCheck, DigestService+PriceCheck); failure ─▶ unconfirmed + warning
+   │
+   ▼
 Merge into KillerIdeas (new, or update returning ones) ─▶ screens update automatically (SwiftData @Query)
 ```
 

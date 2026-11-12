@@ -15,14 +15,17 @@ extension AppSettings {
     ///   - items: Items the AI reads per refresh.
     ///   - price: The chosen model's price.
     ///   - mixed: Whether Claude's "Mixed" is chosen (`price` is then ignored).
-    /// - Returns: Low and high estimates; the high end is 1.5× the low.
-    static func estimatedRefreshCost(items: Int, price: ModelPrice, mixed: Bool = false) -> ClosedRange<Double> {
+    ///   - priceCheck: Whether the web price check runs (Claude only); adds up to `PriceCheck.estimatedCostPerScan`.
+    /// - Returns: Low and high estimates; the high end is 1.5× the low, plus the full price check.
+    static func estimatedRefreshCost(items: Int, price: ModelPrice, mixed: Bool = false,
+                                     priceCheck: Bool = false) -> ClosedRange<Double> {
         let perItem = Double(items) * 0.00064
         let base = mixed
             ? perItem * refreshPriceScale(stepPrice(.reading))
                 + 0.055 * (refreshPriceScale(stepPrice(.writing)) + refreshPriceScale(stepPrice(.judging)))
             : (0.11 + perItem) * refreshPriceScale(price)
-        return base...(base * 1.5)
+        let check = priceCheck ? PriceCheck.estimatedCostPerScan : 0
+        return (base + check / 2)...(base * 1.5 + check)
     }
 
     /// The list price of the model "Mixed" uses for a step.
@@ -58,9 +61,9 @@ extension AppSettings {
     ///   - items: Items the AI reads per refresh.
     ///   - price: The chosen model's price, or `nil` when the refresh is free.
     /// - Returns: "Free", or the high estimate as in `approximateCostText` ("~$0.45").
-    static func refreshCostText(items: Int, price: ModelPrice?, mixed: Bool = false) -> String {
+    static func refreshCostText(items: Int, price: ModelPrice?, mixed: Bool = false, priceCheck: Bool = false) -> String {
         guard let price else { return "Free" }
-        return approximateCostText(estimatedRefreshCost(items: items, price: price, mixed: mixed).upperBound)
+        return approximateCostText(estimatedRefreshCost(items: items, price: price, mixed: mixed, priceCheck: priceCheck).upperBound)
     }
 
     /// Rough cost of one "Suggest variants" request, in US dollars. Assumes 1,500 input tokens (instructions,

@@ -44,6 +44,8 @@ final class DigestService {
         var notify: @MainActor (_ themes: Int, _ items: Int) async -> Void
         /// A client for one scan step when Claude's "Mixed" is chosen; `nil` uses the summariser's own client.
         var stepClient: @MainActor (ScanStep) -> (any LLMClient)? = { _ in nil }
+        /// The client for the web price check (Claude Haiku 5.5 with web search); `nil` skips it.
+        var priceChecker: @MainActor () -> (any WebSearchClient & LLMClient)? = { nil }
 
         /// The real app: settings, Keychain, StoreKit and notifications.
         static let live = Dependencies(
@@ -59,7 +61,8 @@ final class DigestService {
             isOverDailyCap: { AppSettings.isOverDailyCap },
             needsConsent: { AppSettings.needsConsent },
             notify: { themes, items in await Notifier.digestReady(themes: themes, items: items) },
-            stepClient: { AppSettings.stepClient($0) })
+            stepClient: { AppSettings.stepClient($0) },
+            priceChecker: { AppSettings.priceCheckClient() })
     }
 
     /// What this instance uses for sources, AI, trial state and notifications.
@@ -80,8 +83,8 @@ final class DigestService {
 
     /// Refresh steps shown as "Step n of 4". Raw values are the step numbers.
     enum Stage: Int, CaseIterable {
-        /// Steps 1–4: fetch sources, trend step, idea step (pass 1), devil's advocate (pass 2).
-        case fetching = 1, trends, ideas, critique
+        /// Steps 1–5: fetch sources, trend step, idea step (pass 1), devil's advocate (pass 2), web price check.
+        case fetching = 1, trends, ideas, critique, priceCheck
         /// Plain-English step name.
         var label: String {
             switch self {
@@ -89,6 +92,7 @@ final class DigestService {
             case .trends: "Reading items and finding trends"
             case .ideas: "Generating ideas"
             case .critique: "Devil's advocate"
+            case .priceCheck: "Checking competitor prices on the web"
             }
         }
     }
@@ -337,7 +341,9 @@ final class DigestService {
                       painClusters: builtThemes.filter(\.isPainCluster).map {
                           "\($0.title) (buyer: \($0.buyer); today: \($0.workaround); pays: \($0.paySignals); \($0.items.count) items)"
                       }))
-            mergeKillerIdeas(results, items: trends.batch, context: context)
+            let checked = await checkPrices(results, onStart: { service.stage = .priceCheck })
+            if let warning = checked.warning { digest.warnings.append(warning) }
+            mergeKillerIdeas(checked.results, items: trends.batch, context: context)
             if results.isEmpty {
                 digest.warnings.append("The devil's advocate rejected every idea today.")
             } else if !results.contains(where: { $0.score >= AppSettings.qualityBar }) {

@@ -1278,7 +1278,8 @@ struct RefreshRoutineTests {
     final class Box { var count = 0 }
 
     private func harness(llm: ScriptedLLM?, access: StoreManager.Access = .unlocked, overCap: Bool = false,
-                         needsConsent: Bool = false, steps: [ScanStep: ScriptedLLM] = [:]) throws -> Harness {
+                         needsConsent: Bool = false, steps: [ScanStep: ScriptedLLM] = [:],
+                         priceChecker: ScriptedPriceChecker? = nil) throws -> Harness {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let box = Box()
@@ -1295,13 +1296,34 @@ struct RefreshRoutineTests {
             isOverDailyCap: { overCap },
             needsConsent: { needsConsent },
             notify: { _, _ in box.count += 1 },
-            stepClient: { steps[$0] })
+            stepClient: { steps[$0] },
+            priceChecker: { priceChecker })
         let service = DigestService(dependencies: deps)
         service.container = container
         return Harness(service: service, context: container.mainContext, notified: box)
     }
 
     private func digests(_ h: Harness) throws -> [Digest] { try h.context.fetch(FetchDescriptor<Digest>()) }
+
+    /// The web price check confirms a competitor's price when its link is one the search returned; a failed check
+    /// leaves prices unconfirmed and says so, without stopping the refresh.
+    @Test func priceCheckConfirmsPricesFromTheWeb() async throws {
+        let replies = ["Trends": Result<String, LLMHTTPError>.success(Self.trends), "Killer ideas": .success(Self.ideas),
+                       "Devil's advocate": .success(Self.reviews)]
+        let found = WebSearchReply(text: "Chaser costs $40 a month.", sources: ["https://chaser.example/pricing"])
+        let formatted = #"{"competitors":[{"name":"Chaser","cheapest_plan":"Starter","price_per_month_usd":40,"is_free":false,"url":"https://chaser.example/pricing"}]}"#
+        let h = try harness(llm: ScriptedLLM(replies: replies), priceChecker: ScriptedPriceChecker(search: .success(found), formatted: formatted))
+        await h.service.refresh(force: true, notify: false)
+        let idea = try #require(try h.context.fetch(FetchDescriptor<KillerIdea>()).first)
+        #expect(idea.competitorList.first.map { $0.confirmed && $0.monthlyPrice == 40 && $0.url == "https://chaser.example/pricing" } == true)
+
+        let failing = try harness(llm: ScriptedLLM(replies: replies), priceChecker: ScriptedPriceChecker(
+            search: .failure(LLMHTTPError(status: 529, retryAfter: nil, detail: "")), formatted: formatted))
+        await failing.service.refresh(force: true, notify: false)
+        let digest = try #require(try digests(failing).first)
+        #expect(digest.warnings.contains { $0.contains("weren't checked on the web") })
+        #expect(try failing.context.fetch(FetchDescriptor<KillerIdea>()).first?.competitorList.contains(where: \.confirmed) == false)
+    }
 
     /// With "Mixed", each step goes to its own model: a step sent to the wrong one finds no scripted reply and fails.
     @Test func mixedSendsEachStepToItsOwnModel() async throws {
