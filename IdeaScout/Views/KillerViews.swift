@@ -103,7 +103,7 @@ struct KillerIdeaCard: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
             if !idea.undercutApp.isEmpty {
-                Label("Undercuts \(idea.undercutApp)", systemImage: "scissors")
+                Label("Gap spotted in \(idea.undercutApp)", systemImage: "sparkles")
                     .font(.caption2.bold()).foregroundStyle(.purple)
             }
             if idea.backWithNewEvidence {
@@ -146,7 +146,7 @@ struct LeaderboardView: View {
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
     /// The idea waiting for "Dismiss" confirmation.
     @State private var pendingDismiss: KillerIdea?
-    /// Shows the "Undercut an app" sheet.
+    /// Shows the "Reimagine an app" sheet.
     @State private var showUndercut = false
 
     /// Ideas not dismissed: those judged on the five principles first, then best killer score.
@@ -185,7 +185,7 @@ struct LeaderboardView: View {
             .navigationTitle("Ideas")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Undercut an app", systemImage: "scissors") { showUndercut = true }
+                    Button("Reimagine an app", systemImage: "sparkles") { showUndercut = true }
                 }
             }
             .sheet(isPresented: $showUndercut) { UndercutView() }

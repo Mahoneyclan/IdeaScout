@@ -18,7 +18,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case consumerReviews
     /// Hacker News stories and comments found by searching the user's interest area (13 Nov 2026).
     case areaDiscussion
-    /// Evidence found by "Undercut an app"'s web research (13 Nov 2026), never by a scan: complaints about the app
+    /// Evidence found by "Reimagine an app"'s web research (13 Nov 2026), never by a scan: complaints about the app
     /// and its rivals, and the paid plans people buy.
     case webComplaints, webPaying
 
@@ -86,7 +86,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Whether a daily scan reads it (and Settings lists it); the web research kinds come only from "Undercut an app".
+    /// Whether a daily scan reads it (and Settings lists it); the web research kinds come only from "Reimagine an app".
     var isScanSource: Bool { self != .webComplaints && self != .webPaying }
 
     /// Developer- and game-focused sources start switched off, so ideas lean towards people who pay.

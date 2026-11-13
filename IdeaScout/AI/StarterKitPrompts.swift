@@ -118,7 +118,9 @@ enum StarterKitPrompts {
     - first_slice: the first thing to build: one thin piece that works end to end and could be shown to a customer.
     - done_when: 3 to 6 checks that show the first slice works.
     - project_rules: 5 to 10 short rules for the AI coding tool to follow throughout (for example: keep keys \
-    and passwords out of the code, check all input, test the payment and permission logic, keep files small).
+    and passwords out of the code, check all input, test the payment and permission logic, keep files small). If \
+    the request names an app the idea was found beside, one rule must be: design your own name, screens, icon and \
+    text, and never copy that app's.
 
     No links and no code.
     """ + Prompts.untrustedData
@@ -134,6 +136,8 @@ enum StarterKitPrompts {
         var appType: BuilderTool.AppType?
         /// The job, features, price and competitors (empty for ideas found before the five principles).
         var offer = ""
+        /// "Reimagine an app": the app the idea was found beside, so the kit says not to copy it; empty otherwise.
+        var reimaginedApp = ""
 
         /// Copies the fields the kit needs from a saved idea.
         /// - Parameters:
@@ -145,6 +149,7 @@ enum StarterKitPrompts {
             title = idea.title; pitch = idea.pitch; buyer = idea.buyer; pricing = idea.pricing; replaces = idea.replaces
             channel = idea.channel; whyNow = idea.whyNow; oneWeekTest = idea.oneWeekTest; objection = idea.objection
             competitors = idea.competitors
+            reimaginedApp = idea.undercutApp
             self.aboutMe = aboutMe
             self.tool = tool
             self.appType = appType
@@ -165,6 +170,7 @@ enum StarterKitPrompts {
         if !request.replaces.isEmpty { lines.append("Replaces: \(request.replaces)") }
         if !request.channel.isEmpty { lines.append("Where customers are found: \(request.channel)") }
         if !request.offer.isEmpty { lines += request.offer.split(separator: "\n").map(String.init) }
+        if !request.reimaginedApp.isEmpty { lines.append("Found beside this app (don't copy it): \(request.reimaginedApp)") }
         lines += ["Why now: \(request.whyNow)", "One-week demand test: \(request.oneWeekTest)",
                   "Strongest objection: \(request.objection)", "Known competitors: \(request.competitors)",
                   "About me: " + (request.aboutMe.isEmpty ? "(not provided)" : request.aboutMe)]

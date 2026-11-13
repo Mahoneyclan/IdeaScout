@@ -105,7 +105,7 @@ struct KillerIdeaDetailView: View {
                 }
             }
             if !idea.evidence.isEmpty {
-                Section("Evidence") {
+                Section {
                     ForEach(Array(idea.evidence.enumerated()), id: \.offset) { _, item in
                         if let url = item.url, url.isWebLink {   // Security: web links only
                             Link(item.title, destination: url).lineLimit(2)
@@ -113,6 +113,10 @@ struct KillerIdeaDetailView: View {
                             Text(item.title)
                         }
                     }
+                } header: {
+                    Text("Evidence")
+                } footer: {
+                    Text("What people say online, in the AI's words. Not verified: tap a link to read the original.")
                 }
             }
         }

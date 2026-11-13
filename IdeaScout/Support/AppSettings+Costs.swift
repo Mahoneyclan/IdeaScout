@@ -1,6 +1,6 @@
 // AppSettings+Costs.swift
 // Cost estimates shown before paid AI actions (a refresh, "Suggest variants", a starter kit, "Improve this idea",
-// "Undercut an app"), and the cost text on buttons and confirmations.
+// "Reimagine an app"), and the cost text on buttons and confirmations.
 
 import Foundation
 
@@ -120,7 +120,7 @@ extension AppSettings {
         return (estimatedImproveCost(price: stepPrice(.writing)) + estimatedImproveCost(price: stepPrice(.judging))) / 2
     }
 
-    /// The upper cost guide for "Undercut an app": the web research, one idea step (priced like a refresh's, at
+    /// The upper cost guide for "Reimagine an app": the web research, one idea step (priced like a refresh's, at
     /// 1.5×) and one idea's price check.
     /// - Returns: The cost when Claude is chosen, agreed to and has a key; `nil` when it can't run (it needs Claude's
     ///   web search).

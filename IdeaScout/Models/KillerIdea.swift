@@ -73,8 +73,8 @@ import SwiftData
     /// It was dismissed, then came back because a scan cited new evidence; shown as "Back with new evidence" until
     /// the next scan that proposes it.
     var backWithNewEvidence = false
-    /// The app the user asked to undercut ("Undercut an app", 13 Nov 2026); empty for ideas from a daily scan. A
-    /// later scan proposing the same idea leaves it set.
+    /// The app the user named in "Reimagine an app" (first "Undercut an app", 13 Nov 2026; the stored name is
+    /// permanent); empty for ideas from a daily scan. A later scan proposing the same idea leaves it set.
     var undercutApp: String = ""
     /// The starter kit as JSON (see `StarterKit` and `starterKit`), or empty when none has been made.
     var starterKitJSON: String = ""

@@ -1,6 +1,6 @@
 // IdeaScoutUITests.swift
 // Automated screen tests for the critical flows: first launch with consent, a refresh, the paywall
-// after the trial, "Delete all my data", saving an idea, making a starter kit, "Undercut an app" reading a link,
+// after the trial, "Delete all my data", saving an idea, making a starter kit, "Reimagine an app" reading a link,
 // and iPad rotation. The app runs in its sealed test mode (TestMode.swift):
 // in-memory database, separate settings and Keychain, fake sources and a scripted AI. So these tests
 // never touch the owner's real data, never use the network and never spend money.
@@ -58,11 +58,11 @@ final class IdeaScoutUITests: XCTestCase {
         XCTAssertTrue(element(app, containing: "Run another refresh today?").waitForExistence(timeout: 5))
     }
 
-    /// "Undercut an app" opens from the Ideas tab and reads the app's name from a pasted App Store link, without
+    /// "Reimagine an app" opens from the Ideas tab and reads the app's name from a pasted App Store link, without
     /// any AI call (the test stops before the paid button).
-    func testUndercutReadsTheAppFromALink() {
+    func testReimagineReadsTheAppFromALink() {
         let app = launch("-ui-skip-welcome")
-        let open = app.buttons["Undercut an app"].firstMatch
+        let open = app.buttons["Reimagine an app"].firstMatch
         XCTAssertTrue(open.waitForExistence(timeout: 20))
         open.tap()
         let field = app.textFields["App Store link or app name"].firstMatch
@@ -71,7 +71,7 @@ final class IdeaScoutUITests: XCTestCase {
         field.typeText("https://apps.apple.com/au/app/things-3/id904237743")
         XCTAssertTrue(element(app, containing: "App Store id904237743").waitForExistence(timeout: 5), "the link should be read")
         XCTAssertEqual(app.textFields["App name, read from the link"].firstMatch.value as? String, "Things 3")
-        XCTAssertTrue(button(app, startingWith: "Find a cheaper idea").exists)
+        XCTAssertTrue(button(app, startingWith: "Find a gap").exists)
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.navigationBars["Ideas"].waitForExistence(timeout: 5))
     }

@@ -1,5 +1,5 @@
 // UndercutTests.swift
-// "Undercut an app": reading App Store links on the phone, keeping only research the web search really returned
+// "Reimagine an app" (first "Undercut an app"): reading App Store links on the phone, keeping only research the web search really returned
 // (never Apple's pages), the prompt block, and the service end to end with a scripted AI and web search (offline).
 
 import Foundation
@@ -25,15 +25,17 @@ struct UndercutRuleTests {
         #expect(Undercut.target(from: input) == nil)
     }
 
-    /// Findings and the price are kept only with links the search returned; Apple's pages are dropped even if
-    /// returned; one item per page.
+    /// Findings and the price are kept only with links the search returned; Apple's and Replit's pages are dropped
+    /// even if returned; one item per page; apps solo builders already made become "Vibe-coded" competition.
     @Test func keepsOnlyRealLinks() throws {
-        let json = #"{"app_plan":"Pro","price_per_month_usd":10,"price_url":"https://things.example/pricing","summary":"A to-do app.","findings":[{"kind":"complaint","title":"Too pricey for what it does","detail":"d","url":"https://forum.example/t/1"},{"kind":"complaint","title":"Same thread again","detail":"d","url":"https://forum.example/t/1/"},{"kind":"paid_plan","title":"Pro is $10 a month","detail":"d","url":"https://things.example/pricing"},{"kind":"complaint","title":"Made up","detail":"d","url":"https://invented.example/x"},{"kind":"complaint","title":"App Store review","detail":"d","url":"https://apps.apple.com/au/app/things-3/id1"}]}"#
+        let json = #"{"app_plan":"Pro","price_per_month_usd":10,"price_url":"https://things.example/pricing","summary":"A to-do app.","findings":[{"kind":"complaint","title":"Too pricey for what it does","detail":"d","url":"https://forum.example/t/1"},{"kind":"complaint","title":"Same thread again","detail":"d","url":"https://forum.example/t/1/"},{"kind":"paid_plan","title":"Pro is $10 a month","detail":"d","url":"https://things.example/pricing"},{"kind":"complaint","title":"Made up","detail":"d","url":"https://invented.example/x"},{"kind":"complaint","title":"App Store review","detail":"d","url":"https://apps.apple.com/au/app/things-3/id1"},{"kind":"already_built","title":"TinyTasks, made with Lovable","detail":"d","url":"https://news.example/item/9"},{"kind":"already_built","title":"Replit gallery","detail":"d","url":"https://replit.com/gallery/x"}]}"#
         let data = try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": json]], "stop_reason": "end_turn"])
         let research = try Undercut.parse(data, sources: ["https://forum.example/t/1", "https://things.example/pricing/",
-                                                          "https://apps.apple.com/au/app/things-3/id1"],
+                                                          "https://apps.apple.com/au/app/things-3/id1",
+                                                          "https://news.example/item/9", "https://replit.com/gallery/x"],
                                           target: Undercut.Target(name: "Things 3"))
-        #expect(research.items.map(\.source) == [.webComplaints, .webPaying])
+        #expect(research.items.map(\.source) == [.webComplaints, .webPaying, .vibeCode])
+        #expect(research.target.alreadyBuilt == ["TinyTasks, made with Lovable"])
         #expect(research.target.monthlyPrice == 10 && research.target.plan == "Pro")
         #expect(Undercut.competitor(research.target)?.confirmed == true)
 
@@ -41,12 +43,23 @@ struct UndercutRuleTests {
         #expect(unfound.target.monthlyPrice == 0 && Undercut.competitor(unfound.target) == nil, "no price without its link")
     }
 
+    /// The app, its price and what's already built reach both the idea step and the devil's advocate, whose
+    /// instructions fail copies; the starter kit says not to copy it.
     @Test func promptNamesTheAppAndItsPrice() {
-        let block = Undercut.promptBlock(Undercut.Target(name: "Things 3", plan: "Pro", monthlyPrice: 10, summary: "Too dear."))
-        #expect(block.contains("App to undercut: Things 3") && block.contains("$10 a month") && block.contains("Too dear."))
-        #expect(KillerEngine.generateInstructions.contains("If an app to undercut is given"))
+        let target = Undercut.Target(name: "Things 3", alreadyBuilt: ["TinyTasks"], plan: "Pro", monthlyPrice: 10, summary: "Too dear.")
+        let block = Undercut.promptBlock(target)
+        #expect(block.contains("App the user named (find a gap beside it; don't copy it): Things 3")
+                && block.contains("$10 a month") && block.contains("Too dear.") && block.contains("TinyTasks"))
+        #expect(KillerEngine.generateInstructions.contains("don't compete with it head-on"))
+        #expect(KillerEngine.critiqueInstructions.contains("survives is false for any idea that copies it"))
+        #expect(KillerEngine.critiquePrompt([], items: [], aboutMe: "", target: target).contains("Things 3"))
+        #expect(!KillerEngine.critiquePrompt([], items: [], aboutMe: "").contains("App the user named"))
+        var request = StarterKitPrompts.Request(KillerIdea(key: "k", title: "TinyTodo"), aboutMe: "")
+        #expect(!StarterKitPrompts.prompt(request).contains("don't copy"))
+        request.reimaginedApp = "Things 3"
+        #expect(StarterKitPrompts.prompt(request).contains("Found beside this app (don't copy it): Things 3"))
         #expect(ClaudeClient.searchBody(system: "s", messages: [], maxSearches: 5, blockedDomains: Undercut.blockedDomains, model: "m")
-            .description.contains("apps.apple.com"))
+            .description.contains("replit.com"))
     }
 }
 

@@ -1,14 +1,15 @@
 // DigestService+Undercut.swift
-// "Undercut an app" on demand, never part of a refresh: web research on the named app (Claude Haiku with web search,
-// kept off Apple's sites), then the usual idea step and devil's advocate with that research as evidence, then the
-// web price check; the best idea is saved with the others and marked with the app's name. Same rules as a starter
+// "Reimagine an app" (first built as "Undercut an app") on demand, never part of a refresh: web research on the named
+// app (Claude Haiku with web search, kept off Apple's and Replit's sites), then the usual idea step and devil's
+// advocate with that research as evidence, then the web price check; the best idea fills a gap beside the app, and
+// is saved with the others and marked with the app's name. Same rules as a starter
 // kit: the trial or unlock, consent, the daily spending limit before every paid call. Needs Claude, the only
 // provider with web search here.
 
 import Foundation
 import SwiftData
 
-/// Why "Undercut an app" stopped with nothing saved.
+/// Why "Reimagine an app" stopped with nothing saved.
 enum UndercutError: LocalizedError, Equatable {
     /// One is already running; a second tap would pay twice.
     case busy
@@ -27,22 +28,22 @@ enum UndercutError: LocalizedError, Equatable {
         switch self {
         case .busy: "IdeaScout is already working on an app."
         case .locked(let started): started
-            ? "Your free trial has ended. Unlock IdeaScout to undercut apps."
-            : "Start your free 7-day trial to undercut apps."
-        case .needsClaude: "Undercutting an app needs Claude (it searches the web), with its API key and your OK to "
+            ? "Your free trial has ended. Unlock IdeaScout to reimagine apps."
+            : "Start your free 7-day trial to reimagine apps."
+        case .needsClaude: "Reimagining an app needs Claude (it searches the web), with its API key and your OK to "
             + "share with Anthropic. See Settings → Advanced → AI & costs."
         case .noName: "Type the app's name first."
         case .nothingFound(let name): "The web search found too little about \(name) to work from. Check the name, "
             + "or try the name of its company."
-        case .noIdea(let name): "No idea to undercut \(name) passed the devil's advocate: none was something one person "
-            + "could build. Try again, or try a simpler app."
+        case .noIdea(let name): "No gap beside \(name) passed the devil's advocate: each idea was too close a copy, "
+            + "already built, or more than one person could build. Try again, or try another app."
         }
     }
 }
 
 @MainActor
 extension DigestService {
-    /// Researches the app, makes and judges ideas to undercut it, and saves the best one.
+    /// Researches the app, makes and judges ideas for a gap beside it, and saves the best one.
     /// - Parameter target: The app, as read from the link or typed.
     /// - Returns: The saved idea.
     /// - Throws: `UndercutError` or `SummarizerError.overDailyLimit` (before any call, nothing is charged; later,
@@ -63,20 +64,20 @@ extension DigestService {
 
         var named = target
         named.name = StarterKit.clean(name, Undercut.maxNameLength)
-        undercutStep = "Searching the web for \(named.name)'s prices and complaints…"
+        undercutStep = "Searching the web for \(named.name)'s prices, complaints and what's already been built…"
         let reply = try await searcher.searchWeb(system: Undercut.searchInstructions,
                                                  prompt: Undercut.searchPrompt(named, interestArea: AppSettings.interestArea),
                                                  maxSearches: Undercut.maxSearches, blockedDomains: Undercut.blockedDomains,
-                                                 feature: "Undercut an app")
+                                                 feature: "Reimagine an app")
         guard !reply.sources.isEmpty else { throw UndercutError.nothingFound(named.name) }
         if dependencies.isOverDailyCap() { throw SummarizerError.overDailyLimit }
         let data = try await searcher.complete(system: Undercut.formatInstructions, prompt: Undercut.formatPrompt(reply),
-                                               schema: Undercut.formatSchema, effort: "low", feature: "Undercut an app")
+                                               schema: Undercut.formatSchema, effort: "low", feature: "Reimagine an app")
         let research = try Undercut.parse(data, sources: reply.sources, target: named)
         guard !research.items.isEmpty else { throw UndercutError.nothingFound(named.name) }
 
         if dependencies.isOverDailyCap() { throw SummarizerError.overDailyLimit }
-        undercutStep = "Writing ideas to undercut \(named.name)…"
+        undercutStep = "Looking for a gap beside \(named.name)…"
         let service = self
         let writer = dependencies.stepClient(.writing).map { LLMSummarizer(client: $0) } ?? llm
         // The leaderboard isn't sent: these ideas answer one app, not the day's scan, so they shouldn't merge into it.

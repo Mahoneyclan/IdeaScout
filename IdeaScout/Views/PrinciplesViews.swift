@@ -38,8 +38,9 @@ struct IdeaPrinciplesSections: View {
             Text("Competitors")
         } footer: {
             Text(idea.competitorList.contains { $0.confirmed }
-                 ? "Prices with a link were checked on the web."
-                 : "Prices are the AI's best knowledge and haven't been checked on the web.")
+                 ? "Prices with a link were found on the web by \(idea.lastSeen.formatted(date: .abbreviated, time: .omitted)), "
+                   + "roughly converted to US dollars a month. They may be out of date: tap a link to check."
+                 : "Prices are the AI's best knowledge and haven't been checked on the web. They may be wrong or out of date.")
         }
         if let plan = idea.salesPlan {
             SalesPlanSection(idea: idea, plan: plan)

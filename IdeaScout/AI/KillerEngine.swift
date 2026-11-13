@@ -151,7 +151,8 @@ struct KillerEngine {
         var appType: BuilderTool.AppType?
         /// Pain clusters as one-line summaries for the prompt.
         var painClusters: [String] = []
-        /// "Undercut an app": the app every idea must undercut, with what the web research found; `nil` for a scan.
+        /// "Reimagine an app": the app the user named, whose gap every idea must fill, with what the web research
+        /// found; `nil` for a scan.
         var target: Undercut.Target?
     }
 
@@ -166,7 +167,7 @@ struct KillerEngine {
         guard !candidates.isEmpty else { return [] }
         await onCritique()
         let reviews = try await critique(candidates, items: context.items, aboutMe: context.aboutMe, tool: context.tool,
-                                       appType: context.appType)
+                                       appType: context.appType, target: context.target)
         return Self.survivors(candidates: candidates, reviews: reviews, items: context.items, tool: context.tool,
                               appType: context.appType ?? context.tool.defaultAppType)
     }

@@ -90,11 +90,14 @@ prices where the link is a returned page (PriceCheck, DigestService+PriceCheck);
 Merge into KillerIdeas (new, or update returning ones) ─▶ screens update automatically (SwiftData @Query)
 ```
 
-**Undercut an app** (on demand, Claude only; `Undercut`, `DigestService+Undercut`, `UndercutView`): the app's name is
-read from a pasted App Store link on the phone (Apple is never contacted) ─▶ web search on Haiku 5.5, Apple's sites
-blocked, then a format call ─▶ findings kept only with returned links become evidence items ("Complaints on the web",
-"Paid plans on the web") ─▶ the usual idea step and devil's advocate, told which app to undercut ─▶ price check ─▶ the
-best idea is merged and marked with the app's name (`KillerIdea.undercutApp`).
+**Reimagine an app** (on demand, Claude only; first built as "Undercut an app", so the code keeps `Undercut`,
+`DigestService+Undercut`, `UndercutView` and the stored `KillerIdea.undercutApp`): the app's name is read from a pasted
+App Store link on the phone (Apple is never contacted) ─▶ web search on Haiku 5.5 (up to 7 searches), Apple's and
+Replit's sites blocked, then a format call ─▶ findings kept only with returned links become evidence items
+("Complaints on the web", "Paid plans on the web", and apps solo builders already made as "Vibe-coded") ─▶ the usual
+idea step, told to fill a gap beside the app at half its price or less without copying it, and the devil's advocate,
+told to fail copies ─▶ price check ─▶ the best idea is merged and marked "Gap spotted in …". Its starter kit adds a
+"design your own name, screens, icon and text" rule.
 
 ## Key rules and why
 - **Signal shares (40/40/20):** stop developer-heavy sources crowding out evidence of demand.

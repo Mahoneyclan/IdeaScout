@@ -46,7 +46,9 @@ extension KillerEngine {
     Judge whether the one-week test would really show demand. survives is true only if the idea is still worth \
     a one-week test after your objections. Give the single strongest objection, the main competitors (or "none found"), \
     a one-sentence verdict, and evidence_needed: the one fact that would most raise the score. Copy each title exactly. \
-    Write everything in English.
+    If an app the user named is given, survives is false for any idea that copies it: the same job for the same \
+    people, or its name, slogans, feature wording, screens or design. Mark gap down hard when an app already built by \
+    solo builders does the same job. Write everything in English.
     """ + Prompts.untrustedData
 
     /// Pass 2: the devil's advocate (feature "Devil's advocate"). Uses high effort because judging is where
@@ -58,9 +60,11 @@ extension KillerEngine {
     /// - Returns: One review per idea the critic answered; matched to candidates later by title.
     /// - Throws: Errors from the AI call or the parser.
     func critique(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String,
-                  tool: BuilderTool = .claudeCode, appType: BuilderTool.AppType? = nil) async throws -> [Review] {
+                  tool: BuilderTool = .claudeCode, appType: BuilderTool.AppType? = nil,
+                  target: Undercut.Target? = nil) async throws -> [Review] {
         let data = try await (judge ?? llm.client).complete(system: Self.critiqueInstructions,
-                                                 prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe, tool: tool, appType: appType),
+                                                 prompt: Self.critiquePrompt(candidates, items: items, aboutMe: aboutMe, tool: tool,
+                                                                             appType: appType, target: target),
                                                  schema: Self.reviewSchema, effort: "high", feature: "Devil's advocate")
         return try Self.parseReviews(data)
     }
@@ -71,11 +75,15 @@ extension KillerEngine {
     ///   - candidates: The pass 1 ideas.
     ///   - items: The numbered items the evidence numbers point into.
     ///   - aboutMe: The user's profile; "(not provided)" when empty.
+    ///   - target: "Reimagine an app": the app the user named, so copies of it can be failed; `nil` for a scan.
     /// - Returns: The prompt text.
     static func critiquePrompt(_ candidates: [Candidate], items: [FetchedItem], aboutMe: String,
-                               tool: BuilderTool = .claudeCode, appType: BuilderTool.AppType? = nil) -> String {
+                               tool: BuilderTool = .claudeCode, appType: BuilderTool.AppType? = nil,
+                               target: Undercut.Target? = nil) -> String {
         var text = "About me: " + (aboutMe.isEmpty ? "(not provided)" : aboutMe)
-        text += "\nBuilder's tool: \(tool.label). Each idea must be \(tool.forAI(appType)).\n\nIdeas:"
+        text += "\nBuilder's tool: \(tool.label). Each idea must be \(tool.forAI(appType))."
+        if let target { text += "\n" + Undercut.promptBlock(target) }
+        text += "\n\nIdeas:"
         for c in candidates {
             text += "\n\nTitle: \(c.title)\nPitch: \(c.pitch)\nBuyer: \(c.buyer)\nPricing: \(c.pricing)"
             if !c.replaces.isEmpty { text += "\nReplaces: \(c.replaces)" }

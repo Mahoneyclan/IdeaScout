@@ -1,6 +1,7 @@
 // UndercutView.swift
-// The "Undercut an app" sheet, opened from the Ideas tab: paste an App Store link (or type an app's name), check the
-// name read from it, see the cost, then get one idea for a cheaper, simpler alternative, saved with the others.
+// The "Reimagine an app" sheet (first built as "Undercut an app"), opened from the Ideas tab: paste an App Store link
+// (or type an app's name), check the name read from it, see the cost, then get one idea for a gap in the market
+// beside that app, saved with the others.
 
 import SwiftUI
 
@@ -32,7 +33,7 @@ struct UndercutView: View {
                     Section("Your idea") {
                         NavigationLink { KillerIdeaDetailView(idea: made) } label: { KillerIdeaCard(idea: made) }
                     }
-                    Section {} footer: { Text("It's saved in Ideas, marked \"Undercuts \(made.undercutApp)\".") }
+                    Section {} footer: { Text("It's saved in Ideas, marked \"Gap spotted in \(made.undercutApp)\". " + Self.ownAppNote) }
                 } else {
                     inputSection
                     if let failure {
@@ -44,7 +45,7 @@ struct UndercutView: View {
                 }
             }
             .readableList()
-            .navigationTitle("Undercut an app")
+            .navigationTitle("Reimagine an app")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -99,8 +100,8 @@ struct UndercutView: View {
                 Button {
                     start()
                 } label: {
-                    Label("Find a cheaper idea" + (cost.map { " · up to " + AppSettings.approximateCostText($0) } ?? ""),
-                          systemImage: "scissors")
+                    Label("Find a gap" + (cost.map { " · up to " + AppSettings.approximateCostText($0) } ?? ""),
+                          systemImage: "sparkles")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
@@ -109,11 +110,17 @@ struct UndercutView: View {
         } footer: {
             Text(cost == nil
                  ? "This needs Claude with its API key, because it searches the web. See Settings → Advanced → AI & costs."
-                 : "Claude searches the web (never the App Store itself) for the app's prices and the complaints about "
-                   + "it, then writes ideas and the devil's advocate judges them. Takes about a minute. The cost is an "
-                   + "upper guide and counts towards your daily AI spending limit.")
+                 : "Claude searches the web (never the App Store itself) for the app's prices, the complaints about "
+                   + "it and what solo builders have already made, then looks for a gap beside it: people or a job it "
+                   + "serves badly, at half its price or less. The devil's advocate judges the ideas. Takes about a "
+                   + "minute. The cost is an upper guide and counts towards your daily AI spending limit.\n\n"
+                   + Self.ownAppNote)
         }
     }
+
+    /// Said before and after: the AI is asked not to copy, but nothing can guarantee it (legal review, 14 Nov 2026).
+    static let ownAppNote = "The idea is meant to be your own app. IdeaScout asks the AI not to copy the name, look or "
+        + "wording, but check before you build: you're responsible for what you ship."
 
     /// Runs it in its own task, so closing the sheet doesn't waste the paid calls (the idea is still saved).
     private func start() {
