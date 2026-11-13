@@ -36,7 +36,7 @@ struct SourcesSettings: View {
             let counts = Dictionary(grouping: digests.first?.themeList.flatMap(\.itemList) ?? [], by: \.source).mapValues(\.count)
             ForEach(Signal.allCases, id: \.self) { signal in
                 Section(signal.label) {
-                    ForEach(SourceKind.allCases.filter { $0.signal == signal }) { kind in
+                    ForEach(SourceKind.allCases.filter { $0.isScanSource && $0.signal == signal }) { kind in
                         SourceToggle(kind: kind, count: counts[kind])
                     }
                 }

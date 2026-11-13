@@ -105,6 +105,8 @@ final class DigestService {
     var improvingIdea: String?
     /// What the running improvement is doing, for the screen ("Round 2 of 3: rewriting…").
     var improveStep = ""
+    /// What "Undercut an app" is doing, for the screen; empty when it isn't running. Only one runs at a time.
+    var undercutStep = ""
 
     /// The database, set by IdeaScoutApp at launch. Refreshes do nothing until it's set.
     @ObservationIgnored var container: ModelContainer?

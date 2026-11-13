@@ -1,13 +1,14 @@
 // IdeaImprover.swift
 // "Improve this idea": rounds in which the AI rewrites an idea to answer the devil's advocate's objection, then the
-// devil's advocate scores the rewrite. Holds the rewrite instructions, schema and parser, the evidence cap and the
-// stopping rules. The service in DigestService+Improve.swift makes the paid calls.
+// devil's advocate scores the rewrite. Before round 1 the same devil's advocate re-scores the original, so every round
+// is compared with a score marked the same way; "Improve again" adds rounds to the last run (owner, 13 Nov 2026). Holds the rewrite instructions, schema and
+// parser, the evidence cap and the stopping rules. The service in DigestService+Improve.swift makes the paid calls.
 
 import Foundation
 
 /// The rules of an improvement run. Testable without the network: the paid steps are passed in.
 enum IdeaImprover {
-    /// At most this many rounds (each is two paid calls: a rewrite and a review).
+    /// At most this many rounds (each is two paid calls: a rewrite and a review), after one review re-scoring the original.
     static let maxRounds = 3
 
     /// Why a run stopped.
@@ -20,17 +21,19 @@ enum IdeaImprover {
             case .reachedBar: "Stopped: it reached your quality bar."
             case .noBetter: "Stopped: the last round didn't raise the score."
             case .rejected: "Stopped: the devil's advocate rejected the last rewrite."
-            case .maxRounds: "Stopped after \(IdeaImprover.maxRounds) rounds."
+            case .maxRounds: "Stopped after \(IdeaImprover.maxRounds) rounds, the most in one go. Improve again to carry on."
             }
         }
     }
 
-    /// A run so far: the original first, then one version per finished round.
+    /// A run so far: the original first, then one version per finished round; "Improve again" adds rounds to it.
     struct Run: Codable, Equatable, Sendable {
         var versions: [IdeaVersion]
         var stop: Stop?
         var madeAt = Date.now
         var model = ""
+        /// The original's score from the daily scan, before the re-score; `nil` for runs saved before re-scoring.
+        var scanScore: Double?
     }
 
     /// The rewrite adds no new evidence, so pain and willingness to pay can't rise above the original's: only
@@ -47,8 +50,8 @@ enum IdeaImprover {
     /// - Parameters:
     ///   - latest: The version the round produced (already capped).
     ///   - best: The best score before this round.
-    ///   - original: The original's score; the bar only stops a run that started below it.
-    ///   - round: The round just finished (1-based).
+    ///   - original: The score this run started from; the bar only stops a run that started below it.
+    ///   - round: The round just finished in this run (1-based).
     ///   - bar: The user's quality bar.
     static func stop(after latest: IdeaVersion, best: Double, original: Double, round: Int, bar: Double) -> Stop? {
         if !latest.passes || !latest.survives { return .rejected }
@@ -57,31 +60,62 @@ enum IdeaImprover {
         return round >= maxRounds ? .maxRounds : nil
     }
 
+    /// Where "Improve again" carries on from: the kept round if one is in use; while the original is in use, the
+    /// best-scoring version so far (the later on a tie). `nil` when nothing in the run is in use (a version kept from
+    /// a run saved before rounds carried on), so a new run starts from the idea as it stands.
+    /// - Parameters:
+    ///   - run: The last run.
+    ///   - inUse: Whether a version is the one in use, given its index.
+    /// - Returns: The index to continue from, or `nil`.
+    static func continueIndex(_ run: Run, inUse: (IdeaVersion, Int) -> Bool) -> Int? {
+        guard !run.versions.isEmpty else { return nil }
+        if let kept = run.versions.indices.dropFirst().first(where: { inUse(run.versions[$0], $0) }) { return kept }
+        guard inUse(run.versions[0], 0) else { return nil }
+        var best = 0
+        for index in run.versions.indices where run.versions[index].score >= run.versions[best].score { best = index }
+        return best
+    }
+
     /// Runs rounds until a stop rule is met. Each finished round is reported through `onRound` before the next
     /// starts, so a failure part-way keeps the versions already made.
     /// - Parameters:
-    ///   - original: The idea as it stands.
+    ///   - original: The idea before any kept improvement; caps the evidence scores and, on a new run, is re-scored.
+    ///   - previous: The last run and the index to continue from ("Improve again"); its rounds stay and new ones
+    ///     are numbered after them, with no re-score. `nil` starts a new run.
     ///   - bar: The quality bar.
     ///   - beforeCall: Called before every paid call; throws to stop (for example over the daily limit).
-    ///   - rewrite: Rewrites a version to answer its objection (paid).
-    ///   - review: The devil's advocate's review of a rewritten version (paid).
+    ///   - rewrite: Rewrites a version to answer its objection (paid), with its round.
+    ///   - review: The devil's advocate's review of a version (paid), with its round; round 0 re-scores the original.
     ///   - onRound: The run after each round.
     /// - Returns: The finished run.
-    @MainActor static func run(from original: IdeaVersion, bar: Double,
+    @MainActor static func run(from original: IdeaVersion, continuing previous: (run: Run, from: Int)? = nil, bar: Double,
                     beforeCall: () throws -> Void,
-                    rewrite: (IdeaVersion) async throws -> IdeaVersion,
-                    review: (IdeaVersion) async throws -> KillerEngine.Review,
+                    rewrite: (IdeaVersion, Int) async throws -> IdeaVersion,
+                    review: (IdeaVersion, Int) async throws -> KillerEngine.Review,
                     onRound: (Run) -> Void) async throws -> Run {
-        var run = Run(versions: [original])
-        var current = original
-        for round in 1...maxRounds {
+        var run: Run
+        if let previous, previous.run.versions.indices.contains(previous.from) {
+            run = previous.run
+            run.stop = nil
+            run.madeAt = .now
+        } else {
+            // The daily scan marked the original with the full evidence among that day's ideas, a different setting
+            // from the rounds' reviews; re-scoring it makes "did the round raise the score?" a like-for-like question.
             try beforeCall()
-            let rewritten = try await rewrite(current)
+            let rescored = original.reviewed(by: capped(try await review(original, 0), original: original))
+            run = Run(versions: [rescored], scanScore: original.score)
+        }
+        var current = run.versions[previous?.from ?? 0]
+        let start = current.score, first = run.versions.count
+        for step in 1...maxRounds {
+            let round = first + step - 1
             try beforeCall()
-            let latest = rewritten.reviewed(by: capped(try await review(rewritten), original: original))
-            let best = run.versions.map(\.score).max() ?? original.score
+            let rewritten = try await rewrite(current, round)
+            try beforeCall()
+            let latest = rewritten.reviewed(by: capped(try await review(rewritten, round), original: original))
+            let best = run.versions.map(\.score).max() ?? start
             run.versions.append(latest)
-            run.stop = stop(after: latest, best: best, original: original.score, round: round, bar: bar)
+            run.stop = stop(after: latest, best: best, original: start, round: step, bar: bar)
             onRound(run)
             if run.stop != nil { break }
             current = latest

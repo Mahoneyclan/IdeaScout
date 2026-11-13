@@ -1,7 +1,8 @@
 // ImproveIdeaView.swift
 // The "Improve this idea" screen: start a run (cost shown first), watch the rounds, compare each version with the
 // original, keep one (a confirmation says so, and the version in use is marked), or undo a kept improvement.
-// Starting again asks first, because it's another paid run.
+// "Improve again" asks first, because it's another paid run, and adds rounds after the last ones. On iPad at full or wide width the rounds are compared
+// side by side with the original (ImproveCompareView.swift).
 
 import SwiftUI
 import SwiftData
@@ -10,12 +11,17 @@ import SwiftData
 struct ImproveIdeaView: View {
     @Bindable var idea: KillerIdea
     @Environment(DigestService.self) private var service
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @AppStorage(AppSettings.Keys.dailyCap) private var dailyCap = AppSettings.defaultDailyCap
     /// Estimated cost of a full run; `nil` when no paid cloud AI is set up. Read when the screen appears.
     @State private var cost: Double?
     /// The last error: a plain message and any technical detail.
     @State private var failure: (message: String, details: String?)?
     @State private var confirmAgain = false
+    /// Shows rounds older than the latest few.
+    @State private var showEarlier = false
+    /// Rounds shown before "Show earlier rounds".
+    private static let roundsShown = 3
     /// What the last keep or undo did, shown at the top until the next action.
     @State private var notice: String?
 
@@ -59,10 +65,16 @@ struct ImproveIdeaView: View {
                 }
             }
             if let run = idea.improvement {
-                versionSections(run)
+                if comparesSideBySide(run) {
+                    ImproveCompareSection(idea: idea, run: run, canKeep: !isRunning,
+                                          footer: run.stop.map { $0.text + madeText(run) },
+                                          keep: { keep($0, round: $1) })
+                } else {
+                    versionSections(run)
+                }
             }
         }
-        .readableList()
+        .readableList(idea.improvement.map(comparesSideBySide) == true ? Layout.compareWidth : Layout.readableWidth)
         .confirmationDialog("Improve it again?", isPresented: $confirmAgain, titleVisibility: .visible) {
             Button("Improve again" + costText) { start() }
         } message: {
@@ -94,9 +106,22 @@ struct ImproveIdeaView: View {
         }
     }
 
-    /// One section per version: the original, then each round.
+    /// Side by side on a wide screen (iPad at full or wide width) once there's a round to compare.
+    private func comparesSideBySide(_ run: IdeaImprover.Run) -> Bool { sizeClass == .regular && run.versions.count >= 2 }
+
+    /// One section per version: the original, then each round. Once "Improve again" has added rounds, only the
+    /// latest few show until "Show earlier rounds" is tapped, to keep the list short on iPhone.
     @ViewBuilder private func versionSections(_ run: IdeaImprover.Run) -> some View {
-        ForEach(Array(run.versions.enumerated()), id: \.offset) { index, version in
+        let hidden = showEarlier ? 0 : max(0, run.versions.count - 1 - Self.roundsShown)
+        let shown = [0] + Array(run.versions.indices.dropFirst(1 + hidden))
+        if hidden > 0 {
+            Section {
+                Button("Show \(hidden) earlier round\(hidden == 1 ? "" : "s")", systemImage: "chevron.down") { showEarlier = true }
+                    .frame(minHeight: 44)
+            }
+        }
+        ForEach(shown, id: \.self) { index in
+            let version = run.versions[index]
             Section {
                 let inUse = version.isInUse(by: idea, isOriginal: index == 0)
                 HStack {
@@ -143,7 +168,10 @@ struct ImproveIdeaView: View {
 
     private func madeText(_ run: IdeaImprover.Run) -> String {
         let model = run.model.isEmpty ? "" : " with \(run.model)"
-        return " Made on \(run.madeAt.formatted(date: .abbreviated, time: .omitted))\(model)."
+        let made = " Made on \(run.madeAt.formatted(date: .abbreviated, time: .omitted))\(model)."
+        guard let scan = run.scanScore else { return made }
+        return made + " The original was re-scored by the same devil's advocate as the rounds, so they compare fairly "
+            + "(before, it scored \(scan.formatted(.number.precision(.fractionLength(1)))))."
     }
 
     /// The repeat run's cost and today's spending against the daily limit.
@@ -151,7 +179,7 @@ struct ImproveIdeaView: View {
         let spent = UsageTracker.summary().today.cost.formatted(.currency(code: "USD"))
         let limit = dailyCap > 0 ? " of \(dailyCap.formatted(.currency(code: "USD")))" : ""
         let price = cost.map { " (up to \(AppSettings.approximateCostText($0)))" } ?? ""
-        return "This makes more paid AI requests\(price) and replaces these versions. Spent today: \(spent)\(limit)."
+        return "This adds up to \(IdeaImprover.maxRounds) more rounds after these, with more paid AI requests\(price). Spent today: \(spent)\(limit)."
     }
 
     /// Keeps a version and says so, with the score change.

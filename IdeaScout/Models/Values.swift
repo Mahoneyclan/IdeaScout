@@ -18,6 +18,9 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case consumerReviews
     /// Hacker News stories and comments found by searching the user's interest area (13 Nov 2026).
     case areaDiscussion
+    /// Evidence found by "Undercut an app"'s web research (13 Nov 2026), never by a scan: complaints about the app
+    /// and its rivals, and the paid plans people buy.
+    case webComplaints, webPaying
 
     /// Identity for SwiftUI lists.
     var id: String { rawValue }
@@ -41,6 +44,8 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .appReviews: "App Store complaints"
         case .consumerReviews: "Consumer app complaints"
         case .areaDiscussion: "Hacker News on your area"
+        case .webComplaints: "Complaints on the web"
+        case .webPaying: "Paid plans on the web"
         case .atlassian: "Atlassian Marketplace"
         case .ausTender: "AusTender"
         }
@@ -64,6 +69,8 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .appReviews: "star.slash"
         case .consumerReviews: "hand.thumbsdown"
         case .areaDiscussion: "text.magnifyingglass"
+        case .webComplaints: "exclamationmark.bubble.fill"
+        case .webPaying: "creditcard"
         case .atlassian: "puzzlepiece.extension"
         case .ausTender: "building.2"
         }
@@ -73,11 +80,14 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     /// so builder-heavy sources can't crowd out evidence of demand.
     var signal: Signal {
         switch self {
-        case .painPoints, .fieldNotes, .appReviews, .consumerReviews, .ausTender, .areaDiscussion: .demand
+        case .painPoints, .fieldNotes, .appReviews, .consumerReviews, .ausTender, .areaDiscussion, .webComplaints, .webPaying: .demand
         case .ycombinator, .research: .timing
         default: .supply
         }
     }
+
+    /// Whether a daily scan reads it (and Settings lists it); the web research kinds come only from "Undercut an app".
+    var isScanSource: Bool { self != .webComplaints && self != .webPaying }
 
     /// Developer- and game-focused sources start switched off, so ideas lean towards people who pay.
     /// GitHub, Show HN and AI research show what builders make rather than what buyers need, and AusTender's

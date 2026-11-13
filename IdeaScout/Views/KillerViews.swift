@@ -102,6 +102,10 @@ struct KillerIdeaCard: View {
                 Text("Last seen \(idea.lastSeen.formatted(date: .abbreviated, time: .omitted))")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            if !idea.undercutApp.isEmpty {
+                Label("Undercuts \(idea.undercutApp)", systemImage: "scissors")
+                    .font(.caption2.bold()).foregroundStyle(.purple)
+            }
             if idea.backWithNewEvidence {
                 Label("Back with new evidence", systemImage: "arrow.uturn.up")
                     .font(.caption2.bold()).foregroundStyle(.teal)
@@ -142,6 +146,8 @@ struct LeaderboardView: View {
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
     /// The idea waiting for "Dismiss" confirmation.
     @State private var pendingDismiss: KillerIdea?
+    /// Shows the "Undercut an app" sheet.
+    @State private var showUndercut = false
 
     /// Ideas not dismissed: those judged on the five principles first, then best killer score.
     private var ranked: [KillerIdea] { ideas.filter { !$0.isDismissed }.sorted(by: KillerIdea.ranksAbove) }
@@ -177,6 +183,12 @@ struct LeaderboardView: View {
             }
             .readableList()
             .navigationTitle("Ideas")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Undercut an app", systemImage: "scissors") { showUndercut = true }
+                }
+            }
+            .sheet(isPresented: $showUndercut) { UndercutView() }
             .safeAreaInset(edge: .bottom) { RefreshBar() }
             // An alert rather than a confirmation dialog: it comes from a swipe, so on iPad there's no button to point at.
             .alert("Dismiss \(pendingDismiss?.title ?? "this idea")?",

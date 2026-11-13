@@ -7,37 +7,57 @@ import Foundation
 
 extension ClaudeClient: WebSearchClient {
     /// Most times a paused search turn is continued.
-    static let maxContinuations = 2
+    static let maxContinuations = 3
+    /// Room for the reply. Haiku thinks by default and its thinking counts towards this; at 4,000 a search with
+    /// several pages of results could use it all before writing the answer (seen 13 Nov 2026: "gave no answer").
+    static let searchMaxTokens = 16_000
 
     /// See `WebSearchClient.searchWeb`.
     /// - Throws: `LLMHTTPError`, `SummarizerError.refused` or `.badResponse`, network errors or `CancellationError`.
-    func searchWeb(system: String, prompt: String, maxSearches: Int, feature: String) async throws -> WebSearchReply {
+    func searchWeb(system: String, prompt: String, maxSearches: Int, blockedDomains: [String],
+                   feature: String) async throws -> WebSearchReply {
         var messages: [[String: Any]] = [["role": "user", "content": prompt]]
         var found = WebSearchReply(text: "", sources: [])
+        var lastStop: String?
         for _ in 0...Self.maxContinuations {
-            let payload = try JSONSerialization.data(withJSONObject: Self.searchBody(system: system, messages: messages,
-                                                                                  maxSearches: maxSearches, model: model))
+            let payload = try JSONSerialization.data(withJSONObject: Self.searchBody(
+                system: system, messages: messages, maxSearches: maxSearches, blockedDomains: blockedDomains, model: model))
             let data = try await LLMRetry.run { try await sendSearch(payload, feature: feature) }
             let reply = try Self.parseSearchReply(data)
             found.text += reply.text
             found.sources.formUnion(reply.sources)
+            lastStop = reply.stopReason
             guard reply.paused, let content = reply.content else { break }
             // Security: the paused reply is sent back unchanged, as the API requires; nothing in it is run here.
             messages.append(["role": "assistant", "content": content])
         }
-        guard !found.text.isEmpty else { throw SummarizerError.badResponse("the web search gave no answer") }
+        guard !found.text.isEmpty else { throw SummarizerError.badResponse(Self.noAnswerReason(lastStop)) }
         return found
     }
 
-    /// The request: the web search tool limited to `maxSearches`, no structured output (the formatting is a
-    /// separate call), no server-side fallback (Haiku has none).
-    static func searchBody(system: String, messages: [[String: Any]], maxSearches: Int, model: String) -> [String: Any] {
-        [
+    /// Why a search ended without an answer, for the error's wording.
+    static func noAnswerReason(_ stop: String?) -> String {
+        switch stop {
+        case "max_tokens": "the web search ran out of room before answering"
+        case "pause_turn": "the web search took too many steps and stopped before answering"
+        default: "the web search gave no answer (it stopped with \"\(stop ?? "no reason")\")"
+        }
+    }
+
+    /// The request: the web search tool limited to `maxSearches` and kept off `blockedDomains`, low effort (finding
+    /// and reporting pages needs little thinking, and thinking uses the reply's room), no structured output (the
+    /// formatting is a separate call), no server-side fallback (Haiku has none).
+    static func searchBody(system: String, messages: [[String: Any]], maxSearches: Int, blockedDomains: [String] = [],
+                           model: String) -> [String: Any] {
+        var tool: [String: Any] = ["type": "web_search_20250305", "name": "web_search", "max_uses": maxSearches]
+        if !blockedDomains.isEmpty { tool["blocked_domains"] = blockedDomains }
+        return [
             "model": model,
-            "max_tokens": 4000,
+            "max_tokens": searchMaxTokens,
+            "output_config": ["effort": "low"],
             "system": system,
             "messages": messages,
-            "tools": [["type": "web_search_20250305", "name": "web_search", "max_uses": maxSearches]],
+            "tools": [tool],
         ]
     }
 
@@ -53,6 +73,8 @@ extension ClaudeClient: WebSearchClient {
         var content: [Any]?
         /// Searches billed for this reply.
         var searches: Int
+        /// Why the reply ended ("end_turn", "max_tokens", "pause_turn"…).
+        var stopReason: String?
     }
 
     /// Reads a web search reply: text, every returned or cited link, whether it paused, and the searches billed.
@@ -83,7 +105,8 @@ extension ClaudeClient: WebSearchClient {
         }
         let usage = json["usage"] as? [String: Any]
         let searches = (usage?["server_tool_use"] as? [String: Any])?["web_search_requests"] as? Int ?? 0
-        return SearchReply(text: text, sources: sources, paused: stop == "pause_turn", content: content, searches: searches)
+        return SearchReply(text: text, sources: sources, paused: stop == "pause_turn", content: content, searches: searches,
+                           stopReason: stop)
     }
 
     /// One attempt; records tokens and searches.

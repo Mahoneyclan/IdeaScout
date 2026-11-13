@@ -28,6 +28,7 @@ extension KillerEngine {
     complaining or asking for tools that don't exist, "App Store complaints" and "Consumer app complaints" are \
     1-2 star reviews of business and consumer apps people pay for, which show buyers ready to switch, "Hacker News on \
     your area" are recent posts and comments about the user's interest area (read them for complaints and needs), \
+    "Complaints on the web" and "Paid plans on the web" are web research about one app the user wants to undercut, \
     "AusTender" is government IT spending, and "My pain points" \
     are the user's own problems, which are strong evidence; "Atlassian Marketplace", "Y Combinator" and \
     "App Store top paid" show what people and businesses already pay for, and also who the competitors are; "Vibe-coded", "Show HN" \
@@ -50,6 +51,9 @@ extension KillerEngine {
     - Every idea must be the kind of app given below for the builder's tool, and one person must be able to build \
     all of it with that tool. Don't propose anything that tool can't build.
     - Each must replace a named manual task, spreadsheet or costly app that the buyer uses today.
+    - If an app to undercut is given below, every idea must be a cheaper, simpler alternative to that app for the \
+    people who complain about it: priced at half its cheapest paid plan or less, keeping only the features those \
+    people need. Never copy its name, brand, wording or design; name it as the main competitor.
     Prefer ideas that solve a pain cluster and are supported by several projects. Cite at least one Demand item for each idea. Only propose ideas you would genuinely back; \
     quality matters more than variety.
     For each idea give: a short memorable title; a one-sentence pitch; the buyer (a specific role in a specific \
@@ -91,6 +95,7 @@ extension KillerEngine {
         parts.append("About me: " + (context.aboutMe.isEmpty ? "(not provided)" : context.aboutMe))
         if !context.interestArea.isEmpty { parts.append("Interest area: " + context.interestArea) }
         parts.append("Builder's tool: \(context.tool.label). Every idea must be \(context.tool.forAI(context.appType)).")
+        if let target = context.target { parts.append(Undercut.promptBlock(target)) }
         let trends = context.themes.filter { !$0.isCatchAll && !$0.isPainCluster }.map { theme in
             "- \(theme.title): \(theme.summary)" + (theme.opportunities.isEmpty ? "" : " Variants: " + theme.opportunities.joined(separator: " | "))
         }

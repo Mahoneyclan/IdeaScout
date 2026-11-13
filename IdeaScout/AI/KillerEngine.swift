@@ -151,6 +151,8 @@ struct KillerEngine {
         var appType: BuilderTool.AppType?
         /// Pain clusters as one-line summaries for the prompt.
         var painClusters: [String] = []
+        /// "Undercut an app": the app every idea must undercut, with what the web research found; `nil` for a scan.
+        var target: Undercut.Target?
     }
 
     /// Every vibe-codable idea is kept (up to 3 a day); ones the devil's advocate rejected rank last. Whether it counts as a
@@ -233,10 +235,11 @@ struct KillerEngine {
     }
 
     /// Sources that count as evidence of pain: complaints and the user's own pain points.
-    static let painEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .fieldNotes]
+    static let painEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .fieldNotes, .webComplaints]
     /// Sources that count as evidence that people pay: complaints, funded startups, top paid apps, paid
     /// marketplace add-ons, government contracts.
-    static let payEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .ycombinator, .appStore, .atlassian, .ausTender]
+    static let payEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .ycombinator, .appStore, .atlassian, .ausTender,
+                                               .webComplaints, .webPaying]
 
     /// How many different cited items show people paying.
     static func payEvidenceCount(_ cited: [FetchedItem]) -> Int {

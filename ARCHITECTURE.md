@@ -90,6 +90,12 @@ prices where the link is a returned page (PriceCheck, DigestService+PriceCheck);
 Merge into KillerIdeas (new, or update returning ones) ─▶ screens update automatically (SwiftData @Query)
 ```
 
+**Undercut an app** (on demand, Claude only; `Undercut`, `DigestService+Undercut`, `UndercutView`): the app's name is
+read from a pasted App Store link on the phone (Apple is never contacted) ─▶ web search on Haiku 5.5, Apple's sites
+blocked, then a format call ─▶ findings kept only with returned links become evidence items ("Complaints on the web",
+"Paid plans on the web") ─▶ the usual idea step and devil's advocate, told which app to undercut ─▶ price check ─▶ the
+best idea is merged and marked with the app's name (`KillerIdea.undercutApp`).
+
 ## Key rules and why
 - **Signal shares (40/40/20):** stop developer-heavy sources crowding out evidence of demand.
 - **Evidence caps:** pain and willingness to pay can't score above 3 without matching evidence (models score generously).

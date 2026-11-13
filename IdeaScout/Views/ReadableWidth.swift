@@ -11,6 +11,8 @@ enum Layout {
     static let readableWidth: CGFloat = 700
     /// Widest a full-width button gets on a large screen, so it still reads as one button.
     static let buttonWidth: CGFloat = 480
+    /// Widest the side-by-side comparison of an improvement gets: two text columns plus labels.
+    static let compareWidth: CGFloat = 1100
 }
 
 extension View {
@@ -23,28 +25,33 @@ extension View {
 
     /// For a `List` or `Form`: adds side space on wide windows so the rows form a centred column of
     /// `Layout.readableWidth`. Narrow windows get nothing extra, so they look exactly as before.
+    /// - Parameter maxWidth: The column width (wider for side-by-side layouts).
     /// - Returns: The list with adjusted margins.
-    func readableList() -> some View { modifier(ReadableListMargins()) }
+    func readableList(_ maxWidth: CGFloat = Layout.readableWidth) -> some View { modifier(ReadableListMargins(maxWidth: maxWidth)) }
 }
 
 /// Measures the list's width and turns any space beyond the readable column into side space. Uses safe-area
 /// padding rather than content margins, because setting content margins to 0 would remove the list's own insets.
 struct ReadableListMargins: ViewModifier {
+    /// The column width.
+    var maxWidth = Layout.readableWidth
     /// The list's current width, updated on rotation and window resizing.
     @State private var width: CGFloat = 0
 
     func body(content: Content) -> some View {
-        let margin = Self.margin(for: width)
+        let margin = Self.margin(for: width, maxWidth: maxWidth)
         return content
             .safeAreaPadding(.horizontal, margin)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     }
 
     /// The extra side space that centres a readable column.
-    /// - Parameter width: The list's width.
-    /// - Returns: Half the width beyond `Layout.readableWidth`, or 0 when the window isn't wider than it.
-    static func margin(for width: CGFloat) -> CGFloat {
-        max(0, (width - Layout.readableWidth) / 2)
+    /// - Parameters:
+    ///   - width: The list's width.
+    ///   - maxWidth: The column width.
+    /// - Returns: Half the width beyond `maxWidth`, or 0 when the window isn't wider than it.
+    static func margin(for width: CGFloat, maxWidth: CGFloat = Layout.readableWidth) -> CGFloat {
+        max(0, (width - maxWidth) / 2)
     }
 }
 

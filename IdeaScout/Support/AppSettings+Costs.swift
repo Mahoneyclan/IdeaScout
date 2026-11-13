@@ -1,6 +1,6 @@
 // AppSettings+Costs.swift
-// Cost estimates shown before paid AI actions (a refresh, "Suggest variants", a starter kit, "Improve this idea"),
-// and the cost text on buttons and confirmations.
+// Cost estimates shown before paid AI actions (a refresh, "Suggest variants", a starter kit, "Improve this idea",
+// "Undercut an app"), and the cost text on buttons and confirmations.
 
 import Foundation
 
@@ -106,7 +106,8 @@ extension AppSettings {
     /// - Parameter price: The chosen model's price.
     /// - Returns: The estimated cost.
     static func estimatedImproveCost(price: ModelPrice) -> Double {
-        price.cost(input: 3_000, output: 5_000) * Double(IdeaImprover.maxRounds)
+        // Each round is a rewrite and a review; the original's re-score is one more review (about half a round).
+        price.cost(input: 3_000, output: 5_000) * (Double(IdeaImprover.maxRounds) + 0.5)
     }
 
     /// The estimated cost of improving an idea with the current settings.
@@ -117,6 +118,19 @@ extension AppSettings {
         // With "Mixed", Sonnet rewrites and Opus judges: about half the run at each price.
         guard usesMixedModels else { return estimatedImproveCost(price: price) }
         return (estimatedImproveCost(price: stepPrice(.writing)) + estimatedImproveCost(price: stepPrice(.judging))) / 2
+    }
+
+    /// The upper cost guide for "Undercut an app": the web research, one idea step (priced like a refresh's, at
+    /// 1.5×) and one idea's price check.
+    /// - Returns: The cost when Claude is chosen, agreed to and has a key; `nil` when it can't run (it needs Claude's
+    ///   web search).
+    /// - Note: Reads the Keychain, so call it on demand rather than in every view update.
+    static func undercutCost() -> Double? {
+        guard provider == .claude, hasConsent(.claude), let price = chosenModelPrice() else { return nil }
+        let ideas = usesMixedModels
+            ? 0.055 * (refreshPriceScale(stepPrice(.writing)) + refreshPriceScale(stepPrice(.judging)))
+            : 0.11 * refreshPriceScale(price)
+        return ideas * 1.5 + Undercut.estimatedResearchCost + PriceCheck.estimatedCostPerScan / Double(KillerEngine.maxPerDay)
     }
 
     /// A cost for buttons and confirmations: "~$0.02", or "<$0.01" when it would round to nothing.

@@ -13,9 +13,19 @@ protocol WebSearchClient: Sendable {
     ///   - system: Instructions.
     ///   - prompt: The question.
     ///   - maxSearches: Most searches the model may run.
+    ///   - blockedDomains: Sites the search must never return (for example Apple's, whose terms forbid automated
+    ///     access); empty for none.
     ///   - feature: Cost-tracker label.
     /// - Returns: The answer's text and the links of every page the searches returned.
-    func searchWeb(system: String, prompt: String, maxSearches: Int, feature: String) async throws -> WebSearchReply
+    func searchWeb(system: String, prompt: String, maxSearches: Int, blockedDomains: [String],
+                   feature: String) async throws -> WebSearchReply
+}
+
+extension WebSearchClient {
+    /// A search with no blocked sites.
+    func searchWeb(system: String, prompt: String, maxSearches: Int, feature: String) async throws -> WebSearchReply {
+        try await searchWeb(system: system, prompt: prompt, maxSearches: maxSearches, blockedDomains: [], feature: feature)
+    }
 }
 
 /// What a web search call found.

@@ -1,6 +1,7 @@
 // IdeaScoutUITests.swift
 // Automated screen tests for the critical flows: first launch with consent, a refresh, the paywall
-// after the trial, "Delete all my data", saving an idea, making a starter kit, and iPad rotation. The app runs in its sealed test mode (TestMode.swift):
+// after the trial, "Delete all my data", saving an idea, making a starter kit, "Undercut an app" reading a link,
+// and iPad rotation. The app runs in its sealed test mode (TestMode.swift):
 // in-memory database, separate settings and Keychain, fake sources and a scripted AI. So these tests
 // never touch the owner's real data, never use the network and never spend money.
 
@@ -55,6 +56,24 @@ final class IdeaScoutUITests: XCTestCase {
         XCTAssertTrue(again.waitForExistence(timeout: 5))
         again.tap()
         XCTAssertTrue(element(app, containing: "Run another refresh today?").waitForExistence(timeout: 5))
+    }
+
+    /// "Undercut an app" opens from the Ideas tab and reads the app's name from a pasted App Store link, without
+    /// any AI call (the test stops before the paid button).
+    func testUndercutReadsTheAppFromALink() {
+        let app = launch("-ui-skip-welcome")
+        let open = app.buttons["Undercut an app"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 20))
+        open.tap()
+        let field = app.textFields["App Store link or app name"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("https://apps.apple.com/au/app/things-3/id904237743")
+        XCTAssertTrue(element(app, containing: "App Store id904237743").waitForExistence(timeout: 5), "the link should be read")
+        XCTAssertEqual(app.textFields["App name, read from the link"].firstMatch.value as? String, "Things 3")
+        XCTAssertTrue(button(app, startingWith: "Find a cheaper idea").exists)
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Ideas"].waitForExistence(timeout: 5))
     }
 
     /// After the trial, refreshing leads to the paywall; unlocking restores the refresh button.
@@ -166,6 +185,14 @@ final class IdeaScoutUITests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         XCTAssertTrue(button(app, startingWith: "Improve again").waitForExistence(timeout: 10), "the run should finish")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            let compare = element(app, containing: "Original and round side by side")
+            for _ in 0..<4 where !compare.exists { app.swipeUp() }
+            XCTAssertTrue(compare.exists, "iPad should compare side by side")
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "iPad comparison"; shot.lifetime = .keepAlways
+            add(shot)
+        }
         let round = element(app, containing: "Round 1")
         for _ in 0..<4 where !round.exists { app.swipeUp() }
         XCTAssertTrue(round.exists, "a round should be listed")

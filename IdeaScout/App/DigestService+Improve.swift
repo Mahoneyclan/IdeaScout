@@ -1,7 +1,7 @@
 // DigestService+Improve.swift
-// "Improve this idea" on demand: up to three rounds of a paid rewrite and a paid devil's-advocate review, never part
-// of a refresh. Same rules as a starter kit: the trial or unlock, a cloud AI with a key and consent, the daily
-// spending limit. The idea itself only changes when the user keeps a version; undo puts the original back.
+// "Improve this idea" on demand: a paid re-score of the original, then up to three rounds of a paid rewrite and a
+// paid devil's-advocate review, never part of a refresh. Same rules as a starter kit: the trial or unlock, a cloud
+// AI with a key and consent, the daily spending limit. The idea itself only changes when the user keeps a version; undo puts the original back.
 
 import Foundation
 import SwiftData
@@ -29,7 +29,8 @@ enum ImproveError: LocalizedError, Equatable {
 
 @MainActor
 extension DigestService {
-    /// Runs an improvement and saves each finished round on the idea (`improvement`), replacing the last run.
+    /// Runs an improvement and saves each finished round on the idea (`improvement`); "Improve again" adds to the
+    /// last run.
     /// The idea's own text and scores don't change.
     /// - Throws: `ImproveError` or `SummarizerError.overDailyLimit` before any call; otherwise errors from a call
     ///   or parser, with the rounds already finished kept.
@@ -48,20 +49,27 @@ extension DigestService {
             appType = AppSettings.appType
         let client = llm.client
         let judge = dependencies.stepClient(.judging) ?? client
-        var round = 1
+        // "Improve again" carries on from the version in use (or the best so far), capped by the idea as the scan
+        // made it, before any kept round. A new run starts from the idea as it stands.
+        let original = idea.originalVersion ?? IdeaVersion(idea)
+        let previous = idea.improvement.flatMap { run in
+            IdeaImprover.continueIndex(run) { version, index in version.isInUse(by: idea, isOriginal: index == 0) }
+                .map { (run: run, from: $0) }
+        }
         _ = try await IdeaImprover.run(
-            from: IdeaVersion(idea), bar: AppSettings.qualityBar,
+            from: previous == nil ? IdeaVersion(idea) : original, continuing: previous, bar: AppSettings.qualityBar,
             beforeCall: { if dependencies.isOverDailyCap() { throw SummarizerError.overDailyLimit } },
-            rewrite: { version in
-                improveStep = "Round \(round) of \(IdeaImprover.maxRounds): rewriting the idea…"
+            rewrite: { version, round in
+                improveStep = "Round \(round): rewriting the idea…"
                 let data = try await client.complete(
                     system: IdeaImprover.rewriteInstructions,
                     prompt: IdeaImprover.rewritePrompt(version, title: title, evidence: evidence, aboutMe: aboutMe, tool: tool, appType: appType),
                     schema: IdeaImprover.rewriteSchema, effort: "medium", feature: "Improve idea")
                 return try IdeaImprover.parseRewrite(data, from: version)
             },
-            review: { version in
-                improveStep = "Round \(round) of \(IdeaImprover.maxRounds): the devil's advocate is judging it…"
+            review: { version, step in
+                improveStep = step == 0 ? "Re-scoring the original so the rounds compare fairly…"
+                    : "Round \(step): the devil's advocate is judging it…"
                 let data = try await judge.complete(
                     system: KillerEngine.critiqueInstructions,
                     prompt: IdeaImprover.reviewPrompt(version, title: title, evidence: evidence, aboutMe: aboutMe, tool: tool, appType: appType),
@@ -75,7 +83,6 @@ extension DigestService {
                 var saved = run
                 saved.model = client.model
                 idea.improvement = saved
-                round += 1
                 if let message = container?.mainContext.saveOrReport("the improved idea") { lastError = message }
             })
     }

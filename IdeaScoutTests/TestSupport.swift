@@ -41,7 +41,8 @@ struct ScriptedPriceChecker: WebSearchClient, LLMClient {
     var search: Result<WebSearchReply, LLMHTTPError>
     var formatted: String
 
-    func searchWeb(system: String, prompt: String, maxSearches: Int, feature: String) async throws -> WebSearchReply {
+    func searchWeb(system: String, prompt: String, maxSearches: Int, blockedDomains: [String],
+                   feature: String) async throws -> WebSearchReply {
         try search.get()
     }
 

@@ -35,13 +35,18 @@ struct PriceCheckTests {
         #expect(merged.map(\.name) == ["chaser", "Other"] && merged.first?.confirmed == true)
     }
 
-    /// The request uses the basic web search tool, capped, with no structured output or fallback.
+    /// The request uses the basic web search tool, capped, at low effort with room to answer after thinking, with
+    /// no structured output or fallback.
     @Test func searchRequestShape() throws {
         let body = ClaudeClient.searchBody(system: "s", messages: [["role": "user", "content": "p"]], maxSearches: 3,
                                            model: ScanStep.reading.mixedModelID)
         let tools = try #require(body["tools"] as? [[String: Any]])
         #expect(tools.first?["type"] as? String == "web_search_20250305" && tools.first?["max_uses"] as? Int == 3)
-        #expect(body["output_config"] == nil && body["fallbacks"] == nil && body["model"] as? String == "claude-haiku-5-5")
+        let config = try #require(body["output_config"] as? [String: Any])
+        #expect(config["effort"] as? String == "low" && config["format"] == nil)
+        #expect(body["max_tokens"] as? Int == 16_000, "Haiku's thinking used up 4,000 before it answered")
+        #expect(body["fallbacks"] == nil && body["model"] as? String == "claude-haiku-5-5")
+        #expect(ClaudeClient.noAnswerReason("max_tokens").contains("ran out of room"))
     }
 
     /// Reply shape from Anthropic's web search docs: text with citations, a result list, an error result, usage.

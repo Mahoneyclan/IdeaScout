@@ -115,7 +115,7 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink { SourcesSettings() } label: {
-                        LabeledContent("Sources", value: "\(SourceKind.allCases.filter(AppSettings.isEnabled).count) on")
+                        LabeledContent("Sources", value: "\(SourceKind.allCases.filter { $0.isScanSource && AppSettings.isEnabled($0) }.count) on")
                     }
                     NavigationLink { ScanRankingSettings() } label: { Text("Scan & ranking") }
                     NavigationLink { AISettings() } label: {

@@ -53,34 +53,74 @@ struct IdeaImproverRuleTests {
         #expect(IdeaImprover.stop(after: latest, best: best, original: original, round: round, bar: bar) == expected)
     }
 
-    /// Rounds continue while the score rises, each starting from the last; a failing round keeps the earlier ones.
+    /// The original is re-scored first; rounds continue while the score rises, each starting from the last; a failing
+    /// round keeps the earlier ones.
     @MainActor @Test func failedRoundKeepsEarlierRounds() async throws {
-        var reviews = [review(4), review(5)]
+        var reviews = [review(3), review(4), review(5)]
         var rewrittenFrom: [String] = []
+        var reviewed: [Int] = []
         var saved: IdeaImprover.Run?
         await #expect(throws: SummarizerError.self) {
             _ = try await IdeaImprover.run(
                 from: version(3), bar: 6, beforeCall: {},   // a bar it can never reach
-                rewrite: { v in
+                rewrite: { v, _ in
                     rewrittenFrom.append(v.objection)
                     var r = v; r.pitch = "Round \(rewrittenFrom.count)"; return r
                 },
-                review: { _ in
+                review: { _, round in
+                    reviewed.append(round)
                     guard !reviews.isEmpty else { throw SummarizerError.unavailable }
                     return reviews.removeFirst()
                 },
                 onRound: { saved = $0 })
         }
-        #expect(rewrittenFrom == ["o", "new objection", "new objection"], "each round answers the latest objection")
+        #expect(reviewed == [0, 1, 2, 3], "round 0 re-scores the original")
+        #expect(rewrittenFrom == ["new objection", "new objection", "new objection"], "each round answers the latest objection")
         #expect(saved?.versions.map(\.pitch) == ["Chases invoices.", "Round 1", "Round 2"])
         #expect(saved?.stop == nil)
+    }
+
+    /// A round is judged against the re-scored original, not the daily scan's score: here the re-score is lower
+    /// than the scan's, so a round between the two counts as better and the run carries on.
+    @MainActor @Test func roundsAreComparedWithTheReScore() async throws {
+        var reviews = [review(2), review(3), review(3)]
+        let run = try await IdeaImprover.run(from: version(4), bar: 6, beforeCall: {},
+                                             rewrite: { v, _ in v }, review: { _, _ in reviews.removeFirst() }, onRound: { _ in })
+        #expect(run.scanScore == version(4).score)
+        #expect(run.versions.count == 3, "round 1 beat the re-score; round 2 didn't beat round 1")
+        #expect(run.stop == .noBetter)
+    }
+
+    /// "Improve again" adds rounds after the last ones, numbered on, with no second re-score, starting from the
+    /// version it carries on from and comparing with that version's score.
+    @MainActor @Test func improveAgainCarriesOn() async throws {
+        let earlier = IdeaImprover.Run(versions: [version(3), version(4), version(2)], stop: .noBetter, scanScore: 3)
+        var rounds: [Int] = [], startedFrom: [String] = []
+        var reviews = [review(5), review(5)]
+        let run = try await IdeaImprover.run(
+            from: version(3), continuing: (run: earlier, from: 1), bar: 6, beforeCall: {},
+            rewrite: { v, round in startedFrom.append(v.pitch); var r = v; r.pitch = "Round \(round)"; return r },
+            review: { _, round in rounds.append(round); return reviews.removeFirst() }, onRound: { _ in })
+        #expect(rounds == [3, 4], "no re-score; numbered after the earlier rounds")
+        #expect(startedFrom == ["Chases invoices.", "Round 3"])
+        #expect(run.versions.count == 5 && run.versions.prefix(3) == earlier.versions.prefix(3), "earlier rounds stay")
+        #expect(run.stop == .noBetter && run.scanScore == 3)
+    }
+
+    /// Where "Improve again" carries on from: the kept round; else, while the original is in use, the best so far;
+    /// else (a version kept from an older run) nowhere, so a new run starts.
+    @Test func improveAgainStartsFromTheRightVersion() {
+        let run = IdeaImprover.Run(versions: [version(3), version(4), version(4), version(2)], stop: .noBetter)
+        #expect(IdeaImprover.continueIndex(run) { _, i in i == 3 } == 3)
+        #expect(IdeaImprover.continueIndex(run) { _, i in i == 0 } == 2, "best so far, the later on a tie")
+        #expect(IdeaImprover.continueIndex(run) { _, _ in false } == nil)
     }
 
     @MainActor @Test func overLimitStopsBeforeAnyCall() async {
         var calls = 0
         await #expect(throws: SummarizerError.self) {
             _ = try await IdeaImprover.run(from: version(3), bar: 4, beforeCall: { throw SummarizerError.overDailyLimit },
-                                           rewrite: { calls += 1; return $0 }, review: { _ in calls += 1; return review(4) },
+                                           rewrite: { v, _ in calls += 1; return v }, review: { _, _ in calls += 1; return review(4) },
                                            onRound: { _ in })
         }
         #expect(calls == 0)
@@ -106,7 +146,7 @@ struct IdeaImproverRuleTests {
     }
 
     @Test func costCoversEveryRound() {
-        #expect(abs(AppSettings.estimatedImproveCost(price: ModelPrice(input: 4, output: 20)) - 0.336) < 0.0001)
+        #expect(abs(AppSettings.estimatedImproveCost(price: ModelPrice(input: 4, output: 20)) - 0.392) < 0.0001, "three rounds and the re-score")
     }
 }
 
@@ -139,8 +179,8 @@ struct ImproveServiceTests {
         try await service.improve(idea)
         let run = try #require(idea.improvement)
         #expect(run.versions.count >= 2 && run.model == "test-model")
-        #expect(run.versions[0].evidenceNeeded == "invoices paid late")
-        #expect(run.versions[1].pain == 3, "pain capped at the original's")
+        #expect(run.versions[0].evidenceNeeded == "e2" && run.scanScore == version(3).score, "the original was re-scored")
+        #expect(run.versions[0].pain == 3 && run.versions[1].pain == 3, "pain capped at the original's")
         #expect(idea.pitch == "Chases invoices." && idea.pain == 3)
         #expect(service.improvingIdea == nil)
     }

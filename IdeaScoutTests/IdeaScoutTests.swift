@@ -366,6 +366,23 @@ struct KillerEngineTests {
         #expect(!original.isInUse(by: idea, isOriginal: true) && round.isInUse(by: idea, isOriginal: false))
     }
 
+    /// iPad comparison: a row counts as changed only if the words differ (not spacing or case); empty fields are left
+    /// out; the round shown first is the kept one, otherwise the best-scoring.
+    @Test func comparisonMarksRealChangesAndStartsOnTheRightRound() {
+        let idea = KillerIdea(key: "k", title: "T")
+        idea.pitch = "Chases  unpaid invoices"; idea.buyer = "Trades"; idea.pricing = "$9 a month"
+        let original = IdeaVersion(idea)
+        var better = original, worse = original
+        better.pitch = "chases unpaid invoices"; better.buyer = "Sole traders"; better.pain = 5; better.gap = 5
+        worse.pricing = "$4 once"
+        let rows = ComparisonRow.rows(original: original, round: better)
+        #expect(rows.first { $0.label == "Pitch" }?.changed == false && rows.first { $0.label == "Who pays" }?.changed == true)
+        #expect(!rows.contains { $0.label == "Where to find buyers" })
+        let run = IdeaImprover.Run(versions: [original, better, worse], stop: nil)
+        #expect(ComparisonRow.initialRound(run, inUse: { _, _ in false }) == (better.score >= worse.score ? 1 : 2))
+        #expect(ComparisonRow.initialRound(run, inUse: { _, index in index == 2 }) == 2)
+    }
+
     @Test func parsesPainPointComment() throws {
         let json = #"{"hits":[{"objectID":"9","title":null,"url":null,"points":null,"created_at_i":1760000000,"comment_text":"I wish there was a tool for rosters","story_title":"Ask HN: Nurses"}]}"#
         let items = try HackerNewsFetcher.parse(Data(json.utf8), as: .painPoints)
