@@ -1,7 +1,7 @@
 // UndercutView.swift
-// The "Reimagine an app" sheet (first built as "Undercut an app"), opened from the Ideas tab: paste an App Store link
-// (or type an app's name), check the name read from it, see the cost, then get one idea for a gap in the market
-// beside that app, saved with the others.
+// The "Reimagine an app" sheet (first built as "Undercut an app"), opened from the Ideas tab: paste a link to the app
+// (its website, GitHub or App Store page) or type its name, check the name read from it, see the cost, then get one
+// idea for a gap in the market beside that app, saved with the others.
 
 import SwiftUI
 
@@ -13,8 +13,8 @@ struct UndercutView: View {
     @State private var input = ""
     /// The app's name, read from `input` and editable.
     @State private var name = ""
-    /// The App Store id from the link, if any (shown so the user knows the link was read).
-    @State private var appID = ""
+    /// What was read from the link, kept so the run uses its id, label and link.
+    @State private var read: Undercut.Target?
     /// The upper cost guide, or `nil` when Claude isn't set up.
     @State private var cost: Double?
     @State private var failure: (message: String, details: String?)?
@@ -23,7 +23,7 @@ struct UndercutView: View {
     @FocusState private var typing: Bool
 
     private var isRunning: Bool { !service.undercutStep.isEmpty }
-    /// Pasted text that isn't an App Store app link (and isn't a plain name).
+    /// Pasted text that isn't a web link (or is an Apple link that isn't an app's page), and isn't a plain name.
     private var badLink: Bool { !input.isEmpty && Undercut.target(from: input) == nil }
 
     var body: some View {
@@ -61,22 +61,21 @@ struct UndercutView: View {
 
     @ViewBuilder private var inputSection: some View {
         Section {
-            TextField("App Store link or app name", text: $input, axis: .vertical)
+            TextField("Link to the app, or its name", text: $input, axis: .vertical)
                 .lineLimit(1...3)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($typing)
                 .disabled(isRunning)
                 .onChange(of: input) { _, value in
-                    let target = Undercut.target(from: value)
-                    name = target?.name ?? ""
-                    appID = target?.appID ?? ""
+                    read = Undercut.target(from: value)
+                    name = read?.name ?? ""
                 }
             if badLink {
-                Label("That isn't an App Store app link. Copy the link from the app's page with Share → Copy Link, "
-                      + "or type the app's name.", systemImage: "exclamationmark.circle")
+                Label("That isn't a link IdeaScout can read. Paste the app's website, GitHub or App Store link "
+                      + "(in the App Store: Share → Copy Link), or type the app's name.", systemImage: "exclamationmark.circle")
                     .foregroundStyle(.orange)
-            } else if !appID.isEmpty {
+            } else if let from = read?.from, !from.isEmpty {
                 TextField("App name", text: $name)
                     .focused($typing)
                     .disabled(isRunning)
@@ -85,9 +84,10 @@ struct UndercutView: View {
         } header: {
             Text("Which app?")
         } footer: {
-            Text(appID.isEmpty
-                 ? "In the App Store, open the app, tap Share, then Copy Link, and paste it here. Or type its name."
-                 : "Read from the link (App Store \(appID)). Correct the name if it's wrong.")
+            Text((read?.from ?? "").isEmpty
+                 ? "Paste a link to the app: its website, its GitHub page, or its App Store page (Share → Copy Link). "
+                   + "Or type its name."
+                 : "Read from the link (\(read?.from ?? "")). Correct the name if it's wrong.")
         }
         Section {
             if isRunning {
@@ -119,14 +119,15 @@ struct UndercutView: View {
     }
 
     /// Said before and after: the AI is asked not to copy, but nothing can guarantee it (legal review, 14 Nov 2026).
-    static let ownAppNote = "The idea is meant to be your own app. IdeaScout asks the AI not to copy the name, look or "
-        + "wording, but check before you build: you're responsible for what you ship."
+    static let ownAppNote = "The idea is meant to be your own app. IdeaScout asks the AI not to copy the name, look, "
+        + "wording or code, but check before you build: you're responsible for what you ship."
 
     /// Runs it in its own task, so closing the sheet doesn't waste the paid calls (the idea is still saved).
     private func start() {
         typing = false
         failure = nil
-        let target = Undercut.Target(name: name, appID: appID)
+        var target = read ?? Undercut.Target(name: name)
+        target.name = name
         Task {
             do {
                 made = try await service.undercut(target)

@@ -8,19 +8,26 @@ import SwiftData
 @testable import IdeaScout
 
 struct UndercutRuleTests {
+    /// App Store links still resolve (owner, 14 Nov 2026), and any other web link or a typed name works too; the
+    /// search gets the link, except Apple's.
     @Test(arguments: [
-        ("https://apps.apple.com/au/app/things-3/id904237743", "Things 3", "id904237743"),
-        ("apps.apple.com/us/app/fantastical-calendar/id975937182?platform=iphone", "Fantastical Calendar", "id975937182"),
-        ("https://apps.apple.com/app/id123456", "", "id123456"),          // no words: the user types the name
-        ("  Notion  ", "Notion", ""),                                    // a typed name
+        ("https://apps.apple.com/au/app/things-3/id904237743", "Things 3", "App Store id904237743", ""),
+        ("apps.apple.com/us/app/fantastical-calendar/id975937182?platform=iphone", "Fantastical Calendar", "App Store id975937182", ""),
+        ("https://apps.apple.com/app/id123456", "", "App Store id123456", ""),          // no words: the user types the name
+        ("https://github.com/usememos/memos?tab=readme", "Memos", "GitHub usememos/memos", "https://github.com/usememos/memos"),
+        ("github.com/excalidraw/excalidraw", "Excalidraw", "GitHub excalidraw/excalidraw", "https://github.com/excalidraw/excalidraw"),
+        ("https://www.notion.so/product?utm=x", "Notion", "www.notion.so", "https://www.notion.so/product"),
+        ("app.todoist.com", "Todoist", "app.todoist.com", "https://app.todoist.com"),
+        ("  Notion  ", "Notion", "", ""),                                              // typed names
+        ("Things 3.0", "Things 3.0", "", ""),
     ])
-    func readsTheAppFromTheLink(input: String, name: String, id: String) {
+    func readsTheAppFromTheLink(input: String, name: String, from: String, link: String) {
         let target = Undercut.target(from: input)
-        #expect(target?.name == name && target?.appID == id)
+        #expect(target?.name == name && target?.from == from && target?.link == link)
     }
 
-    @Test(arguments: ["", "https://example.com/app/things/id1", "https://apps.apple.com/au/developer/cultured-code/id1",
-                      "https://apps.apple.com/au/app/things-3"])
+    @Test(arguments: ["", "ftp://example.com/x", "https://localhost/x", "https://github.com/usememos",
+                      "https://apps.apple.com/au/developer/cultured-code/id1", "https://apps.apple.com/au/app/things-3"])
     func rejectsWhatIsNotAnAppLink(input: String) {
         #expect(Undercut.target(from: input) == nil)
     }
@@ -48,6 +55,8 @@ struct UndercutRuleTests {
     @Test func promptNamesTheAppAndItsPrice() {
         let target = Undercut.Target(name: "Things 3", alreadyBuilt: ["TinyTasks"], plan: "Pro", monthlyPrice: 10, summary: "Too dear.")
         let block = Undercut.promptBlock(target)
+        #expect(Undercut.searchPrompt(Undercut.Target(name: "Memos", link: "https://github.com/usememos/memos"), interestArea: "")
+            .contains("https://github.com/usememos/memos"))
         #expect(block.contains("App the user named (find a gap beside it; don't copy it): Things 3")
                 && block.contains("$10 a month") && block.contains("Too dear.") && block.contains("TinyTasks"))
         #expect(KillerEngine.generateInstructions.contains("don't compete with it head-on"))

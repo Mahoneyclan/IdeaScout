@@ -65,7 +65,7 @@ final class IdeaScoutUITests: XCTestCase {
         let open = app.buttons["Reimagine an app"].firstMatch
         XCTAssertTrue(open.waitForExistence(timeout: 20))
         open.tap()
-        let field = app.textFields["App Store link or app name"].firstMatch
+        let field = app.textFields["Link to the app, or its name"].firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText("https://apps.apple.com/au/app/things-3/id904237743")

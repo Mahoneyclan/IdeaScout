@@ -91,8 +91,8 @@ Merge into KillerIdeas (new, or update returning ones) ─▶ screens update aut
 ```
 
 **Reimagine an app** (on demand, Claude only; first built as "Undercut an app", so the code keeps `Undercut`,
-`DigestService+Undercut`, `UndercutView` and the stored `KillerIdea.undercutApp`): the app's name is read from a pasted
-App Store link on the phone (Apple is never contacted) ─▶ web search on Haiku 5.5 (up to 7 searches), Apple's and
+`DigestService+Undercut`, `UndercutView` and the stored `KillerIdea.undercutApp`): the app's name is read on the phone from a
+pasted link (an App Store page, a GitHub project or any website) or typed (nothing is fetched; Apple is never contacted) ─▶ web search on Haiku 5.5 (up to 7 searches), Apple's and
 Replit's sites blocked, then a format call ─▶ findings kept only with returned links become evidence items
 ("Complaints on the web", "Paid plans on the web", and apps solo builders already made as "Vibe-coded") ─▶ the usual
 idea step, told to fill a gap beside the app at half its price or less without copying it, and the devil's advocate,

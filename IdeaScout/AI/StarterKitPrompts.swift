@@ -119,8 +119,8 @@ enum StarterKitPrompts {
     - done_when: 3 to 6 checks that show the first slice works.
     - project_rules: 5 to 10 short rules for the AI coding tool to follow throughout (for example: keep keys \
     and passwords out of the code, check all input, test the payment and permission logic, keep files small). If \
-    the request names an app the idea was found beside, one rule must be: design your own name, screens, icon and \
-    text, and never copy that app's.
+    the request names an app the idea was found beside, one rule must be: design your own name, screens, icon, \
+    text and code, never copy that app's, and check the licence before reusing anything from an open-source project.
 
     No links and no code.
     """ + Prompts.untrustedData
