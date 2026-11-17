@@ -178,6 +178,34 @@ enum AreaFocus {
         return words.contains { text.contains($0) }
     }
 
+    /// Whether any of the words appear in the text.
+    /// - Parameters:
+    ///   - text: Any text, e.g. an app's name and genre.
+    ///   - words: From `words(in:)`.
+    /// - Returns: `false` when `words` is empty.
+    static func mentions(_ text: String, _ words: [String]) -> Bool {
+        let lower = text.lowercased()
+        return words.contains { lower.contains($0) }
+    }
+
+    /// Today's slice of a list that's read a few entries a day: entries about the interest area first, each group
+    /// rotated by day so the same ones aren't read every day.
+    /// - Parameters:
+    ///   - pool: Candidates, best first, without duplicates.
+    ///   - count: How many to pick.
+    ///   - day: Day of the year, which picks today's slice.
+    ///   - isAboutArea: Whether an entry mentions the interest area.
+    /// - Returns: Up to `count` entries: matching ones first, the rest filled from the others.
+    static func todaysPick<T>(_ pool: [T], count: Int, day: Int, isAboutArea: (T) -> Bool) -> [T] {
+        func rotated(_ list: [T], _ n: Int) -> [T] {
+            guard list.count > n else { return list }
+            let start = (day * n) % list.count
+            return (0..<n).map { list[(start + $0) % list.count] }
+        }
+        let preferred = rotated(pool.filter(isAboutArea), count)
+        return preferred + rotated(pool.filter { !isAboutArea($0) }, count - preferred.count)
+    }
+
     /// Drops one common ending: "ing", "ers" or "es" from words of 6 or more letters, a plural "s" from 5 or more.
     private static func stem(_ word: String) -> String {
         if word.count >= 6, let ending = ["ing", "ers", "es"].first(where: word.hasSuffix) { return String(word.dropLast(ending.count)) }

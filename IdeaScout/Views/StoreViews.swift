@@ -19,8 +19,8 @@ struct PaywallView: View {
                     .accessibilityHidden(true)
                 Text(headline).font(.title2.bold()).multilineTextAlignment(.center)
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("A fresh scan for money-making ideas every day", systemImage: "sun.max")
-                    Label("Pain clusters, trends and devil's-advocate checks", systemImage: "checkmark.seal")
+                    Label("New money-making ideas every day", systemImage: "sun.max")
+                    Label("Common complaints, trends and devil's-advocate checks", systemImage: "checkmark.seal")
                     Label("Use the AI provider of your choice", systemImage: "cpu")
                     Label("Your history and saved ideas always stay yours", systemImage: "bookmark")
                 }

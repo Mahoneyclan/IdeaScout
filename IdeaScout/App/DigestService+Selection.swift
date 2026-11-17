@@ -13,14 +13,16 @@ extension DigestService {
         if AppSettings.isEnabled(.fieldNotes) { fetchers.append(FieldNotesFetcher(notes: AppSettings.fieldNotes)) }
         let area = AppSettings.interestArea.trimmingCharacters(in: .whitespacesAndNewlines)
         if !area.isEmpty && AppSettings.isEnabled(.areaDiscussion) { fetchers.append(AreaDiscussionFetcher(area: area)) }
-        if AppSettings.isEnabled(.appReviews) { fetchers.append(AppReviewsFetcher()) }
-        if AppSettings.isEnabled(.consumerReviews) { fetchers.append(AppReviewsFetcher(kind: .consumerReviews)) }
+        // The interest area's words only reorder which apps and plugins are read; they're never sent to Apple or WordPress.org.
+        let words = AreaFocus.words(in: area)
+        if AppSettings.isEnabled(.appReviews) { fetchers.append(AppReviewsFetcher(areaWords: words)) }
+        if AppSettings.isEnabled(.consumerReviews) { fetchers.append(AppReviewsFetcher(kind: .consumerReviews, areaWords: words)) }
+        if AppSettings.isEnabled(.wordpressReviews) { fetchers.append(WordPressReviewsFetcher(areaWords: words)) }
         if AppSettings.isEnabled(.ausTender) { fetchers.append(AusTenderFetcher()) }
         if AppSettings.isEnabled(.atlassian) { fetchers.append(AtlassianFetcher()) }
         if AppSettings.isEnabled(.vibeCode) { fetchers.append(VibeCodeFetcher()) }
         if AppSettings.isEnabled(.games) { fetchers.append(GamesFetcher()) }
         if AppSettings.isEnabled(.painPoints) { fetchers.append(PainPointsFetcher()) }
-        if AppSettings.isEnabled(.ycombinator) { fetchers.append(YCombinatorFetcher()) }
         if AppSettings.isEnabled(.appStore) { fetchers.append(AppStoreFetcher()) }
         if AppSettings.isEnabled(.research) { fetchers.append(ResearchFetcher()) }
         if AppSettings.isEnabled(.lobsters) { fetchers.append(LobstersFetcher()) }

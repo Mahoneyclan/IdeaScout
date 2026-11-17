@@ -7,6 +7,8 @@ import SwiftData
 
 /// Shows or makes the idea's starter kit.
 struct StarterKitView: View {
+    /// Shows "Copied" after the prompt is copied.
+    @State private var copied = false
     @Bindable var idea: KillerIdea
     @Environment(DigestService.self) private var service
     @AppStorage(AppSettings.Keys.starterKitTool) private var toolRaw = BuilderTool.claudeCode.rawValue
@@ -63,11 +65,25 @@ struct StarterKitView: View {
         .readableList()
         .safeAreaInset(edge: .bottom) {
             if let kit = idea.starterKit {
-                ShareLink(item: StarterKitPrompts.shareText(kit, title: idea.title, tool: tool), subject: Text(idea.title)) {
-                    Label("Share build prompt for \(tool.label)…", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                let prompt = StarterKitPrompts.shareText(kit, title: idea.title, tool: tool)
+                VStack(spacing: 6) {
+                    HStack {
+                        // Copy is the quickest route to the coding tool; Share is for sending it elsewhere.
+                        Button {
+                            SecureClipboard.copy(prompt)
+                            copied = true
+                        } label: {
+                            Label(copied ? "Copied" : "Copy prompt", systemImage: copied ? "checkmark" : "doc.on.doc")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        ShareLink(item: prompt, subject: Text(idea.title)) {
+                            Label("Share…", systemImage: "square.and.arrow.up").frame(minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    Text("Then paste it into \(tool.label) to start building.").font(.footnote).foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderedProminent)
                 .frame(maxWidth: Layout.buttonWidth)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -134,7 +150,7 @@ struct StarterKitView: View {
                 }
             }
         } header: {
-            Text("Stack")
+            Text("Tools to use")
         } footer: {
             if !kit.monthlyCost.isEmpty { Text("Running cost: \(kit.monthlyCost)") }
         }
@@ -143,7 +159,7 @@ struct StarterKitView: View {
                 ForEach(Array(kit.leaveOut.enumerated()), id: \.offset) { _, text in Label(text, systemImage: "minus.circle") }
             }
         }
-        Section("First slice") {
+        Section("Build this first") {
             Text(kit.firstSlice)
             ForEach(Array(kit.doneWhen.enumerated()), id: \.offset) { _, text in Label(text, systemImage: "checkmark.circle") }
         }

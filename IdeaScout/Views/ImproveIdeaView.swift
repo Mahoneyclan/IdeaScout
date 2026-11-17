@@ -31,7 +31,7 @@ struct ImproveIdeaView: View {
     private var intro: String {
         "Each round, the AI rewrites \(idea.title) to answer the devil's advocate's strongest objection, then the devil's "
             + "advocate scores the rewrite. It stops after \(IdeaImprover.maxRounds) rounds, or sooner when the score stops "
-            + "rising or reaches your quality bar. Nothing changes until you keep a version."
+            + "rising or reaches your minimum score. Nothing changes until you keep a version."
     }
     private static let needsAIText = "Improving an idea needs a cloud AI with its API key. See Settings → Advanced → AI & costs."
     private static let costNote = "Pain and willingness to pay can't go up, because a rewrite adds no new evidence. "
@@ -50,10 +50,10 @@ struct ImproveIdeaView: View {
                 if idea.originalVersion != nil && !isRunning {
                     Button("Undo improvement", systemImage: "arrow.uturn.backward") {
                         service.undoImprovement(of: idea)
-                        announce("Original put back. The idea uses the version the daily scan proposed.")
+                        announce("Original put back. The idea uses the version the daily refresh proposed.")
                     }
                         .frame(minHeight: 44)
-                        .accessibilityHint("Puts back the idea as the daily scan proposed it")
+                        .accessibilityHint("Puts back the idea as the daily refresh proposed it")
                 }
             } footer: {
                 Text(cost == nil ? Self.needsAIText : Self.costNote)

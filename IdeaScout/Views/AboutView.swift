@@ -36,12 +36,12 @@ struct AboutView: View {
     }
 
     private let credits = [
-        Credit(name: "Hacker News", note: "Show HN, Ask HN, Launch HN and comments, via the Algolia HN Search API."),
+        Credit(name: "Hacker News", note: "Show HN, Ask HN and comments, via the Algolia HN Search API."),
         Credit(name: "GitHub", note: "Public repositories, via the GitHub Search API."),
         Credit(name: "Apple App Store", note: "Top charts and customer reviews, via Apple's public RSS feeds."),
+        Credit(name: "WordPress.org", note: "Popular plugins and their recent reviews, via the WordPress.org Plugins API and review feeds."),
         Credit(name: "AusTender", note: "Australian Government contract notices. Contains information from AusTender (www.tenders.gov.au), licensed under Creative Commons Attribution 4.0."),
-        Credit(name: "Atlassian Marketplace", note: "Trending and new apps, via the Marketplace REST API."),
-        Credit(name: "Y Combinator", note: "Company directory data via the open yc-oss project."),
+        Credit(name: "Atlassian Marketplace", note: "Trending and new apps, via the Marketplace REST API. Off by default."),
         Credit(name: "Hugging Face", note: "Daily papers and Spaces, via the Hugging Face Hub API."),
         Credit(name: "DEV, Lobsters, itch.io, Steam", note: "Optional sources, off by default."),
     ]
@@ -56,10 +56,10 @@ struct AboutView: View {
                 }
             }
             Section {
-                Text("IdeaScout has no server and no tracking. Your scans, ideas, saved projects, main settings and AI spending sync between your devices through your own iCloud account; I can't see them. Your API keys stay on each device. When you use a cloud AI, your About me, interest area, pain points and the collected public posts are sent directly to the provider you chose, using your own key.")
+                Text("IdeaScout has no server and no tracking. Your refreshes, ideas, saved projects, main settings and AI spending sync between your devices through your own iCloud account; I can't see them. Your API keys stay on each device. When you use a cloud AI, your About me, interest area, pain points and the collected public posts are sent directly to the provider you chose, using your own key.")
                     .font(.subheadline)
                 if CloudSync.databaseSyncFailed {
-                    Label("iCloud sync isn't working, so your scans and ideas are on this device only. Check you're signed in to iCloud, then restart IdeaScout.",
+                    Label("iCloud sync isn't working, so your refreshes and ideas are on this device only. Check you're signed in to iCloud, then restart IdeaScout.",
                           systemImage: "icloud.slash")
                         .font(.subheadline)
                         .foregroundStyle(.orange)

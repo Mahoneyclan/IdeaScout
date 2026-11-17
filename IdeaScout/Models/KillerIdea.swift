@@ -143,7 +143,7 @@ import SwiftData
         lastSeen = .now
     }
 
-    /// The killer score: the average of the five principles, or the older weighted score for older ideas.
+    /// The killer score: the average of the principles, or the older weighted score for older ideas.
     var killerScore: Double {
         engineVersion >= 1 ? FiveTests.score(principles)
             : Self.killerScore(pain: pain, willingToPay: willingToPay, timing: timing, gap: gap, fit: fit,
@@ -167,14 +167,13 @@ import SwiftData
         PaybackSums.priceText(salesPlan?.model ?? .subscription, monthlyPrice: monthlyPrice)
     }
 
-    /// The five principles, worked out from the stored scores and prices (empty for older ideas).
+    /// The principles, worked out from the stored scores and prices (empty for older ideas).
     var principles: [TestOutcome] {
         guard engineVersion >= 1 else { return [] }
         return FiveTests.outcomes(
             vibeCodable: buildability,
             willPay: FiveTests.willPay(score: willingToPay, competitors: competitorList, payEvidence: payEvidenceCount),
             pain: pain,
-            cheaper: FiveTests.cheaper(price: monthlyPrice, competitors: competitorList, fillsGap: fillsGap),
             coversBuild: salesPlan.map {
                 PaybackSums.coversBuild(plan: $0, monthlyPrice: monthlyPrice, customers: likelyCustomers, buildDays: buildDays,
                                         tool: builderTool, channelScore: channelScore)

@@ -1,11 +1,12 @@
 // PrinciplesViews.swift
-// The five principles on an idea's screen (owner's decision, 11 Nov 2026): each with its score and a one-line
-// reason, then the competitors and prices (with a coloured tag: undercuts a competitor, or fills a gap), the one job and features, the money, and the devil's advocate's answers.
+// The principles on an idea's screen (owner's decisions, 11 and 16 Nov 2026): each with its score and a one-line
+// reason, then the competitors and prices (with a coloured tag: undercuts a competitor, or fills a gap, and how the
+// price compares with the 25% cap), the one job and features, the money, and the devil's advocate's answers.
 // Only for ideas judged on the principles; older ideas keep their older scores section.
 
 import SwiftUI
 
-/// The sections shown for an idea judged on the five principles.
+/// The sections shown for an idea judged on the principles.
 struct IdeaPrinciplesSections: View {
     let idea: KillerIdea
 
@@ -15,9 +16,10 @@ struct IdeaPrinciplesSections: View {
                 PrincipleRow(outcome: outcome)
             }
         } header: {
-            Text("Five principles")
+            Text("Why it's a killer idea")
         } footer: {
-            Text("Vibe-codable is a must; the other four score and rank the idea. The killer score is their average.")
+            Text("Four tests. Vibe-codable (one person can build it with an AI coding tool) is a must; the other three "
+                 + "score and rank the idea. Its score out of 5 is their average.")
         }
         if !idea.oneJob.isEmpty || !idea.keepFeatures.isEmpty || !idea.leaveOutFeatures.isEmpty {
             Section("What it does") {
@@ -33,6 +35,9 @@ struct IdeaPrinciplesSections: View {
             }
             ForEach(Array(idea.competitorList.enumerated()), id: \.offset) { _, competitor in
                 CompetitorRow(competitor: competitor)
+            }
+            if let note = FiveTests.priceNote(price: idea.monthlyPrice, competitors: idea.competitorList) {
+                Label(note, systemImage: "tag").font(.footnote)
             }
         } header: {
             Text("Competitors")
@@ -55,12 +60,16 @@ struct IdeaPrinciplesSections: View {
                 }
             }
         }
-        if !idea.followRisk.isEmpty || !idea.copyRisk.isEmpty || !idea.keepPaying.isEmpty {
-            Section("Devil's advocate also asks") {
-                if !idea.followRisk.isEmpty { labelled("Would competitors follow?", idea.followRisk) }
-                if !idea.copyRisk.isEmpty { labelled("What stops copying?", idea.copyRisk) }
-                if !idea.keepPaying.isEmpty { labelled("Will customers keep paying?", idea.keepPaying) }
-            }
+        Section {
+            if !idea.objection.isEmpty { labelled("Strongest objection", idea.objection) }
+            if !idea.followRisk.isEmpty { labelled("Would competitors follow?", idea.followRisk) }
+            if !idea.copyRisk.isEmpty { labelled("What stops copying?", idea.copyRisk) }
+            if !idea.keepPaying.isEmpty { labelled("Will customers keep paying?", idea.keepPaying) }
+            if !idea.verdict.isEmpty { labelled("Verdict", idea.verdict) }
+        } header: {
+            Text("Doubts")
+        } footer: {
+            Text("From the devil's advocate: a second, sceptical AI that tries to knock the idea down.")
         }
     }
 
@@ -90,12 +99,12 @@ struct PrincipleRow: View {
                 Label(outcome.name, systemImage: !outcome.known ? "questionmark.circle" : outcome.passed ? "checkmark.circle.fill" : "xmark.circle")
                     .foregroundStyle(outcome.passed || !outcome.known ? Color.primary : Color.orange)
                 Spacer()
-                Text(outcome.known ? "\(outcome.score)/5" : "Unproven").monospacedDigit()
+                Text(outcome.known ? "\(outcome.score)/5" : "No proof yet").monospacedDigit()
             }
             Text(outcome.reason).font(.footnote).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(outcome.name), " + (outcome.known ? "\(outcome.passed ? "met" : "not met"), \(outcome.score) out of 5. " : "unproven. ")
+        .accessibilityLabel("\(outcome.name), " + (outcome.known ? "\(outcome.passed ? "met" : "not met"), \(outcome.score) out of 5. " : "no proof yet. ")
                             + outcome.reason)
     }
 }
@@ -178,17 +187,21 @@ struct SalesPlanSection: View {
                 LabeledContent(plan.model.label, value: idea.monthlyPrice >= FiveTests.minimumPrice ? idea.priceText : "No price given")
                 if !plan.reason.isEmpty { Text(plan.reason).font(.subheadline).foregroundStyle(.secondary) }
             }
-            LabeledContent("Build", value: IdeaPrinciplesSections.buildText(idea))
-            LabeledContent("Yearly costs", value: FiveTests.money(plan.otherYearlyCosts))
-            LabeledContent("Running cost per customer", value: FiveTests.money(plan.runningCostPerCustomer) + " a month")
-            if plan.model == .subscription {
-                LabeledContent("Customers leaving",
-                               value: "\(max(plan.monthlyChurnPercent, PaybackSums.minimumChurnPercent).formatted())% a month")
-            }
-            LabeledContent("Customers counted, first year",
-                           value: "\(PaybackSums.cautiousCustomers(idea.likelyCustomers)) (half the guess of \(idea.likelyCustomers))")
             LabeledContent("First-year profit", value: FiveTests.money(year.profit))
             LabeledContent("Pays back", value: year.paybackMonth.map { "in about \($0) month\($0 == 1 ? "" : "s")" } ?? "Not within the first year")
+            // The working is there for those who want it; most people only need the two lines above.
+            DisclosureGroup("Show the sums") {
+                LabeledContent("Build", value: IdeaPrinciplesSections.buildText(idea))
+                LabeledContent("Yearly costs", value: FiveTests.money(plan.otherYearlyCosts))
+                LabeledContent("Running cost per customer", value: FiveTests.money(plan.runningCostPerCustomer) + " a month")
+                if plan.model == .subscription {
+                    LabeledContent("Customers leaving",
+                                   value: "\(max(plan.monthlyChurnPercent, PaybackSums.minimumChurnPercent).formatted())% a month")
+                }
+                LabeledContent("Customers counted, first year",
+                               value: "\(PaybackSums.cautiousCustomers(idea.likelyCustomers)) (half the guess of \(idea.likelyCustomers))")
+            }
+            .frame(minHeight: 44)
         } header: {
             Text("The money")
         } footer: {

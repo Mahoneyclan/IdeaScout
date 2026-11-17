@@ -134,9 +134,10 @@ enum IdeaImprover {
     or sharpen the one-week test. Keep it the same product solving the same buyer problem: don't swap in a \
     different idea. Someone must still pay for it. Don't invent evidence, customers, numbers or competitors' \
     prices; if the objection can only be answered by evidence you don't have, make the one-week test collect it.
-    Aim at the five principles: vibe-codable by one person with their tool (a must), people will pay, real pain, \
-    materially cheaper (ideally half the cheapest competitor's price or less), and likely sales from a small number \
-    of customers covering the build cost. Doing the one job people need with fewer features often helps.
+    Aim at the principles: vibe-codable by one person with their tool (a must), people will pay, real pain, and \
+    likely sales from a small number of customers covering the build cost. The price must be at most a quarter \
+    (25%) of the cheapest competitor's comparable plan; a higher price is lowered to that in code. Doing the one \
+    job people need with fewer features often helps.
     Give: pitch (one sentence); buyer (a specific role in a specific type of business, or a specific type of \
     consumer); pricing (model and price per customer, per month or one-off); replaces (the manual task or \
     workaround it replaces); channel (the named place where the first 100 buyers would be found); why_now; \
@@ -223,6 +224,8 @@ enum IdeaImprover {
             if let leave = out.leave_out_features { offer.leaveOutFeatures = KillerEngine.cleanList(leave) }
             let price = KillerEngine.cleanPrice(out.price_per_month_usd)
             if price > 0 { offer.monthlyPrice = price }
+            // The 25% cap (owner, 16 Nov 2026) applies to a rewrite's price too.
+            offer.monthlyPrice = FiveTests.capped(offer.monthlyPrice, competitors: offer.competitors)
             r.offer = offer
         }
         guard !r.pitch.isEmpty, !r.buyer.isEmpty else { throw SummarizerError.badResponse("the rewritten idea was empty") }

@@ -117,7 +117,7 @@ struct SettingsView: View {
                     NavigationLink { SourcesSettings() } label: {
                         LabeledContent("Sources", value: "\(SourceKind.allCases.filter { $0.isScanSource && AppSettings.isEnabled($0) }.count) on")
                     }
-                    NavigationLink { ScanRankingSettings() } label: { Text("Scan & ranking") }
+                    NavigationLink { ScanRankingSettings() } label: { Text("Refresh & ranking") }
                     NavigationLink { AISettings() } label: {
                         LabeledContent("AI & costs", value: "\(AppSettings.provider.shortName) · today \(usage.today.cost.formatted(.currency(code: "USD")))")
                     }

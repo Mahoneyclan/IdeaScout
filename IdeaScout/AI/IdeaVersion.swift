@@ -79,7 +79,7 @@ struct IdeaVersion: Codable, Equatable, Sendable {
                                         pain: pain, willingToPay: willingToPay, timing: timing, gap: gap, fit: fit,
                                         buildability: buildability, channelScore: channelScore,
                                         buildDays: offer.buildDays, likelyCustomers: offer.likelyCustomers),
-            price: offer.monthlyPrice, competitors: offer.competitors, fillsGap: offer.fillsGap,
+            price: offer.monthlyPrice, competitors: offer.competitors,
             tool: tool, payEvidence: offer.payEvidence, salesPlan: offer.salesPlan)
     }
 

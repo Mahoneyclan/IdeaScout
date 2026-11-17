@@ -1,6 +1,7 @@
 // KillerIdeaDetailView.swift
-// The idea detail screen: "Improve this idea" up top, the opportunity, one-week test, devil's advocate, scores and
-// evidence links, with the starter kit as the main action.
+// The idea detail screen, the answer first (usability review, 17 Nov 2026): the pitch, why it's a killer idea (the
+// tests, price against competitors, the money, doubts), then the opportunity, one-week test and evidence, with
+// Improve and Dismiss at the bottom and the starter kit as the main action.
 
 import SwiftUI
 import SwiftData
@@ -11,6 +12,9 @@ struct KillerIdeaDetailView: View {
     /// The idea shown; bindable so saving updates the screen.
     @Bindable var idea: KillerIdea
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+    /// Asks before dismissing (it hides the idea).
+    @State private var confirmDismiss = false
 
     /// The days it was proposed, as text (first and last day for ideas saved before days were recorded).
     private var seenDays: String {
@@ -34,74 +38,32 @@ struct KillerIdeaDetailView: View {
                         .foregroundStyle(.green)
                 }
                 Text(idea.pitch)
-                NavigationLink {
-                    ImproveIdeaView(idea: idea)
-                } label: {
-                    Label(idea.improvedAt == nil ? "Improve this idea" : "Improve again or undo", systemImage: "arrow.up.circle")
-                        .font(.headline)
-                        .frame(minHeight: 44)
-                }
-                .accessibilityHint("AI rewrites answer the devil's advocate; you choose which version to keep")
+            }
+            // The answer first (usability review, 17 Nov 2026): why it's a killer idea, then the details.
+            if idea.engineVersion >= 1 {
+                IdeaPrinciplesSections(idea: idea)
+            } else {
+                olderScores
             }
             Section("The opportunity") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Who pays").font(.subheadline.bold())
-                    Text(idea.buyer)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Pricing").font(.subheadline.bold())
-                    Text(idea.pricing)
-                }
-                if !idea.replaces.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Replaces").font(.subheadline.bold())
-                        Text(idea.replaces)
-                    }
-                }
-                if !idea.channel.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Where to find buyers").font(.subheadline.bold())
-                        Text(idea.channel)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Why now").font(.subheadline.bold())
-                    Text(idea.whyNow)
-                }
+                labelled("Who pays", idea.buyer)
+                if idea.engineVersion < 1 { labelled("Pricing", idea.pricing) }
+                if !idea.replaces.isEmpty { labelled("Replaces", idea.replaces) }
+                if !idea.channel.isEmpty { labelled("Where to find buyers", idea.channel) }
+                labelled("Why now", idea.whyNow)
             }
             Section("Test it in one week") {
                 Text(idea.oneWeekTest)
             }
-            Section("Devil's advocate") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Strongest objection").font(.subheadline.bold())
-                    Text(idea.objection)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Competitors").font(.subheadline.bold())
-                    Text(idea.competitors)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Verdict").font(.subheadline.bold())
-                    Text(idea.verdict)
-                }
-            }
-            if idea.engineVersion >= 1 {
-                IdeaPrinciplesSections(idea: idea)
-            } else {
+            if idea.engineVersion < 1 {
                 Section {
-                    ForEach(KillerScoreMetrics.metrics, id: \.name) { metric in
-                        let value = idea[keyPath: metric.value]
-                        LabeledContent {
-                            Text(metric.canBeUnscored && value == 0 ? "Not scored" : "\(value)/5").monospacedDigit()
-                        } label: {
-                            Label(metric.name, systemImage: metric.symbol)
-                        }
-                    }
+                    labelled("Strongest objection", idea.objection)
+                    labelled("Competitors", idea.competitors)
+                    labelled("Verdict", idea.verdict)
                 } header: {
-                    Text("Scores")
+                    Text("Doubts")
                 } footer: {
-                    Text("Buildable solo: could one person build all of it with their AI coding tool. Sales channel: can buyers be reached without a sales team. Why now counts half. Fit for me uses your About me in Settings. Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"): \(seenDays).")
+                    Text("From the devil's advocate: a second, sceptical AI that tries to knock the idea down.")
                 }
             }
             if !idea.evidence.isEmpty {
@@ -118,6 +80,21 @@ struct KillerIdeaDetailView: View {
                 } footer: {
                     Text("What people say online, in the AI's words. Not verified: tap a link to read the original.")
                 }
+            }
+            Section {
+                NavigationLink {
+                    ImproveIdeaView(idea: idea)
+                } label: {
+                    Label(idea.improvedAt == nil ? "Improve this idea" : "Improve again or undo", systemImage: "arrow.up.circle")
+                        .frame(minHeight: 44)
+                }
+                .accessibilityHint("AI rewrites answer the devil's advocate; you choose which version to keep")
+                if !idea.isDismissed {
+                    Button("Dismiss this idea", systemImage: "eye.slash", role: .destructive) { confirmDismiss = true }
+                        .frame(minHeight: 44)
+                }
+            } footer: {
+                Text("Dismissed ideas are hidden from Ideas and come back only if a later refresh finds new evidence.")
             }
         }
         .readableList()
@@ -146,7 +123,40 @@ struct KillerIdeaDetailView: View {
                 .accessibilityLabel(idea.isSaved ? "Remove from Saved" : "Save idea")
             }
         }
+        .confirmationDialog("Dismiss \(idea.title)?", isPresented: $confirmDismiss, titleVisibility: .visible) {
+            Button("Dismiss", role: .destructive) {
+                // Hidden rather than deleted, so its history and a saved copy are kept.
+                idea.isDismissed = true
+                context.saveOrReport("the dismissal")
+                dismiss()
+            }
+        }
         .navigationTitle("Killer idea")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Scores for ideas found before the principles (11 Nov 2026).
+    private var olderScores: some View {
+        Section {
+            ForEach(KillerScoreMetrics.metrics, id: \.name) { metric in
+                let value = idea[keyPath: metric.value]
+                LabeledContent {
+                    Text(metric.canBeUnscored && value == 0 ? "Not scored" : "\(value)/5").monospacedDigit()
+                } label: {
+                    Label(metric.name, systemImage: metric.symbol)
+                }
+            }
+        } header: {
+            Text("Scores")
+        } footer: {
+            Text("Buildable solo: could one person build all of it with their AI coding tool. Sales channel: can buyers be reached without a sales team. Why now counts half. Fit for me uses your About me in Settings. Seen on \(idea.timesSeen) day\(idea.timesSeen == 1 ? "" : "s"): \(seenDays).")
+        }
+    }
+
+    private func labelled(_ title: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.subheadline.bold())
+            Text(text)
+        }
     }
 }

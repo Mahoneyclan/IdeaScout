@@ -26,7 +26,7 @@ struct DigestContentView: View {
     /// The filter only applies while the Games source is on (otherwise its picker is hidden).
     private var gamesFilter: Bool { gamesOnly && AppSettings.isEnabled(.games) }
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
-    /// Whether trends below the quality bar are shown.
+    /// Whether trends below the minimum score are shown.
     @State private var showBelowBar = false
     /// Trends whose score breakdown is open (tap the score to toggle).
     @State private var expandedScores: Set<PersistentIdentifier> = []
@@ -56,7 +56,7 @@ struct DigestContentView: View {
                 } header: {
                     Label("Ideas from this day", systemImage: "flame")
                 } footer: {
-                    Text("Killer: at least \(qualityBar.formatted()) / 5. Near-miss: just below. Scores are the latest.")
+                    Text("Killer: at least \(qualityBar.formatted()) / 5. Almost there: just below. Scores are the latest.")
                 }
             }
             if !clusters.isEmpty {
@@ -67,7 +67,7 @@ struct DigestContentView: View {
                                 LabeledContent("Today they", value: cluster.workaround).font(.subheadline)
                             }
                             if !cluster.paySignals.isEmpty {
-                                LabeledContent("Pay signals", value: cluster.paySignals).font(.subheadline)
+                                LabeledContent("Signs people pay", value: cluster.paySignals).font(.subheadline)
                             }
                             ForEach(cluster.sortedItems) { item in
                                 ItemRow(item: item, isStarred: starred.contains(item.key)) {
@@ -83,7 +83,7 @@ struct DigestContentView: View {
                         }
                     }
                 } header: {
-                    Label("Pain clusters", systemImage: "exclamationmark.bubble")
+                    Label("Common complaints", systemImage: "exclamationmark.bubble")
                 } footer: {
                     Text("Problems businesses complain about or pay to work around, from complaints, App Store reviews, government spending and your pain points.")
                 }
@@ -134,7 +134,7 @@ struct DigestContentView: View {
             }
             if hiddenCount > 0 || showBelowBar {
                 Section {
-                    Toggle("Show trends below the quality bar", isOn: $showBelowBar)
+                    Toggle("Show trends below the minimum score", isOn: $showBelowBar)
                 } footer: {
                     Text(showBelowBar ? "Showing everything." :
                             "\(hiddenCount) trend\(hiddenCount == 1 ? "" : "s") scored below \(qualityBar.formatted()) / 5 and \(hiddenCount == 1 ? "is" : "are") hidden. Change the bar in Settings.")
@@ -150,7 +150,7 @@ struct DigestContentView: View {
         .readableList()
         .overlay {
             if themes.isEmpty && gamesFilter && hiddenCount == 0 {
-                ContentUnavailableView("No games in this digest", systemImage: "gamecontroller",
+                ContentUnavailableView("No games in this refresh", systemImage: "gamecontroller",
                                        description: Text("Turn on the Games source in Settings, or switch the filter back to All."))
             }
         }

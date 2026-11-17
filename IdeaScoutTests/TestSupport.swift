@@ -40,6 +40,8 @@ struct ScriptedPriceChecker: WebSearchClient, LLMClient {
     let model = "test-haiku"
     var search: Result<WebSearchReply, LLMHTTPError>
     var formatted: String
+    /// The reply to "Reimagine an app"'s profile call, when it differs from `formatted`.
+    var profile: String?
 
     func searchWeb(system: String, prompt: String, maxSearches: Int, blockedDomains: [String],
                    feature: String) async throws -> WebSearchReply {
@@ -47,6 +49,7 @@ struct ScriptedPriceChecker: WebSearchClient, LLMClient {
     }
 
     func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
-        try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": formatted]], "stop_reason": "end_turn"])
+        let text = system == Reimagine.profileInstructions ? (profile ?? formatted) : formatted
+        return try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": text]], "stop_reason": "end_turn"])
     }
 }

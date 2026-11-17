@@ -171,11 +171,12 @@ enum Prompts {
     You are an analyst who spots new software opportunities that make money, in recent launches, startups and complaints.
     The numbered projects were launched or gained traction recently; "new" marks the last 24 hours. \
     Items tagged "Pain points" are people complaining or asking for tools that don't exist, "App Store complaints" \
-    and "Consumer app complaints" are 1-2 star reviews of business and consumer apps people pay for, "Hacker News on your \
+    and "Consumer app complaints" are 1-2 star reviews of business and consumer apps people pay for, "WordPress plugin \
+    complaints" are 1-2 star reviews of popular WordPress plugins, "Hacker News on your \
     area" are recent posts and comments about the user's interest area, "AusTender" is Australian government IT spending and \
     "My pain points" are the user's own problems: use them as evidence of demand \
-    inside related themes rather than as themes of their own. Items tagged "Y Combinator" are startups investors \
-    just funded and "App Store top paid" are apps people pay for: treat both as evidence that a market pays. \
+    inside related themes rather than as themes of their own. Items tagged "App Store top paid" are apps people pay \
+    for: treat them as evidence that a market pays. \
     Favour trends that people or businesses would pay for over developer tools and novelties with no way to make money. \
     Items tagged "AI research" are new capabilities: use them to explain why an idea is possible now.
     First ignore projects that could never become a product people pay for (libraries with no product angle, \

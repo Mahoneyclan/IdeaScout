@@ -1,9 +1,9 @@
 // IdeaScoutUITests.swift
-// Automated screen tests for the critical flows: first launch with consent, a refresh, the paywall
-// after the trial, "Delete all my data", saving an idea, making a starter kit, "Reimagine an app" reading a link,
-// and iPad rotation. The app runs in its sealed test mode (TestMode.swift):
-// in-memory database, separate settings and Keychain, fake sources and a scripted AI. So these tests
-// never touch the owner's real data, never use the network and never spend money.
+// The few screen tests run before a release (owner, 16 Nov 2026: unit tests cover the logic; screens are checked
+// by hand from the release list): first launch with consent, the main action (a refresh, the idea with its
+// principles and price cap, and a second refresh asking first), and "Delete all my data". The app runs in its sealed
+// test mode (TestMode.swift): in-memory database, separate settings and Keychain, fake sources and a scripted AI.
+// So these tests never touch the owner's real data, never use the network and never spend money.
 
 import XCTest
 
@@ -33,58 +33,48 @@ final class IdeaScoutUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", text)).firstMatch
     }
 
-    /// First launch: welcome pages, then the consent screen before any data goes to a cloud AI.
+
+    /// First launch: welcome pages (including the user's area and tool, and guided key setup), then the consent screen
+    /// before any data goes to a cloud AI.
     func testWelcomeAsksForConsentThenOpensTheApp() {
         let app = launch()
         XCTAssertTrue(app.staticTexts["Welcome to IdeaScout"].waitForExistence(timeout: 10))
         app.buttons["Continue"].tap()
         XCTAssertTrue(app.staticTexts["Free for 7 days"].waitForExistence(timeout: 5))
         app.buttons["Continue"].tap()
+        XCTAssertTrue(app.navigationBars["About you"].waitForExistence(timeout: 5), "should ask about the user's area and tool")
+        app.buttons["Continue"].tap()
+        XCTAssertTrue(element(app, containing: "Paste it here").waitForExistence(timeout: 5), "key setup should be guided")
         app.buttons["Done"].tap()
+        let anyway = app.buttons["Continue anyway"]
+        if anyway.waitForExistence(timeout: 3) { anyway.tap() }   // no key saved in test mode: it says what that means
         XCTAssertTrue(app.buttons["Agree"].waitForExistence(timeout: 5), "consent screen should appear")
         XCTAssertTrue(element(app, containing: "confidential").exists, "confidential-data warning should show")
         app.buttons["Agree"].tap()
         XCTAssertTrue(app.navigationBars["Ideas"].waitForExistence(timeout: 10))
     }
 
-    /// The main action: the automatic refresh at launch shows the day's idea, and a second refresh the
-    /// same day asks first (it costs money).
-    func testRefreshShowsIdeasAndASecondRefreshAsksFirst() {
+    /// The main action: the automatic refresh at launch shows the day's idea; its screen lists the principles, the
+    /// competitor and how the price compares with the 25% cap; refreshing asks first in a pop-up (it costs money).
+    func testRefreshShowsTheIdeaAndASecondRefreshAsksFirst() {
         let app = launch("-ui-skip-welcome")
-        XCTAssertTrue(element(app, containing: "InvoiceChaser").waitForExistence(timeout: 20))
-        let again = button(app, startingWith: "Refresh again")
-        XCTAssertTrue(again.waitForExistence(timeout: 5))
-        again.tap()
-        XCTAssertTrue(element(app, containing: "Run another refresh today?").waitForExistence(timeout: 5))
-    }
-
-    /// "Reimagine an app" opens from the Ideas tab and reads the app's name from a pasted App Store link, without
-    /// any AI call (the test stops before the paid button).
-    func testReimagineReadsTheAppFromALink() {
-        let app = launch("-ui-skip-welcome")
-        let open = app.buttons["Reimagine an app"].firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 20))
-        open.tap()
-        let field = app.textFields["Link to the app, or its name"].firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
-        field.typeText("https://apps.apple.com/au/app/things-3/id904237743")
-        XCTAssertTrue(element(app, containing: "App Store id904237743").waitForExistence(timeout: 5), "the link should be read")
-        XCTAssertEqual(app.textFields["App name, read from the link"].firstMatch.value as? String, "Things 3")
-        XCTAssertTrue(button(app, startingWith: "Find a gap").exists)
-        app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.navigationBars["Ideas"].waitForExistence(timeout: 5))
-    }
-
-    /// After the trial, refreshing leads to the paywall; unlocking restores the refresh button.
-    func testExpiredTrialShowsPaywallAndUnlockWorks() {
-        let app = launch("-ui-skip-welcome", "-ui-trial-expired")
-        let unlock = button(app, startingWith: "Unlock to find new ideas")
-        XCTAssertTrue(unlock.waitForExistence(timeout: 10))
-        unlock.tap()
-        XCTAssertTrue(app.staticTexts["Your free trial has ended"].waitForExistence(timeout: 5))
-        button(app, startingWith: "Unlock forever").tap()
-        XCTAssertTrue(button(app, startingWith: "Find today's ideas").waitForExistence(timeout: 10))
+        let idea = element(app, containing: "InvoiceChaser")
+        XCTAssertTrue(idea.waitForExistence(timeout: 20))
+        XCTAssertTrue(element(app, containing: "Undercuts Chaser").exists, "the card should say which competitor it undercuts")
+        idea.tap()
+        let payback = element(app, containing: "Sales cover the build cost")
+        for _ in 0..<5 where !payback.exists { app.swipeUp() }
+        XCTAssertTrue(payback.exists, "the principles should be listed")
+        let cap = element(app, containing: "the cap is 25%")
+        for _ in 0..<3 where !cap.exists { app.swipeUp() }
+        XCTAssertTrue(cap.exists, "the price should be compared with the 25% cap")
+        app.navigationBars.buttons.firstMatch.tap()
+        // Pulling down and the ↻ button open the same pop-up; the button is the reliable one to tap in a test.
+        let refresh = app.navigationBars["Ideas"].buttons["Refresh"]
+        XCTAssertTrue(refresh.waitForExistence(timeout: 5))
+        refresh.tap()
+        XCTAssertTrue(element(app, containing: "Run another refresh today?").waitForExistence(timeout: 5), "a refresh asks first")
+        app.alerts.buttons["Cancel"].tap()
     }
 
     /// "Delete all my data" asks first, then returns to the welcome screens.
@@ -102,124 +92,5 @@ final class IdeaScoutUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "should ask before deleting")
         confirm.tap()
         XCTAssertTrue(app.staticTexts["Welcome to IdeaScout"].waitForExistence(timeout: 10))
-    }
-
-    /// Settings is a short list: a text setting opens its own screen, and its row then shows the value.
-    func testSettingsRowOpensItsScreenAndShowsTheValue() {
-        let app = launch("-ui-skip-welcome")
-        tab(app, "Settings").tap()
-        let row = element(app, containing: "Interest area")
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
-        XCTAssertTrue(element(app, containing: "Any area").exists, "blank shows as any area")
-        row.tap()
-        let field = app.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
-        field.typeText("Fitness coaching")
-        app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(element(app, containing: "Fitness coaching").waitForExistence(timeout: 5))
-        let shot = XCTAttachment(screenshot: app.screenshot())   // kept, to review the layout
-        shot.name = "Settings"
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
-    /// iPad only: the main screen keeps working in landscape and back in portrait (iPhone stays portrait).
-    func testIPadRotationKeepsTheMainScreenWorking() throws {
-        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPhone is portrait-only")
-        let app = launch("-ui-skip-welcome")
-        XCTAssertTrue(element(app, containing: "InvoiceChaser").waitForExistence(timeout: 20))
-        XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(button(app, startingWith: "Refresh again").waitForExistence(timeout: 5))
-        XCTAssertTrue(element(app, containing: "InvoiceChaser").isHittable, "the idea should still be on screen in landscape")
-        XCUIDevice.shared.orientation = .portrait
-        XCTAssertTrue(button(app, startingWith: "Refresh again").waitForExistence(timeout: 5))
-    }
-
-    /// Saving an idea from its detail screen puts it in Saved; unsaving it there shows the empty state.
-    func testSavedIdeaAppearsInSavedAndCanBeUnsaved() {
-        let app = launch("-ui-skip-welcome")
-        let idea = element(app, containing: "InvoiceChaser")
-        XCTAssertTrue(idea.waitForExistence(timeout: 20))
-        idea.tap()
-        let save = app.buttons["Save idea"]
-        XCTAssertTrue(save.waitForExistence(timeout: 5), "detail screen should offer Save")
-        save.tap()
-        XCTAssertTrue(app.buttons["Remove from Saved"].waitForExistence(timeout: 5))
-        tab(app, "Saved").tap()
-        let saved = element(app, containing: "InvoiceChaser")
-        XCTAssertTrue(saved.waitForExistence(timeout: 5), "the idea should be listed in Saved")
-        saved.swipeLeft()
-        let unsave = app.buttons["Unsave"]
-        XCTAssertTrue(unsave.waitForExistence(timeout: 5))
-        unsave.tap()
-        XCTAssertTrue(app.staticTexts["Nothing saved yet"].waitForExistence(timeout: 5))
-    }
-
-    /// The idea's main action: make a starter kit, pick a coding tool and see the share button worded for it.
-    func testStarterKitIsMadeAndWordedForTheChosenTool() {
-        let app = launch("-ui-skip-welcome")
-        let idea = element(app, containing: "InvoiceChaser")
-        XCTAssertTrue(idea.waitForExistence(timeout: 20))
-        idea.tap()
-        let kit = button(app, startingWith: "Starter kit")
-        XCTAssertTrue(kit.waitForExistence(timeout: 5), "detail screen should offer the starter kit")
-        kit.tap()
-        let make = button(app, startingWith: "Make starter kit")
-        XCTAssertTrue(make.waitForExistence(timeout: 5))
-        make.tap()
-        XCTAssertTrue(button(app, startingWith: "Share build prompt for Claude Code").waitForExistence(timeout: 10), "kit should be made")
-    }
-
-    func testIdeaIsImprovedAndTheVersionKept() {
-        let app = launch("-ui-skip-welcome")
-        let idea = element(app, containing: "InvoiceChaser")
-        XCTAssertTrue(idea.waitForExistence(timeout: 20))
-        idea.tap()
-        let improve = button(app, startingWith: "Improve this idea")
-        for _ in 0..<4 where !improve.isHittable { app.swipeUp() }
-        improve.tap()
-        // The idea screen's link and the Improve screen's start button share a name: wait for the Improve screen.
-        XCTAssertTrue(element(app, containing: "Each round, the AI rewrites").waitForExistence(timeout: 5))
-        let start = button(app, startingWith: "Improve this idea")
-        XCTAssertTrue(start.waitForExistence(timeout: 5))
-        start.tap()
-        XCTAssertTrue(button(app, startingWith: "Improve again").waitForExistence(timeout: 10), "the run should finish")
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            let compare = element(app, containing: "Original and round side by side")
-            for _ in 0..<4 where !compare.exists { app.swipeUp() }
-            XCTAssertTrue(compare.exists, "iPad should compare side by side")
-            let shot = XCTAttachment(screenshot: app.screenshot())
-            shot.name = "iPad comparison"; shot.lifetime = .keepAlways
-            add(shot)
-        }
-        let round = element(app, containing: "Round 1")
-        for _ in 0..<4 where !round.exists { app.swipeUp() }
-        XCTAssertTrue(round.exists, "a round should be listed")
-        let keep = button(app, startingWith: "Keep this version")
-        for _ in 0..<4 where !keep.exists { app.swipeUp() }
-        XCTAssertTrue(keep.exists)
-        keep.tap()
-        let kept = element(app, containing: "Kept round 1")
-        for _ in 0..<4 where !kept.exists { app.swipeDown() }
-        XCTAssertTrue(kept.exists, "keeping a version should say so")
-        let undo = button(app, startingWith: "Undo improvement")
-        for _ in 0..<4 where !undo.exists { app.swipeDown() }
-        XCTAssertTrue(undo.exists, "keeping a version should offer undo")
-    }
-
-    /// Ideas are judged on the five principles: the idea screen lists them, with the competitor and price.
-    func testIdeaShowsTheFivePrinciples() {
-        let app = launch("-ui-skip-welcome")
-        let idea = element(app, containing: "InvoiceChaser")
-        XCTAssertTrue(idea.waitForExistence(timeout: 20))
-        XCTAssertTrue(element(app, containing: "Undercuts Chaser").exists, "the card should say which competitor it undercuts")
-        idea.tap()
-        let cheaper = element(app, containing: "Materially cheaper")
-        for _ in 0..<5 where !cheaper.exists { app.swipeUp() }
-        XCTAssertTrue(cheaper.exists, "the five principles should be listed")
-        let competitor = element(app, containing: "Chaser")
-        for _ in 0..<3 where !competitor.exists { app.swipeUp() }
-        XCTAssertTrue(competitor.exists, "the competitor should be listed")
     }
 }

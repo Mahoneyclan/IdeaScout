@@ -1,5 +1,5 @@
 // FiveTestsTests.swift
-// The five principles (owner, 11 Nov 2026): the price comparison and payback sums done in code, the parsing of
+// The principles (owner, 11 and 16 Nov 2026): the 25% price cap and payback sums done in code, the parsing of
 // competitors and prices from the AI, the ideas' stored principles and ranking, and older saved data still reading.
 
 import Foundation
@@ -14,41 +14,42 @@ struct FiveTestsTests {
         Competitor(name: "Incumbent", plan: "Starter", monthlyPrice: price, confirmed: confirmed)
     }
 
-    /// Half the cheapest competitor's price or less scores 3+; dearer scores lower but is never a drop. Exact
-    /// boundaries: a quarter (5), 40% (4), half (3), three-quarters (2). An unconfirmed price tops out at 4.
-    @Test(arguments: [(10.0, true, 5), (10.0, false, 4), (16.0, true, 4), (20.0, true, 3), (20.1, true, 2),
-                      (30.0, true, 2), (30.1, true, 1), (39.0, false, 1)])
-    func priceComparedWithTheCheapestCompetitor(price: Double, confirmed: Bool, score: Int) {
-        let outcome = FiveTests.cheaper(price: price, competitors: [competitor(80), competitor(40, confirmed: confirmed)],
-                                        fillsGap: false)
-        #expect(outcome.score == score)
-        #expect(outcome.known)
+    /// The 25% cap (owner, 16 Nov 2026): measured against the cheapest paid competitor, a dearer price or no price
+    /// becomes the cap, a lower one is kept, and with no paid competitor nothing is capped.
+    @Test(arguments: [(15.0, 10.0), (10.0, 10.0), (6.0, 6.0), (0.0, 10.0)])
+    func priceIsCappedAtAQuarterOfTheCheapestCompetitor(price: Double, expected: Double) {
+        #expect(FiveTests.capped(price, competitors: [competitor(80), competitor(40)]) == expected)
     }
 
-    @Test func freeCompetitorOrNoPriceIsNotATick() {
+    @Test func noPaidCompetitorMeansNoCap() {
         var free = competitor(0)
         free.isFree = true
-        #expect(FiveTests.cheaper(price: 2, competitors: [competitor(40), free], fillsGap: false).score == 1)
-        let unknown = FiveTests.cheaper(price: 2, competitors: [competitor(0)], fillsGap: false)
-        #expect(!unknown.known && !unknown.passed, "no price found is unknown, not met")
-        #expect(FiveTests.cheaper(price: 2, competitors: [], fillsGap: true).passed, "a gap is fine")
+        #expect(FiveTests.capped(30, competitors: []) == 30, "a gap idea keeps the AI's price")
+        #expect(FiveTests.capped(30, competitors: [free, competitor(0)]) == 30, "free or unpriced apps set no cap")
+        #expect(FiveTests.capped(30, competitors: [competitor(1e-300)]) == 30, "a broken tiny price sets no cap")
+        #expect(FiveTests.priceCap([competitor(9.99)]) == 2.49, "rounded down to the cent")
+    }
+
+    @Test func priceNoteSaysHowThePriceComparesWithTheCap() {
+        var free = competitor(0)
+        free.isFree = true
+        #expect(FiveTests.priceNote(price: 2, competitors: [competitor(40), free])?.contains("for free") == true)
+        #expect(FiveTests.priceNote(price: 2, competitors: []) == nil)
+        let atCap = FiveTests.priceNote(price: 10, competitors: [competitor(40, confirmed: true)]) ?? ""
+        #expect(atCap.hasPrefix("At the 25% cap: a quarter of Incumbent's") && !atCap.contains("unconfirmed"))
+        #expect(FiveTests.priceNote(price: 20, competitors: [competitor(40)])?.hasPrefix("Above the 25% cap") == true,
+                "an older idea saved above the cap says so")
+        #expect(FiveTests.priceNote(price: 6, competitors: [competitor(40)])?.contains("15% of Incumbent") == true)
+        #expect(FiveTests.priceNote(price: 6, competitors: [competitor(40)])?.contains("unconfirmed") == true)
     }
 
     /// A tiny or broken price from the AI must never crash the sums (they run on every leaderboard sort).
     @Test func tinyPricesAreTreatedAsUnknown() {
         #expect(KillerEngine.cleanPrice(1e-300) == 0 && KillerEngine.cleanPrice(.nan) == 0 && KillerEngine.cleanPrice(-1) == 0)
-        #expect(FiveTests.cheaper(price: 2, competitors: [competitor(1e-300)], fillsGap: false).known == false)
         #expect(FiveTests.paybackMonths(buildCost: 20, customers: 1, price: 1e-18) == nil)
         let slow = FiveTests.paybackMonths(buildCost: 1e9, customers: 1, price: 0.01)
         #expect(slow == FiveTests.maxPaybackMonths)
         #expect(FiveTests.monthsText(FiveTests.maxPaybackMonths).hasPrefix("more than"))
-        #expect(FiveTests.cheaper(price: 1e6, competitors: [competitor(0.01)], fillsGap: false).score == 1)
-    }
-
-    @Test func gapOrUnpricedCompetitorIsNeutral() {
-        #expect(FiveTests.cheaper(price: 5, competitors: [], fillsGap: true).score == 3)
-        #expect(FiveTests.cheaper(price: 5, competitors: [competitor(0)], fillsGap: false).reason.contains("No competitor price"))
-        #expect(FiveTests.cheaper(price: 0, competitors: [competitor(40)], fillsGap: false).score == 1)
     }
 
     @Test func buildCostAndPayback() {
@@ -123,10 +124,9 @@ struct FiveTestsTests {
         new.engineVersion = 1
         new.pain = 3; new.willingToPay = 3; new.buildability = 4; new.channelScore = 4
         new.monthlyPrice = 9; new.competitorList = [competitor(40)]; new.buildDays = 10; new.likelyCustomers = 40
-        #expect(new.principles.map(\.name) == ["Vibe-codable", "People will pay", "Real pain", "Materially cheaper",
-                                              "Sales cover the build cost"])
-        // 4 + 3 + 3 + 4 (78% cheaper, unconfirmed) + 4 (pays back in 1 month, held back by the channel score of 4) = 18 / 5
-        #expect(abs(new.killerScore - 3.6) < 0.0001)
+        #expect(new.principles.map(\.name) == ["Vibe-codable", "People will pay", "Real pain", "Sales cover the build cost"])
+        // 4 + 3 + 3 + 4 (pays back in 1 month, held back by the channel score of 4) = 14 / 4
+        #expect(abs(new.killerScore - 3.5) < 0.0001)
         #expect(older.principles.isEmpty && older.killerScore == 5)
         #expect(KillerIdea.ranksAbove(new, older), "older ideas rank below new ones")
         let better = KillerIdea(key: "b", title: "B")
@@ -197,7 +197,7 @@ struct FiveTestsTests {
         let idea = KillerIdea(key: "a", title: "A")
         idea.engineVersion = 1; idea.monthlyPrice = 9; idea.competitorList = [competitor(40)]; idea.buildability = 4
         let version = IdeaVersion(idea)
-        #expect(version.offer?.monthlyPrice == 9 && version.principles.count == 5)
+        #expect(version.offer?.monthlyPrice == 9 && version.principles.count == 4)
         let copy = KillerIdea(key: "b", title: "B")
         copy.engineVersion = 1
         version.apply(to: copy)

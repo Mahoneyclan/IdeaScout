@@ -38,7 +38,7 @@ KillerIdea  – an AI business idea that survived the devil's advocate; updated 
 ```
 - Deleting or replacing a Digest deletes its Themes and their Items (cascade). Idea and KillerIdea are independent and survive.
 - A KillerIdea can hold one starter kit: `starterKitJSON` (a `StarterKit` as JSON, whose property names are stored too), `starterKitMadeAt` and `starterKitModel`. The chosen coding tool is the setting `starterKit.tool`.
-- The five principles (owner, 11 Nov 2026) are worked out in code by `AI/FiveTests.swift` from the devil's advocate's scores and the idea's prices; `KillerEngine.swift` holds the types and rules, `KillerEngine+Prompts.swift` the instructions, schemas and parsers. A KillerIdea judged on them has `engineVersion` 1 and stores `oneJob`, `keepFeatures`, `leaveOutFeatures`, `monthlyPrice`, `fillsGap`, `competitorsJSON` (`Competitor` as JSON), `buildDays`, `likelyCustomers`, `builderToolRaw`, `followRisk`, `copyRisk` and `keepPaying` (all stored names are permanent). Older ideas have `engineVersion` 0 and keep the older weighted score. The principles are shown by `Views/PrinciplesViews.swift`. Test 5 runs a first year of sales in `AI/PaybackSums.swift` from the idea's `salesPlanJSON` (a `SalesPlan`: one-off or subscription, the reason, running cost per customer, other yearly costs, monthly churn; stored names are permanent) and `appTypeRaw`; ideas without a plan keep the older build-cost-only payback until a scan proposes them again. The devil's advocate's prompt and parser are in `KillerEngine+Critique.swift`; `IdeaVersion` is in its own file.
+- The principles (owner, 11 Nov 2026; four since 16 Nov, when the half-price test was replaced by a 25% price cap) are worked out in code by `AI/FiveTests.swift` from the devil's advocate's scores and the idea's prices. `FiveTests.capped` lowers a price above 25% of the cheapest paid competitor's plan; `KillerEngine.Result.price` applies it after the web price check, and `IdeaImprover` applies it to rewrites; `KillerEngine.swift` holds the types and rules, `KillerEngine+Prompts.swift` the instructions, schemas and parsers. A KillerIdea judged on them has `engineVersion` 1 and stores `oneJob`, `keepFeatures`, `leaveOutFeatures`, `monthlyPrice`, `fillsGap`, `competitorsJSON` (`Competitor` as JSON), `buildDays`, `likelyCustomers`, `builderToolRaw`, `followRisk`, `copyRisk` and `keepPaying` (all stored names are permanent). Older ideas have `engineVersion` 0 and keep the older weighted score. The principles are shown by `Views/PrinciplesViews.swift`. The payback test runs a first year of sales in `AI/PaybackSums.swift` from the idea's `salesPlanJSON` (a `SalesPlan`: one-off or subscription, the reason, running cost per customer, other yearly costs, monthly churn; stored names are permanent) and `appTypeRaw`; ideas without a plan keep the older build-cost-only payback until a scan proposes them again. The devil's advocate's prompt and parser are in `KillerEngine+Critique.swift`; `IdeaVersion` is in its own file.
 - "Improve this idea" (`IdeaImprover` for the rules and prompts, `DigestService+Improve` for the paid calls) saves its last run on the idea as `improvementJSON` (an `IdeaImprover.Run` of `IdeaVersion`s, whose property names are stored too). Keeping a version copies it onto the idea and saves the earlier text in `originalVersionJSON` for undo, with `improvedAt`; a refresh that proposes the idea again clears both.
 - A KillerIdea records every day it was proposed (`daysSeen`), so History can show each day's ideas. Dismissing hides it (it returns only with new evidence, flagged `backWithNewEvidence`); saving bookmarks it. Ranking uses the killer score alone, with no bonus for returning.
 - Settings live in UserDefaults (`Support/AppSettings.swift`); API keys live in the Keychain (`Support/Keychain.swift`); the cost ledger is JSON in UserDefaults (`Support/UsageTracker.swift`).
@@ -90,14 +90,17 @@ prices where the link is a returned page (PriceCheck, DigestService+PriceCheck);
 Merge into KillerIdeas (new, or update returning ones) ─▶ screens update automatically (SwiftData @Query)
 ```
 
-**Reimagine an app** (on demand, Claude only; first built as "Undercut an app", so the code keeps `Undercut`,
-`DigestService+Undercut`, `UndercutView` and the stored `KillerIdea.undercutApp`): the app's name is read on the phone from a
-pasted link (an App Store page, a GitHub project or any website) or typed (nothing is fetched; Apple is never contacted) ─▶ web search on Haiku 5.5 (up to 7 searches), Apple's and
-Replit's sites blocked, then a format call ─▶ findings kept only with returned links become evidence items
-("Complaints on the web", "Paid plans on the web", and apps solo builders already made as "Vibe-coded") ─▶ the usual
-idea step, told to fill a gap beside the app at half its price or less without copying it, and the devil's advocate,
-told to fail copies ─▶ price check ─▶ the best idea is merged and marked "Gap spotted in …". Its starter kit adds a
-"design your own name, screens, icon and text" rule.
+**Reimagine an app** (on demand, Claude only; rebuilt in steps 16 Nov 2026; first built as "Undercut an app", so the code keeps
+`Undercut`, `DigestService+Undercut`, `UndercutView` and the stored `KillerIdea.undercutApp`): the app's name (and, for an App Store
+link, its id and store country) is read from the link on the phone ─▶ **step 1** `reimagineResearch`: web search on Haiku 5.5 (up to 7
+searches, Apple's and Replit's sites blocked), then a format call into a `Reimagine.Profile`, kept only with returned links; plus the
+app's 1–2 star reviews from Apple's public review feed (`Dependencies.httpGet`) and the user's note as a "My pain points" item ─▶ a
+`Reimagine.Run` saved on the device by `ReimagineStore` (JSON in Application Support, last 10, removed by "Delete all my data") ─▶
+**step 2** `reimagineDirections`: one writing-model call; `Reimagine.parseDirections` keeps directions backed by two different pages
+of demand evidence ─▶ **step 3** `reimagineBuild`: a 3-search web check of the chosen group (`Undercut.parse`), one idea with
+`Reimagine.ideaInstructions` (sharing `KillerEngine.ideaFields` and `candidateSchema`), the devil's advocate, the price check and the
+25% cap ─▶ `saveReimagined` merges it (a backed idea at once, a rejected one only on "Save anyway"). Screens: `UndercutView`,
+`ReimagineSteps`.
 
 ## Key rules and why
 - **Signal shares (40/40/20):** stop developer-heavy sources crowding out evidence of demand.

@@ -47,16 +47,16 @@ struct KillerScoreBadge: View {
     @AppStorage(AppSettings.Keys.qualityBar) private var qualityBar = AppSettings.defaultQualityBar
 
     var body: some View {
-        Text(score, format: .number.precision(.fractionLength(1)))
+        Text(score.formatted(.number.precision(.fractionLength(1))) + " / 5")
             .font(.headline.monospacedDigit())
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .background((score >= qualityBar ? Color.orange : Color.gray).opacity(0.2), in: Capsule())
-            .accessibilityLabel("Killer score \(score.formatted(.number.precision(.fractionLength(1)))) out of 5")
+            .accessibilityLabel("Score \(score.formatted(.number.precision(.fractionLength(1)))) out of 5")
     }
 }
 
-/// Labels an idea "Killer" (score at or above the quality bar, which the user can change), "Near-miss", or
+/// Labels an idea "Killer" (score at or above the quality bar, which the user can change), "Almost there", or
 /// "Not worth testing" when the devil's advocate rejected it, whatever its score.
 /// Recomputed on screen, so changing the bar relabels saved ideas at once.
 struct KillerStatusLabel: View {
@@ -73,7 +73,7 @@ struct KillerStatusLabel: View {
                 .foregroundStyle(.secondary)
         } else {
             let killer = score >= qualityBar
-            Label(killer ? "Killer" : "Near-miss", systemImage: killer ? "flame.fill" : "scope")
+            Label(killer ? "Killer" : "Almost there", systemImage: killer ? "flame.fill" : "scope")
                 .font(.caption2.bold())
                 .foregroundStyle(killer ? Color.orange : Color.secondary)
         }
@@ -117,7 +117,7 @@ struct KillerIdeaCard: View {
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 if let weakest = idea.principles.min(by: { $0.score < $1.score }) {
-                    Text("Weakest: \(weakest.name) " + (weakest.known ? "\(weakest.score)/5" : "unproven")).font(.caption).foregroundStyle(.secondary)
+                    Text("Weakest: \(weakest.name) " + (weakest.known ? "\(weakest.score)/5" : "no proof yet")).font(.caption).foregroundStyle(.secondary)
                 } else {
                     let weakest = KillerScoreMetrics.weakest(idea)
                     Text("Weakest: \(weakest.name) \(weakest.value)/5 · older scoring").font(.caption).foregroundStyle(.secondary)
@@ -159,6 +159,14 @@ struct LeaderboardView: View {
         NavigationStack {
             List {
                 Section { TodayStatus(today: digests.first { Calendar.current.isDateInToday($0.day) }, ideas: ideas) }
+                if service.isRefreshing { LiveRefreshSections(live: service.live) }
+                if !service.isRefreshing && ranked.isEmpty {
+                    let today = digests.first { Calendar.current.isDateInToday($0.day) }
+                    Section {
+                        IdeasEmptyState(lastNote: service.lastError ?? today?.warnings.last.map { DigestWarning.parts($0).message },
+                                        refreshedToday: today != nil)
+                    }
+                }
                 if !killers.isEmpty {
                     Section("Killer ideas") { rows(killers) }
                 }
@@ -166,9 +174,9 @@ struct LeaderboardView: View {
                     Section {
                         rows(nearMisses, offset: killers.count)
                     } header: {
-                        Text("Near-misses")
+                        Text("Almost there")
                     } footer: {
-                        Text("Survived the devil's advocate but scored below your quality bar (\(qualityBar.formatted()) / 5). They can climb if they come back on later days.")
+                        Text("Survived the devil's advocate but scored below your minimum score (\(qualityBar.formatted()) / 5). They can climb if they come back on later days.")
                     }
                 }
                 if !rejected.isEmpty {
@@ -189,7 +197,7 @@ struct LeaderboardView: View {
                 }
             }
             .sheet(isPresented: $showUndercut) { UndercutView() }
-            .safeAreaInset(edge: .bottom) { RefreshBar() }
+            .pullToRefresh()
             // An alert rather than a confirmation dialog: it comes from a swipe, so on iPad there's no button to point at.
             .alert("Dismiss \(pendingDismiss?.title ?? "this idea")?",
                    isPresented: Binding(get: { pendingDismiss != nil }, set: { if !$0 { pendingDismiss = nil } })) {
@@ -215,8 +223,11 @@ struct LeaderboardView: View {
             } label: {
                 HStack(alignment: .top, spacing: 12) {
                     Text("\(offset + index + 1)").font(.title3.bold().monospacedDigit()).foregroundStyle(.secondary)
+                        .accessibilityLabel("Number \(offset + index + 1).")
                     KillerIdeaCard(idea: idea)
                 }
+                // VoiceOver reads the card as one item rather than piece by piece.
+                .accessibilityElement(children: .combine)
             }
             .swipeActions(edge: .trailing) {
                 Button("Dismiss", role: .destructive) { pendingDismiss = idea }

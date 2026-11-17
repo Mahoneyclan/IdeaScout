@@ -60,14 +60,13 @@ enum Samples {
     static let papers = #"[{"paper":{"id":"1","title":"Recent","summary":"Long","ai_summary":"Short","upvotes":12},"publishedAt":"2099-01-01T00:00:00.000Z"},{"paper":{"id":"2","title":"Old","summary":"Long","ai_summary":"Short","upvotes":99},"publishedAt":"2000-01-01T00:00:00.000Z"}]"#
     static let devTo = #"[{"id":5,"title":"I built a CRM for plumbers","description":"Side project","url":"https://dev.to/a/crm","positive_reactions_count":131,"published_at":"2026-10-18T10:55:38Z"}]"#
     static let lobsters = #"[{"short_id":"new","title":"Fresh","url":"","comments_url":"https://lobste.rs/s/new","score":7,"created_at":"2099-01-01T00:00:00.000-05:00","description_plain":"x"},{"short_id":"old","title":"Old","url":"","comments_url":"https://lobste.rs/s/old","score":7,"created_at":"2000-01-01T00:00:00.000-05:00","description_plain":"x"}]"#
-    static let yc = #"[{"id":1,"name":"Tire Swing","one_liner":"AI compliance","url":"https://www.ycombinator.com/companies/tire-swing","industry":"B2B","batch":"Fall 2026"}]"#
     static let topPaid = #"{"feed":{"results":[{"id":"2","name":"AnkiMobile","url":"https://apps.apple.com/us/app/id2","genres":[{"name":"Education"}]}]}}"#
     static let atlassian = #"{"_embedded":{"addons":[{"id":"5","name":"Daily Worklog","tagLine":"Log time fast","_links":{"alternate":{"href":"/apps/5/daily-worklog"}},"_embedded":{"categories":[{"name":"Time tracking"}],"distribution":{"totalInstalls":12}}}]}}"#
     static let itch = #"<?xml version="1.0"?><rss version="2.0"><channel><item><title>CellZ</title><plainTitle>CellZ</plainTitle><link>https://dev.itch.io/cellz</link><description>Evolve</description><createDate>Mon, 19 Oct 2026 11:39:19 GMT</createDate></item></channel></rss>"#
     static let steamFeatured = #"{"coming_soon":{"items":[{"id":1,"name":"Reshine","type":0}]},"new_releases":{"items":[{"id":3,"name":"Sky Farm","type":0}]}}"#
     static let steamDetails = #"{"1":{"success":true,"data":{"short_description":"A puzzle game"}}}"#
 
-    /// A top-grossing chart of `count` apps (the daily pick skips the top 5, so it needs more than that).
+    /// A top-grossing chart of `count` apps (the daily pick reads ranks 26–100, or skips only the top 5 in a shorter chart).
     static func chart(count: Int) -> String {
         let entries = (1...count).map { #"{"im:name":{"label":"App \#($0)"},"id":{"label":"x","attributes":{"im:id":"\#($0)"}}}"# }
         return #"{"feed":{"entry":["# + entries.joined(separator: ",") + "]}}"
@@ -159,15 +158,6 @@ struct SourceFetchTests {
         #expect(items.allSatisfy { $0.source == .vibeCode })
     }
 
-    @Test func ycCombinesTheBatchAndLaunchPosts() async throws {
-        StubWeb.serve([("yc-oss.github.io", .init(body: Samples.yc)), ("hn.algolia.com", .init(body: Samples.hn))])
-        let items = try await YCombinatorFetcher().fetch(since: since, topics: [])
-        // The sample batch is below `minimumBatchSize`, so only the Launch HN post remains.
-        #expect(items.map(\.source) == [.ycombinator])
-        StubWeb.serve([("hn.algolia.com", .init(body: Samples.hn))])
-        #expect(try await YCombinatorFetcher().fetch(since: since, topics: []).count == 1, "one part failing still returns the other")
-    }
-
     @Test func appStoreTopPaid() async throws {
         StubWeb.serve([("rss.marketingtools.apple.com", .init(body: Samples.topPaid))])
         #expect(try await AppStoreFetcher().fetch(since: since, topics: []).map(\.title) == ["AnkiMobile"])
@@ -184,6 +174,20 @@ struct SourceFetchTests {
         let charts = StubWeb.requests.compactMap { $0.url?.absoluteString }.filter { $0.contains("topgrossing") }
         #expect(charts.count == AppReviewsFetcher.countries.count * fetcher.genres.count)
         #expect(charts.contains { $0.contains(genreQuery) })
+    }
+
+    /// Every commercial tag is asked for; a plugin listed under several tags has its reviews read once.
+    @Test func wordpressReadsTagsThenTodaysPluginReviews() async throws {
+        StubWeb.serve([("wordpress.org/support/plugin/sliced-invoices/reviews/feed/",
+                        .init(body: WordPressSamples.reviews(recent: .now.addingTimeInterval(-86_400)))),
+                       ("api.wordpress.org/plugins/info/1.2/", .init(body: WordPressSamples.plugins))])
+        let items = try await WordPressReviewsFetcher(areaWords: ["invoic"]).fetch(since: since, topics: [])
+        #expect(items.map(\.title) == ["Sliced Invoices – WordPress Invoice Plugin: PDF broken after update"])
+        let addresses = StubWeb.requests.compactMap { $0.url?.absoluteString }
+        #expect(addresses.filter { $0.contains("query_plugins") }.count == WordPressReviewsFetcher.tags.count)
+        #expect(addresses.filter { $0.contains("/reviews/feed/") }.count == 1)
+        StubWeb.serve([])
+        await #expect(throws: FetchError.self) { try await WordPressReviewsFetcher().fetch(since: since, topics: []) }
     }
 
     @Test func atlassianReadsTrendingAndNew() async throws {

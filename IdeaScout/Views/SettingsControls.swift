@@ -39,6 +39,18 @@ struct SecretField: View {
                     Button("Save", action: save)
                         .frame(minWidth: 44, minHeight: 44)
                         .buttonStyle(.borderless)
+                } else {
+                    // Easier than long-pressing a hidden field: the key is usually on the clipboard from the browser.
+                    // PasteButton reads the clipboard only when tapped, without the "Allow Paste" prompt.
+                    PasteButton(payloadType: String.self) { strings in
+                        Task { @MainActor in
+                            input = strings.first ?? ""
+                            save()
+                        }
+                    }
+                    .labelStyle(.titleOnly)
+                    .buttonBorderShape(.capsule)
+                    .frame(minHeight: 44)
                 }
             }
             if !saved.isEmpty {
@@ -66,7 +78,7 @@ struct SecretField: View {
     /// The typed text without surrounding spaces or line breaks (often picked up when pasting a key).
     private var trimmedInput: String { input.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// Saves the typed key if there is one. The field is cleared once it's saved, so the same text isn't saved
+    /// Saves the typed or pasted key if there is one. The field is cleared once it's saved, so the same text isn't saved
     /// twice and only the "Saved · ends …" label shows it.
     private func save() {
         let value = trimmedInput
@@ -122,7 +134,7 @@ struct SourceToggle: View {
             Label {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(kind.label)
-                    Text(kind.signal.label + (count.map { " · \($0) in last digest" } ?? ""))
+                    Text(kind.signal.label + (count.map { " · \($0) in last refresh" } ?? ""))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } icon: {

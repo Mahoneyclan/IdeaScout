@@ -46,6 +46,8 @@ final class DigestService {
         var stepClient: @MainActor (ScanStep) -> (any LLMClient)? = { _ in nil }
         /// The client for the web price check (Claude Haiku 5.5 with web search); `nil` skips it.
         var priceChecker: @MainActor () -> (any WebSearchClient & LLMClient)? = { nil }
+        /// Reads a web address (Apple's public review feed for "Reimagine an app"); tests pass a stand-in.
+        var httpGet: @Sendable (URL) async throws -> Data = { try await HTTP.get($0) }
 
         /// The real app: settings, Keychain, StoreKit and notifications.
         static let live = Dependencies(
@@ -80,6 +82,8 @@ final class DigestService {
     private(set) var isRefreshing = false
     /// Which step a running refresh is on, for the progress shown on screen.
     private(set) var stage: Stage?
+    /// What the running (or last) refresh has found so far, shown step by step on the Ideas tab.
+    private(set) var live = LiveRefresh()
 
     /// Refresh steps shown as "Step n of 4". Raw values are the step numbers.
     enum Stage: Int, CaseIterable {
@@ -164,6 +168,7 @@ final class DigestService {
 
         isRefreshing = true
         stage = .fetching
+        live = LiveRefresh()
         lastError = nil
         CloudSync.noteScanStarted()
         defer { isRefreshing = false; stage = nil }
@@ -174,6 +179,7 @@ final class DigestService {
             lastError = fetchWarnings.isEmpty ? "No new projects found. Try again later." : fetchWarnings.joined(separator: "\n")
             return
         }
+        live.sources = LiveRefresh.counts(items)
 
         stage = .trends
         guard let trends = await findTrends(in: items, warnings: fetchWarnings) else { return }   // cancelled
@@ -194,6 +200,8 @@ final class DigestService {
         let builtThemes = ThemeBuilder.assemble(trends.drafts, items: trends.batch, noise: trends.noise)
         existing.forEach(context.delete)
         let digest = saveDigest(builtThemes, day: today, summarizer: trends.summarizer.name, warnings: trends.warnings, in: context)
+        live.painClusters = builtThemes.filter(\.isPainCluster).map(\.title)
+        live.trends = builtThemes.filter { !$0.isPainCluster && !$0.isCatchAll }.map(\.title)
 
         await addIdeas(to: digest, trends: trends, themes: builtThemes, context: context)
         if let message = context.saveOrReport("today's ideas") { lastError = message }
@@ -331,18 +339,19 @@ final class DigestService {
         do {
             let leaderboard = topKillerIdeas(context: context, limit: 10).map(Self.leaderboardLine)
             stage = .ideas
-            // `onCritique` is called from the engine off the main actor; it hops back to update `stage`,
-            // which drives the progress row ("Step … · Devil's advocate").
+            // `onCritique` is called from the engine off the main actor; it hops back to update `stage` and show the
+            // draft ideas, which drive the progress row ("Step … · Devil's advocate") and the live results.
             let service = self
             let writer = dependencies.stepClient(.writing).map { LLMSummarizer(client: $0) } ?? llm
-            let results = try await KillerEngine(llm: writer, judge: dependencies.stepClient(.judging), onCritique: {
-                await MainActor.run { service.stage = .critique }
+            let results = try await KillerEngine(llm: writer, judge: dependencies.stepClient(.judging), onCritique: { drafts in
+                await MainActor.run { service.stage = .critique; service.live.drafts = LiveRefresh.drafts(drafts) }
             }).run(
                 .init(themes: builtThemes, items: trends.batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard,
                       interestArea: AppSettings.interestArea, tool: AppSettings.builderTool, appType: AppSettings.appType,
                       painClusters: builtThemes.filter(\.isPainCluster).map {
                           "\($0.title) (buyer: \($0.buyer); today: \($0.workaround); pays: \($0.paySignals); \($0.items.count) items)"
                       }))
+            live.drafts = LiveRefresh.judged(live.drafts, results: results)
             let checked = await checkPrices(results, onStart: { service.stage = .priceCheck })
             if let warning = checked.warning { digest.warnings.append(warning) }
             mergeKillerIdeas(checked.results, items: trends.batch, context: context)
@@ -401,7 +410,7 @@ final class DigestService {
     /// Fetches every source from `dependencies.makeFetchers` at the same time. A failing source becomes a warning; the others continue.
     /// - Parameters:
     ///   - since: Start of the trend window.
-    ///   - painSince: Start of the (longer) window for Pain points and App Store complaints.
+    ///   - painSince: Start of the (longer) window for Pain points and the complaint sources.
     ///   - topics: The user's topics (used by GitHub).
     /// - Returns: De-duplicated items in source order, and one warning per failed source.
     private func fetchAll(since: Date, painSince: Date, topics: [String]) async -> ([FetchedItem], [String]) {
@@ -410,7 +419,7 @@ final class DigestService {
         let results = await withTaskGroup(of: (Int, Result<[FetchedItem], Error>).self) { group in
             for (index, fetcher) in fetchers.enumerated() {
                 group.addTask {
-                    let start = [.painPoints, .appReviews, .consumerReviews, .areaDiscussion].contains(fetcher.kind) ? painSince : since
+                    let start = [.painPoints, .appReviews, .consumerReviews, .areaDiscussion, .wordpressReviews].contains(fetcher.kind) ? painSince : since
                     do { return (index, .success(try await fetcher.fetch(since: start, topics: topics))) }
                     catch { return (index, .failure(error)) }
                 }

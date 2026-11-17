@@ -487,40 +487,8 @@ struct QualityBarTests {
     }
 }
 
-/// Y Combinator, App Store top paid, research papers and Lobsters.
+/// App Store top paid, research papers and Lobsters.
 struct MoreSourcesTests {
-    @Test func parsesYCBatchAndRotates() throws {
-        let json = """
-        [{"id":1,"name":"Tire Swing","one_liner":"AI Compliance for Affordable Housing",
-          "url":"https://www.ycombinator.com/companies/tire-swing","industry":"B2B","batch":"Fall 2026"}]
-        """
-        let since = Date(timeIntervalSince1970: 0)
-        let items = try YCombinatorFetcher.parse(Data(json.utf8), postedAt: since)
-        #expect(items.first?.title == "Tire Swing")
-        #expect(items.first?.detail == "AI Compliance for Affordable Housing (B2B, YC Fall 2026)")
-        #expect(items.first?.isNew() == false)
-
-        let many = (0..<60).map { item("c\($0)") }
-        let day1 = YCombinatorFetcher.rotation(many, day: 1)
-        let day2 = YCombinatorFetcher.rotation(many, day: 2)
-        #expect(day1.count == 25 && day2.count == 25)
-        #expect(Set(day1.map(\.key)) != Set(day2.map(\.key)))
-    }
-
-    @Test func ycPicksNewestBatchWithEnoughB2BCompanies() throws {
-        func company(_ id: Int, _ batch: String) -> [String: Any] {
-            ["id": id, "name": "C\(id)", "one_liner": "x", "url": "https://yc.com/\(id)", "industry": "B2B",
-             "subindustry": "B2B -> Finance and Accounting", "batch": batch]
-        }
-        let list = (0..<40).map { company($0, "Fall 2026") } + (40..<75).map { company($0, "Summer 2026") }
-            + [company(99, "Summer 2027")]
-        let items = try YCombinatorFetcher.newestBatch(in: JSONSerialization.data(withJSONObject: list), postedAt: .now)
-        #expect(items.count == 40)
-        #expect(items.first?.detail == "x (B2B: Finance and Accounting, YC Fall 2026)")
-        #expect(YCombinatorFetcher.batchOrder("Fall 2026") > YCombinatorFetcher.batchOrder("Summer 2026"))
-        #expect(YCombinatorFetcher.batchOrder("Winter 2027") > YCombinatorFetcher.batchOrder("Fall 2026"))
-    }
-
     @Test func parsesAppStoreTopPaid() throws {
         let json = """
         {"feed":{"results":[{"id":"932747118","name":"Shadowrocket","artistName":"Shadow Launch","url":"https://apps.apple.com/us/app/id932747118","genres":[]},
@@ -774,11 +742,11 @@ struct BusinessFocusTests {
         #expect(!SourceKind.devTo.enabledByDefault)
         #expect(!SourceKind.lobsters.enabledByDefault)
         #expect(!SourceKind.huggingFace.enabledByDefault)
-        #expect(SourceKind.painPoints.enabledByDefault && SourceKind.ycombinator.enabledByDefault)
+        #expect(SourceKind.painPoints.enabledByDefault && SourceKind.wordpressReviews.enabledByDefault)
         // Builder-side sources and out-of-reach government contracts start off for a solo builder.
         #expect(!SourceKind.github.enabledByDefault && !SourceKind.hackerNews.enabledByDefault)
         #expect(!SourceKind.research.enabledByDefault && !SourceKind.ausTender.enabledByDefault)
-        #expect(SourceKind.appReviews.enabledByDefault && SourceKind.atlassian.enabledByDefault)
+        #expect(SourceKind.appReviews.enabledByDefault && !SourceKind.atlassian.enabledByDefault)
         #expect(SourceKind.consumerReviews.enabledByDefault && SourceKind.consumerReviews.signal == .demand)
         #expect(SourceKind.consumerReviews.rawValue == "consumerReviews", "stored in the database: never rename")
         #expect(SourceKind.vibeCode.enabledByDefault && SourceKind.fieldNotes.enabledByDefault)
@@ -792,7 +760,8 @@ struct BusinessFocusTests {
         #expect(KillerEngine.critiqueInstructions.contains("no clear buyer who would pay"))
         // Source labels in prompts must match SourceKind.label.
         for text in [KillerEngine.generateInstructions, Prompts.themeInstructions] {
-            #expect(text.contains("\"\(SourceKind.consumerReviews.label)\""))
+            #expect(text.contains("\"\(SourceKind.consumerReviews.label)\"") && text.contains("\"\(SourceKind.wordpressReviews.label)\""))
+            #expect(!text.contains("\"\(SourceKind.ycombinator.label)\""), "no longer read")
         }
         for text in [KillerEngine.generateInstructions, KillerEngine.critiqueInstructions, Prompts.themeInstructions] {
             #expect(!text.contains("Never hobbyists or consumers") && !text.contains("consumer novelties"))
@@ -859,10 +828,6 @@ struct DemandSourceTests {
         let apps = try AppReviewsFetcher.parseChart(Data(chart.utf8), country: "au", genre: "Business")
         #expect(apps.map(\.name) == ["LinkedIn", "Xero"])
         #expect(apps[1].rank == 2)
-        let many = (1...25).map { AppReviewsFetcher.App(id: "\($0)", name: "A\($0)", country: "au", genre: "Business", rank: $0) }
-        let today = AppReviewsFetcher.todaysApps(many + many, day: 3)
-        #expect(today.count == AppReviewsFetcher.appsPerDay)
-        #expect(today.allSatisfy { $0.rank > 5 })
     }
 
     @Test func keepsOnlyRecentLowStarReviews() throws {
@@ -1333,6 +1298,11 @@ struct RefreshRoutineTests {
         await h.service.refresh(force: true, notify: false)
         let idea = try #require(try h.context.fetch(FetchDescriptor<KillerIdea>()).first)
         #expect(idea.competitorList.first.map { $0.confirmed && $0.monthlyPrice == 40 && $0.url == "https://chaser.example/pricing" } == true)
+        #expect(idea.monthlyPrice == 10, "with no price given, the idea gets the 25% cap of the checked $40 plan")
+        // Each step's results are kept for the screen as they arrive (owner, 16 Nov 2026).
+        #expect(h.service.live.itemCount > 0 && !h.service.live.sources.isEmpty, "step 1: items read per source")
+        #expect(h.service.live.drafts.map(\.title) == ["InvoiceChaser"])
+        #expect(h.service.live.drafts.first?.status == .backed, "steps 3-4: the draft shows the devil's advocate's verdict")
 
         let failing = try harness(llm: ScriptedLLM(replies: replies), priceChecker: ScriptedPriceChecker(
             search: .failure(LLMHTTPError(status: 529, retryAfter: nil, detail: "")), formatted: formatted))

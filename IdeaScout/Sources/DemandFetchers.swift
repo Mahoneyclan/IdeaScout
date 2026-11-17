@@ -1,6 +1,6 @@
 // DemandFetchers.swift
 // The demand sources: evidence of what businesses and consumers need or pay for. "My pain points" (typed by
-// the user), 1–2 star App Store reviews of top-grossing business and consumer apps, Atlassian Marketplace add-ons and
+// the user), 1–2 star App Store reviews of mid-ranked top-grossing business and consumer apps, Atlassian Marketplace add-ons and
 // Australian government IT contracts (AusTender, CC BY 4.0: credited in About). Each gets the "demand"
 // share of the AI's items except Atlassian, which counts as supply.
 
@@ -45,11 +45,12 @@ struct FieldNotesFetcher: ItemFetcher {
     }
 }
 
-// MARK: - App Store complaints (1-2 star reviews of top-grossing apps)
+// MARK: - App Store complaints (1-2 star reviews of mid-ranked top-grossing apps)
 
-/// Recent 1–2 star reviews of top-grossing apps in the Australian and US stores: what paying customers are
-/// unhappy about. Two sources use it: "App Store complaints" (business apps) and "Consumer app complaints".
-/// Uses Apple's public RSS feeds (one chart per country and genre, plus 12 review requests a day).
+/// Recent 1–2 star reviews of apps ranked 26–100 in the Australian and US top-grossing charts: what paying customers
+/// are unhappy about, from apps small enough for a solo builder to compete with. Two sources use it: "App Store
+/// complaints" (business apps) and "Consumer app complaints". Uses Apple's public RSS feeds (one chart per country
+/// and genre, plus `appsPerDay` review requests a day); never Apple's Search API or App Store pages.
 struct AppReviewsFetcher: ItemFetcher {
     /// Which source this is: `.appReviews` or `.consumerReviews`.
     var kind = SourceKind.appReviews
@@ -62,8 +63,12 @@ struct AppReviewsFetcher: ItemFetcher {
     static let consumerGenres = ["6013": "Health & Fitness", "6017": "Education", "6023": "Food & Drink", "6003": "Travel"]
     /// The genres for this source.
     var genres: [String: String] { kind == .consumerReviews ? Self.consumerGenres : Self.businessGenres }
+    /// The interest area's words (`AreaFocus.words`): apps whose name or genre mentions them are read first.
+    var areaWords: [String] = []
     /// Apps whose reviews are read each day.
-    static let appsPerDay = 12
+    static let appsPerDay = 16
+    /// Chart positions read (owner's decision, 17 Nov 2026): below the giants, whose complaints are too general.
+    static let ranks = 26...100
     /// Most low-star reviews kept per app, so one unpopular app can't dominate.
     static let reviewsPerApp = 5
     /// Low-star reviews of these apps are rare, so look back further than other sources.
@@ -95,7 +100,7 @@ struct AppReviewsFetcher: ItemFetcher {
         for country in Self.countries {
             for (genreID, genre) in genres.sorted(by: { $0.key < $1.key }) {
                 // Safe to unwrap: country and genre come from the fixed lists above, not from outside data.
-                let url = URL(string: "https://itunes.apple.com/\(country)/rss/topgrossingapplications/limit=25/genre=\(genreID)/json")!
+                let url = URL(string: "https://itunes.apple.com/\(country)/rss/topgrossingapplications/limit=\(Self.ranks.upperBound)/genre=\(genreID)/json")!
                 do { apps += try Self.parseChart(try await HTTP.get(url), country: country, genre: genre) }
                 catch { firstError = firstError ?? error }
             }
@@ -103,7 +108,7 @@ struct AppReviewsFetcher: ItemFetcher {
         let day = Calendar.current.ordinality(of: .day, in: .year, for: .now) ?? 0
         var results: [FetchedItem] = []
         let reviewsSince = min(since, Date.now.addingTimeInterval(-Self.windowDays * 86_400))
-        for app in Self.todaysApps(apps, day: day) {
+        for app in Self.todaysApps(apps, day: day, areaWords: areaWords) {
             // Robustness: the app ID comes from Apple's chart; skip it if it can't form a valid link.
             guard let url = URL(string: "https://itunes.apple.com/\(app.country)/rss/customerreviews/page=1/id=\(app.id)/sortby=mostrecent/json")
             else { continue }
@@ -147,18 +152,20 @@ struct AppReviewsFetcher: ItemFetcher {
         }
     }
 
-    /// Skips the top 5 (giants like LinkedIn, whose complaints are too general), removes duplicates
-    /// across charts, then rotates through the rest a few apps a day.
+    /// Keeps apps ranked 26–100, removes duplicates across charts, then rotates through them a few apps a day, apps
+    /// whose name or genre mentions the interest area first. A short chart with nothing past 25 falls back to
+    /// skipping only the top 5 (giants like LinkedIn).
     /// - Parameters:
     ///   - apps: Every chart's apps, in chart order.
     ///   - day: Day of the year, which picks today's slice.
+    ///   - areaWords: The interest area's words; empty means no preference.
     /// - Returns: Up to `appsPerDay` apps.
-    static func todaysApps(_ apps: [App], day: Int) -> [App] {
+    static func todaysApps(_ apps: [App], day: Int, areaWords: [String] = []) -> [App] {
         var seen = Set<String>()
-        let pool = apps.filter { $0.rank > 5 && seen.insert($0.id).inserted }
-        guard pool.count > appsPerDay else { return pool }
-        let start = (day * appsPerDay) % pool.count
-        return (0..<appsPerDay).map { pool[(start + $0) % pool.count] }
+        let unique = apps.filter { seen.insert($0.id).inserted }
+        let midRanked = unique.filter { ranks.contains($0.rank) }
+        let pool = midRanked.isEmpty ? unique.filter { $0.rank > 5 } : midRanked
+        return AreaFocus.todaysPick(pool, count: appsPerDay, day: day) { AreaFocus.mentions("\($0.name) \($0.genre)", areaWords) }
     }
 
     private struct Reviews: Decodable {
@@ -184,9 +191,11 @@ struct AppReviewsFetcher: ItemFetcher {
     ///   - app: The app the reviews belong to.
     ///   - since: Oldest review date kept.
     ///   - source: The source the items belong to.
+    ///   - context: Replaces the chart position in each item's detail ("App Store, AU"); `nil` shows the chart.
     /// - Returns: Up to `reviewsPerApp` items, in the feed's newest-first order.
     /// - Throws: `DecodingError` if the reply's shape has changed.
-    static func parseReviews(_ data: Data, app: App, since: Date, source: SourceKind = .appReviews) throws -> [FetchedItem] {
+    static func parseReviews(_ data: Data, app: App, since: Date, source: SourceKind = .appReviews,
+                             context: String? = nil) throws -> [FetchedItem] {
         let entries = try JSONDecoder().decode(Reviews.self, from: data).feed.entry ?? []
         guard let url = URL(string: "https://apps.apple.com/\(app.country)/app/id\(app.id)") else { return [] }
         return entries.compactMap { entry -> FetchedItem? in
@@ -195,7 +204,7 @@ struct AppReviewsFetcher: ItemFetcher {
             let text = TextCleaner.clean(entry.content?.label, max: 300)
             return FetchedItem(key: "rev-\(entry.id.label)", source: source,
                                title: "\(app.name): \(TextCleaner.clean(entry.title.label, max: 100))",
-                               detail: "★\(stars) review (#\(app.rank) top-grossing \(app.genre), \(app.country.uppercased())): \(text)",
+                               detail: "★\(stars) review (\(context ?? "#\(app.rank) top-grossing \(app.genre), \(app.country.uppercased())")): \(text)",
                                url: url, score: 3 - stars, postedAt: date)
         }
         .prefix(reviewsPerApp)

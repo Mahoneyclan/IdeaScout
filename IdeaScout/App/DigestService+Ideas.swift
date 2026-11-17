@@ -64,7 +64,7 @@ extension DigestService {
             // The five principles: what they're worked out from.
             idea.engineVersion = 1
             idea.oneJob = c.oneJob; idea.keepFeatures = c.keepFeatures; idea.leaveOutFeatures = c.leaveOutFeatures
-            idea.monthlyPrice = c.monthlyPrice; idea.fillsGap = c.fillsGap; idea.competitorList = result.competitors
+            idea.monthlyPrice = result.price; idea.fillsGap = c.fillsGap; idea.competitorList = result.competitors
             idea.buildDays = r.buildDays; idea.likelyCustomers = r.likelyCustomers; idea.builderToolRaw = result.tool.rawValue
             idea.followRisk = r.followRisk; idea.copyRisk = r.copyRisk; idea.keepPaying = r.keepPaying
             idea.criticRejected = !r.survives

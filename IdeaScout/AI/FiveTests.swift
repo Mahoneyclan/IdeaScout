@@ -1,8 +1,9 @@
 // FiveTests.swift
-// The owner's five tests for a killer idea (decided 11 Nov 2026), worked out in code from the devil's advocate's
-// scores and the idea's prices: 1 vibe-codable, 2 people will pay, 3 real pain, 4 materially cheaper, 5 sales cover
-// the build cost. They're principles that score and rank ideas; only "vibe-codable" is a must (owner, 11 Nov 2026).
-// The price comparison and the payback sums are done here, not by the AI. See CLAUDE.md.
+// The owner's tests for a killer idea, worked out in code from the devil's advocate's scores and the idea's prices:
+// vibe-codable, people will pay, real pain, sales cover the build cost. (There were five until 16 Nov 2026, when the
+// owner removed "materially cheaper" as a test; the name stays.) They score and rank ideas; only "vibe-codable" is a
+// must. The price cap (at most 25% of the cheapest competitor's plan; owner, 16 Nov 2026) and the payback sums are
+// done here, not by the AI. See CLAUDE.md.
 
 import Foundation
 
@@ -46,12 +47,10 @@ struct TestOutcome: Equatable, Sendable {
 }
 
 enum FiveTests {
-    /// The recommended price should be at most this share of the cheapest competitor's (owner, 11 Nov 2026).
-    static let maxPriceShare = 0.5
+    /// The recommended price is at most this share of the cheapest competitor's comparable plan (owner, 16 Nov 2026).
+    static let maxPriceShare = 0.25
     /// Below this, an idea isn't vibe-codable and is always dropped: the one test that's a must.
     static let minimumVibeCodable = 3
-    /// Without a confirmed (web-checked) competitor price, "materially cheaper" can't score above this.
-    static let unconfirmedPriceCap = 4
     /// Share of each sale kept after the app store's or card processor's fee (Apple's small-business rate is 15%).
     static let keptShare = 0.85
     /// Prices below this are treated as unknown, so the sums stay sensible whatever the AI writes.
@@ -74,33 +73,41 @@ enum FiveTests {
         competitors.filter { $0.monthlyPrice >= minimumPrice }.min { $0.monthlyPrice < $1.monthlyPrice }
     }
 
-    /// Test 4: at most half the cheapest competitor's price scores 3 or more; dearer scores lower but isn't dropped.
-    /// A gap idea, or one with no priced competitor, scores 3.
-    static func cheaper(price: Double, competitors: [Competitor], fillsGap: Bool) -> TestOutcome {
-        let name = "Materially cheaper"
-        if let free = competitors.first(where: \.isFree) {
-            return TestOutcome(name: name, score: 1, reason: "\(free.name) already does this for free.")
+    /// The highest price allowed: `maxPriceShare` of the cheapest paid competitor's plan, rounded down to the cent;
+    /// `nil` when no competitor has a known paid price (a gap idea, or only free apps), so no cap applies.
+    static func priceCap(_ competitors: [Competitor]) -> Double? {
+        guard let cheapest = paid(competitors).first else { return nil }
+        let cap = (cheapest.monthlyPrice * maxPriceShare * 100).rounded(.down) / 100
+        return cap >= minimumPrice ? cap : nil
+    }
+
+    /// The price after the cap: a price above it, or no price at all, becomes the cap; a lower price is kept.
+    /// - Parameters:
+    ///   - price: The AI's recommended price per month.
+    ///   - competitors: The idea's competitors, after the web price check where there was one.
+    /// - Returns: The price to save and use in the sums.
+    static func capped(_ price: Double, competitors: [Competitor]) -> Double {
+        guard let cap = priceCap(competitors) else { return price }
+        return price >= minimumPrice ? min(price, cap) : cap
+    }
+
+    /// One line for the screen on how the price compares with the cap, or `nil` with no competitor named.
+    static func priceNote(price: Double, competitors: [Competitor]) -> String? {
+        if let free = competitors.first(where: \.isFree) { return "\(free.name) already does this for free." }
+        guard let cheapest = paid(competitors).first, let cap = priceCap(competitors) else {
+            return competitors.isEmpty ? nil : "No competitor price found, so the 25% cap doesn't apply."
         }
-        guard let cheapest = cheapest(competitors) else {
-            if fillsGap { return TestOutcome(name: name, score: 3, reason: "No direct competitor: it fills a gap.") }
-            return TestOutcome(name: name, score: 3, reason: "No competitor price found, so this can't be judged yet.", known: false)
+        let theirs = "\(cheapest.name)'s \(money(cheapest.monthlyPrice))/mo"
+        var note: String
+        if price > cap + 0.005 {
+            note = "Above the 25% cap of \(money(cap))/mo (a quarter of \(theirs)). A new scan will lower it."
+        } else if price >= cap - 0.005 {
+            note = "At the 25% cap: a quarter of \(theirs)."
+        } else {
+            note = "\(Int((price / cheapest.monthlyPrice * 100).rounded(.up)))% of \(theirs) (the cap is 25%)."
         }
-        guard price >= minimumPrice else { return TestOutcome(name: name, score: 1, reason: "No price was given.") }
-        let share = min(price / cheapest.monthlyPrice, 100)
-        let percent = Int(((1 - share) * 100).rounded(.down))
-        let compared = "\(money(price))/mo against \(cheapest.name) at \(money(cheapest.monthlyPrice))/mo"
-        guard share <= maxPriceShare else {
-            let score = share <= 0.75 ? 2 : 1
-            let reason = percent > 0 ? "Only \(percent)% cheaper: \(compared)." : "Not cheaper: \(compared)."
-            return TestOutcome(name: name, score: score, reason: reason)
-        }
-        var score = share <= 0.25 ? 5 : share <= 0.4 ? 4 : 3
-        var reason = "\(percent)% cheaper: \(compared)."
-        if !cheapest.confirmed {
-            score = min(score, unconfirmedPriceCap)
-            reason += " Competitor price unconfirmed."
-        }
-        return TestOutcome(name: name, score: score, reason: reason)
+        if !cheapest.confirmed { note += " Competitor price unconfirmed." }
+        return note
     }
 
     /// The build cost: the tool's plan for each started month of building (at least one).
@@ -173,18 +180,18 @@ enum FiveTests {
                            reason: "No proof anyone pays for this yet: no paid competitor and no posts about paying.", known: false)
     }
 
-    /// All five outcomes, in the owner's order.
-    static func outcomes(vibeCodable: Int, willPay: TestOutcome, pain: Int, cheaper: TestOutcome, coversBuild: TestOutcome) -> [TestOutcome] {
+    /// All the outcomes, in the owner's order.
+    static func outcomes(vibeCodable: Int, willPay: TestOutcome, pain: Int, coversBuild: TestOutcome) -> [TestOutcome] {
         [TestOutcome(name: "Vibe-codable", score: vibeCodable,
                      reason: vibeCodable >= minimumVibeCodable ? "One person can build it with their AI coding tool." : "Too hard to build alone with the tool."),
          willPay,
          TestOutcome(name: "Real pain", score: pain,
                      reason: pain >= 4 ? "People complain about this." : pain == 3 ? "Some signs, not proven by the evidence."
                         : "Weak evidence of pain."),
-         cheaper, coversBuild]
+         coversBuild]
     }
 
-    /// The killer score: the average of the five test scores.
+    /// The killer score: the average of the test scores.
     static func score(_ outcomes: [TestOutcome]) -> Double {
         outcomes.isEmpty ? 0 : Double(outcomes.map(\.score).reduce(0, +)) / Double(outcomes.count)
     }

@@ -1,6 +1,7 @@
 // UndercutTests.swift
 // "Reimagine an app" (first "Undercut an app"): reading App Store links on the phone, keeping only research the web search really returned
-// (never Apple's pages), the prompt block, and the service end to end with a scripted AI and web search (offline).
+// (never Apple's pages), the prompt block, and the three steps end to end with a scripted AI, web search and review
+// feed (offline).
 
 import Foundation
 import Testing
@@ -72,44 +73,85 @@ struct UndercutRuleTests {
     }
 }
 
-@MainActor
+/// Serialized: the tests share `ReimagineStore.fileURL`.
+@MainActor @Suite(.serialized)
 struct UndercutServiceTests {
-    private static let research = #"{"app_plan":"Pro","price_per_month_usd":10,"price_url":"https://things.example/pricing","summary":"A to-do app people find dear.","findings":[{"kind":"complaint","title":"Too pricey","detail":"d","url":"https://forum.example/t/1"},{"kind":"paid_plan","title":"Pro is $10 a month","detail":"d","url":"https://things.example/pricing"}]}"#
-    private static let ideas = #"{"ideas":[{"title":"TinyTodo","pitch":"p","buyer":"b","pricing":"$3 once","why_now":"w","one_week_test":"t","replaces":"Things 3","channel":"App Store","evidence_numbers":[1,2],"same_as":""}]}"#
-    private static let reviews = #"{"reviews":[{"title":"TinyTodo","survives":true,"objection":"o","competitors":"Things 3","verdict":"v","pain":5,"willing_to_pay":5,"timing":4,"gap":4,"fit":4,"buildability":4,"channel_score":4,"evidence_needed":"e"}]}"#
+    private static let profile = #"{"what_it_does":"A to-do app.","who_its_for":"Mac users","plans":[{"name":"Things 3","plan":"Pro","price_per_month_usd":10,"url":"https://things.example/pricing"}],"likes":[{"text":"Looks lovely","who":"","url":"https://blog.example/a"}],"complaints":[{"text":"No shared lists for families","who":"Parents","url":"https://forum.example/t/1"},{"text":"Families can't share chores","who":"Parents","url":"https://forum.example/t/2"},{"text":"Made up","who":"","url":"https://invented.example/x"}],"alternatives":[],"already_built":[]}"#
+    private static let directions = #"{"directions":[{"who":"Busy parents","job":"Share chores with the family","evidence_numbers":[1,2],"why_not_the_app":"Built for one person.","already_served_by":"Cozi","rough_price":"$2 a month","strength":"strong"},{"who":"Students","job":"Plan study","evidence_numbers":[1],"why_not_the_app":"w","already_served_by":"nobody found","rough_price":"$1","strength":"thin"}]}"#
+    private static let group = #"{"app_plan":"","price_per_month_usd":0,"price_url":"","summary":"","findings":[{"kind":"paid_plan","title":"Cozi Gold is $4 a month","detail":"d","url":"https://cozi.example/pricing"}]}"#
+    private static let idea = #"{"ideas":[{"title":"ChoreChart","pitch":"p","buyer":"Busy parents","pricing":"$3 a month","why_now":"w","one_week_test":"t","replaces":"Paper lists","channel":"App Store","evidence_numbers":[1,2],"same_as":"","one_job":"Share chores","keep_features":["Lists"],"leave_out_features":["Projects"],"competitors":[{"name":"Cozi","cheapest_plan":"Gold","price_per_month_usd":4,"is_free":false}],"fills_gap":false,"price_per_month_usd":3,"sales_model":"subscription","sales_model_reason":"r"}]}"#
+    private static func review(survives: Bool) -> String {
+        #"{"reviews":[{"title":"ChoreChart","survives":"# + "\(survives)" + #","objection":"Families already use Cozi.","competitors":"Cozi","verdict":"v","pain":5,"willing_to_pay":4,"timing":4,"gap":4,"fit":4,"buildability":4,"channel_score":4,"evidence_needed":"e"}]}"#
+    }
 
-    private func service(claude: Bool) throws -> (DigestService, ModelContext) {
+    private func service(claude: Bool = true, survives: Bool = true) throws -> (DigestService, ModelContext) {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
-        let llm = ScriptedLLM(replies: ["Killer ideas": .success(Self.ideas), "Devil's advocate": .success(Self.reviews)])
-        let found = WebSearchReply(text: "Things 3 Pro costs $10 a month; people say it's too pricey.",
-                                   sources: ["https://forum.example/t/1", "https://things.example/pricing"])
-        let searcher = ScriptedPriceChecker(search: .success(found), formatted: Self.research)
-        let service = DigestService(dependencies: .init(
+        let llm = ScriptedLLM(replies: ["Reimagine directions": .success(Self.directions), "Reimagine idea": .success(Self.idea),
+                                        "Devil's advocate": .success(Self.review(survives: survives))])
+        let found = WebSearchReply(text: "Things 3 research.", sources: ["https://forum.example/t/1", "https://forum.example/t/2",
+                                                                          "https://things.example/pricing", "https://blog.example/a",
+                                                                          "https://cozi.example/pricing"])
+        let searcher = ScriptedPriceChecker(search: .success(found), formatted: Self.group, profile: Self.profile)
+        let reviewsFeed = Data(#"{"feed":{"entry":[{"id":{"label":"r1"},"title":{"label":"Can't share"},"content":{"label":"No family sharing."},"im:rating":{"label":"1"},"updated":{"label":"2026-11-10T10:00:00-07:00"}}]}}"#.utf8)
+        var deps = DigestService.Dependencies(
             makeFetchers: { [] }, makeSummarizer: { LLMSummarizer(client: llm) },
             freeSummarizer: { KeywordSummarizer(topics: []) }, access: { .unlocked }, isOverDailyCap: { false },
-            needsConsent: { false }, notify: { _, _ in }, priceChecker: { claude ? searcher as (any WebSearchClient & LLMClient) : nil }))
+            needsConsent: { false }, notify: { _, _ in }, priceChecker: { claude ? searcher as (any WebSearchClient & LLMClient) : nil })
+        deps.httpGet = { url in
+            #expect(url.absoluteString.hasPrefix("https://itunes.apple.com/au/rss/customerreviews/"), "only Apple's review feed")
+            return reviewsFeed
+        }
+        let service = DigestService(dependencies: deps)
         service.container = container
         return (service, container.mainContext)
     }
 
-    /// The research becomes evidence, the app becomes a confirmed competitor, and the idea is saved and marked.
-    @Test func makesAndSavesAnIdeaToUndercutTheApp() async throws {
-        let (service, context) = try service(claude: true)
-        let idea = try await service.undercut(Undercut.Target(name: "Things 3", appID: "id904237743"))
-        #expect(idea.title == "TinyTodo" && idea.undercutApp == "Things 3")
-        #expect(idea.evidenceURLs == ["https://forum.example/t/1", "https://things.example/pricing"])
-        #expect(idea.pain == 4, "one complaint page allows 4, not the 5 asked for")
-        #expect(idea.competitorList.contains { $0.name == "Things 3" && $0.confirmed && $0.monthlyPrice == 10 })
-        #expect(try context.fetch(FetchDescriptor<KillerIdea>()).count == 1)
-        #expect(service.undercutStep.isEmpty)
+    /// Step 1 explains the app from real links plus its App Store reviews and the user's note; step 2 keeps only
+    /// directions backed by two pages; step 3 builds one idea for the chosen direction, capped at 25%, and saves it.
+    @Test func explainsTheAppThenBuildsOneIdeaForTheChosenDirection() async throws {
+        ReimagineStore.fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("reimagine-\(UUID()).json")
+        let (service, context) = try service()
+        let target = try #require(Undercut.target(from: "https://apps.apple.com/au/app/things-3/id904237743"))
+        let run = try await service.reimagineResearch(target, note: "I want to share lists with my kids")
+        #expect(run.profile.whatItDoes == "A to-do app." && run.profile.complaints.count == 2, "the made-up link is dropped")
+        #expect(run.items.first?.source == .fieldNotes && run.items.contains { $0.source == .appReviews })
+        #expect(run.target.monthlyPrice == 10)
+
+        let withDirections = try await service.reimagineDirections(run)
+        #expect(withDirections.directions.map(\.who) == ["Busy parents"], "the one-source direction is dropped")
+        #expect(ReimagineStore.load().first?.directions.count == 1, "saved so another direction costs no new research")
+
+        let built = try await service.reimagineBuild(withDirections, direction: withDirections.directions[0])
+        #expect(built.result.review.survives && built.result.price == 1, "25% of Cozi's $4")
+        let idea = try service.saveReimagined(built, app: run.target.name)
+        #expect(idea.title == "ChoreChart" && idea.undercutApp == "Things 3")
+        #expect(try context.fetch(FetchDescriptor<KillerIdea>()).count == 1 && service.undercutStep.isEmpty)
+        ReimagineStore.deleteAll()
+    }
+
+    /// A rejected idea is returned with its objection, not saved silently.
+    @Test func rejectedIdeaIsNotSaved() async throws {
+        ReimagineStore.fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("reimagine-\(UUID()).json")
+        let (service, context) = try service(survives: false)
+        let run = try await service.reimagineDirections(try await service.reimagineResearch(Undercut.Target(name: "Things 3"), note: ""))
+        let built = try await service.reimagineBuild(run, direction: try #require(run.directions.first))
+        #expect(!built.result.review.survives && built.result.review.objection == "Families already use Cozi.")
+        #expect(try context.fetch(FetchDescriptor<KillerIdea>()).isEmpty)
+        ReimagineStore.deleteAll()
     }
 
     /// Without Claude's web search, or without a name, it stops before any paid call.
     @Test func stopsBeforeAnyPaidCall() async throws {
-        let (noClaude, context) = try service(claude: false)
-        await #expect(throws: UndercutError.needsClaude) { _ = try await noClaude.undercut(Undercut.Target(name: "Things 3")) }
-        await #expect(throws: UndercutError.noName) { _ = try await noClaude.undercut(Undercut.Target(name: " ")) }
-        #expect(try context.fetch(FetchDescriptor<KillerIdea>()).isEmpty && noClaude.undercutStep.isEmpty)
+        let (noClaude, _) = try service(claude: false)
+        await #expect(throws: UndercutError.needsClaude) { _ = try await noClaude.reimagineResearch(Undercut.Target(name: "Things 3"), note: "") }
+        await #expect(throws: UndercutError.noName) { _ = try await noClaude.reimagineResearch(Undercut.Target(name: " "), note: "") }
+        #expect(noClaude.undercutStep.isEmpty)
+    }
+
+    /// The country comes from the App Store link, and only two plain letters are accepted.
+    @Test func readsTheStoreCountry() {
+        #expect(Undercut.target(from: "https://apps.apple.com/au/app/things-3/id904237743")?.country == "au")
+        #expect(Undercut.target(from: "https://apps.apple.com/app/id123456")?.country == "us")
     }
 }

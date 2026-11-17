@@ -63,6 +63,7 @@ extension DigestService {
         if context.saveOrReport("the deletion") != nil { complete = false }
         Keychain.removeAll(service: keychainService)
         CloudSync.eraseAll(in: cloudStore)
+        ReimagineStore.deleteAll()
         // Remove keys one by one first so screens using @AppStorage update immediately, then the whole domain.
         for key in (defaults.persistentDomain(forName: defaultsDomain) ?? [:]).keys { defaults.removeObject(forKey: key) }
         defaults.removePersistentDomain(forName: defaultsDomain)
@@ -76,8 +77,9 @@ extension DigestService {
     // MARK: - Retired sources
 
     /// Product Hunt was removed (its API terms don't allow this use). Deletes its stored items and the
-    /// saved token, once. Starred projects are the user's own and are kept.
+    /// saved token, once. Starred projects are the user's own and are kept. Also applies the 17 Nov 2026 source changes.
     func removeRetiredSources() {
+        Self.applySourceChanges(defaults: AppSettings.defaults)
         let doneKey = "retired.productHunt"
         guard !AppSettings.defaults.bool(forKey: doneKey), let context = container?.mainContext else { return }
         let retired = "productHunt"
@@ -87,6 +89,22 @@ extension DigestService {
         Keychain.delete(account: "productHuntToken")
         AppSettings.defaults.removeObject(forKey: "source.productHunt")
         AppSettings.defaults.set(true, forKey: doneKey)
+    }
+
+    /// Owner's decision, 17 Nov 2026: Y Combinator is no longer read, and Atlassian Marketplace starts off for new
+    /// installs only. Runs once: forgets the Y Combinator toggle and, on a phone that was already set up, keeps
+    /// Atlassian on unless the user had switched it off. Y Combinator's old items are kept (unlike Product Hunt's,
+    /// whose terms forbade the use), so earlier refreshes still show them.
+    /// - Parameter defaults: The settings store.
+    nonisolated static func applySourceChanges(defaults: UserDefaults) {
+        let doneKey = "retired.ycombinator"
+        guard !defaults.bool(forKey: doneKey) else { return }
+        defaults.removeObject(forKey: AppSettings.Keys.sourceEnabled(.ycombinator))
+        let atlassian = AppSettings.Keys.sourceEnabled(.atlassian)
+        if defaults.bool(forKey: AppSettings.Keys.onboarded), defaults.object(forKey: atlassian) == nil {
+            defaults.set(true, forKey: atlassian)
+        }
+        defaults.set(true, forKey: doneKey)
     }
 
     // MARK: - Saved ideas

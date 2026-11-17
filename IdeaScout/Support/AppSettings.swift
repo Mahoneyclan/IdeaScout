@@ -81,9 +81,11 @@ enum AppSettings {
     }
 
     /// Whether a source should be fetched: the user's toggle if set, otherwise the source's default.
-    /// - Parameter kind: The source.
+    /// - Parameters:
+    ///   - kind: The source.
+    ///   - defaults: The settings store (tests pass a separate one).
     /// - Returns: `true` if it should be fetched.
-    static func isEnabled(_ kind: SourceKind) -> Bool {
+    static func isEnabled(_ kind: SourceKind, in defaults: UserDefaults = AppSettings.defaults) -> Bool {
         defaults.object(forKey: Keys.sourceEnabled(kind)) as? Bool ?? kind.enabledByDefault
     }
 

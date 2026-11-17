@@ -42,7 +42,7 @@ struct SourcesSettings: View {
                 }
             }
             Section {} footer: {
-                Text("Demand 40% · Supply 40% · Timing 20%. Numbers = items in the last digest.")
+                Text("Demand 40% · Supply 40% · Timing 20%. Numbers = items in the last refresh.")
             }
         }
         .readableList()
@@ -86,7 +86,7 @@ struct ScanRankingSettings: View {
                     }
                 }
             } header: {
-                Text("Scan")
+                Text("Refresh")
             } footer: {
                 Text("Longer windows favour older posts. More items cost more.")
             }
@@ -96,15 +96,15 @@ struct ScanRankingSettings: View {
                     LabeledContent {
                         Text(qualityBar == 0 ? "Off" : "\(qualityBar.formatted()) / 5").monospacedDigit()
                     } label: {
-                        Label("Quality bar", systemImage: "line.horizontal.star.fill.line.horizontal")
+                        Label("Minimum score", systemImage: "line.horizontal.star.fill.line.horizontal")
                     }
                     Slider(value: $qualityBar, in: 0...4.5, step: 0.5)
-                        .accessibilityLabel("Quality bar")
+                        .accessibilityLabel("Minimum score")
                 }
             } header: {
-                Text("Quality bar")
+                Text("Minimum score")
             } footer: {
-                Text("Ideas at or above this are Killer; below are Near-misses. Trends below it are hidden. Default \(AppSettings.defaultQualityBar.formatted()).")
+                Text("Ideas at or above this are Killer; below are Almost there. Trends below it are hidden. Default \(AppSettings.defaultQualityBar.formatted()).")
             }
 
             Section {
@@ -119,7 +119,7 @@ struct ScanRankingSettings: View {
             }
         }
         .readableList()
-        .navigationTitle("Scan & ranking")
+        .navigationTitle("Refresh & ranking")
         .onAppear { price = AppSettings.chosenModelPrice() }
     }
 }
@@ -188,7 +188,7 @@ struct AISettings: View {
                         LabeledContent(row.feature, value: row.usage.cost.formatted(.currency(code: "USD")))
                     }
                     LabeledContent("Calls this month", value: "\(usage.thisMonth.calls)")
-                    LabeledContent("Tokens this month",
+                    LabeledContent("AI usage this month (tokens)",
                                    value: "\((usage.thisMonth.input + usage.thisMonth.cacheRead + usage.thisMonth.cacheWrite).formatted()) in · \(usage.thisMonth.output.formatted()) out")
                     ForEach(usage.lastDays, id: \.day) { day in
                         LabeledContent(day.day, value: day.cost.formatted(.currency(code: "USD")))

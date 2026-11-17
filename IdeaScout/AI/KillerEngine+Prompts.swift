@@ -8,29 +8,30 @@ import Foundation
 extension KillerEngine {
     // MARK: - Pass 1: generate
 
-    /// Pass 1 instructions: the owner's purpose and five principles (only vibe-codable is a must), someone pays
+    /// Pass 1 instructions: the owner's purpose and four principles (only vibe-codable is a must), someone pays
     /// (a business or a consumer), a named sales channel, at most 1 developer tool, all in the interest area and of the
-    /// tool's app type, each replacing a named manual task, with competitors, a much lower price and a one-week test.
+    /// tool's app type, each replacing a named manual task, with competitors, a price at most 25% of theirs and a one-week test.
     /// Field names must match `candidateSchema`.
     static let generateInstructions = """
     You are a sharp product strategist. Find killer app ideas that one person can vibe-code (build alone with their \
     AI coding tool) and sell for a fraction of what competitors charge, making money even if only a small group of \
-    customers ever buys. Growth is a bonus, not the goal. Judge every idea by five principles:
+    customers ever buys. Growth is a bonus, not the goal. The price is at most a quarter (25%) of the cheapest \
+    competitor's comparable plan. Judge every idea by four principles:
     1. Vibe-codable (a must): one person can build all of it with their AI coding tool.
     2. People will pay: they already pay for an app that does this, or for a workaround (a pricier tool, a service \
     or their own time).
     3. Real pain: people complain about the apps they use for this (too expensive, too bloated, or missing the one \
     thing they need), or that no app does it.
-    4. Materially cheaper: ideally half the price of the cheapest competitor or less.
-    5. Sales cover the build cost: likely sales from a small number of customers, found in a named place where they \
+    4. Sales cover the build cost: likely sales from a small number of customers, found in a named place where they \
     already look, pay back the build and keep making money.
     Using the pain clusters, trends and numbered projects (items tagged Demand show need: "Pain points" are people \
     complaining or asking for tools that don't exist, "App Store complaints" and "Consumer app complaints" are \
-    1-2 star reviews of business and consumer apps people pay for, which show buyers ready to switch, "Hacker News on \
+    1-2 star reviews of business and consumer apps people pay for, which show buyers ready to switch, "WordPress plugin \
+    complaints" are 1-2 star reviews of popular WordPress plugins for shops, bookings, invoices and memberships, "Hacker News on \
     your area" are recent posts and comments about the user's interest area (read them for complaints and needs), \
     "Complaints on the web" and "Paid plans on the web" are web research about one app the user named, to find a gap beside it, \
     "AusTender" is government IT spending, and "My pain points" \
-    are the user's own problems, which are strong evidence; "Atlassian Marketplace", "Y Combinator" and \
+    are the user's own problems, which are strong evidence; "Atlassian Marketplace" and \
     "App Store top paid" show what people and businesses already pay for, and also who the competitors are; "Vibe-coded", "Show HN" \
     and "GitHub" show what other builders have already made, so treat them as competition, not inspiration; \
     "AI research" shows new capabilities), propose 5 distinct product ideas. Rules:
@@ -52,13 +53,18 @@ extension KillerEngine {
     all of it with that tool. Don't propose anything that tool can't build.
     - Each must replace a named manual task, spreadsheet or costly app that the buyer uses today.
     - If an app the user named is given below, don't compete with it head-on: every idea must fill a gap in the \
-    market beside it, serving people or a job it serves badly or leaves out (shown by the complaints), priced at half \
-    its cheapest paid plan or less. Name it as a competitor. Never copy it: write the title, pitch and every feature \
+    market beside it, serving people or a job it serves badly or leaves out (shown by the complaints), priced at a \
+    quarter (25%) of its cheapest paid plan or less. Name it as a competitor. Never copy it: write the title, pitch and every feature \
     in your own words, describing what a feature does, not how that app presents it, and don't reuse its name, \
     slogans, feature names, wording, screens, icon or design. Avoid gaps that the apps already built by solo \
     builders fill.
     Prefer ideas that solve a pain cluster and are supported by several projects. Cite at least one Demand item for each idea. Only propose ideas you would genuinely back; \
     quality matters more than variety.
+    """ + "\n" + ideaFields + Prompts.untrustedData
+
+    /// What each idea must give, field by field. Shared by pass 1 and "Reimagine an app" (`Reimagine.ideaInstructions`),
+    /// so both match `candidateSchema`.
+    static let ideaFields = """
     For each idea give: a short memorable title; a one-sentence pitch; the buyer (a specific role in a specific \
     type of business, or a specific type of consumer); one_job (the one job it does); keep_features (2 to 6 \
     features to keep) and leave_out_features (2 to 6 features the competitors have that it leaves out); \
@@ -66,7 +72,7 @@ extension KillerEngine {
     cheapest comparable plan for one user, a one-off price divided by 12, 0 if you don't know; give a price only if \
     you are fairly sure of it; and is_free, true only if it is free to use; an empty list if no app does this job); fills_gap (true only if no app does this job); \
     price_per_month_usd (your recommended price per customer per month in US dollars, a one-off price divided by 12; \
-    ideally half the cheapest competitor's or less); sales_model ("one_off" for a single purchase or "subscription"): \
+    at most 25% of the cheapest competitor's; a higher price is lowered to that in code); sales_model ("one_off" for a single purchase or "subscription"): \
     choose one_off when the app costs nothing per customer to keep running (for example it runs entirely on the \
     device), and subscription when each customer costs money every month (AI calls, hosting, data) or gets something \
     new every month; sales_model_reason (one sentence on why); pricing (the price as customers would see it, for \
@@ -77,7 +83,7 @@ extension KillerEngine {
     leaderboard, copy that title exactly, otherwise an empty string. Propose new ideas: repeat one from the existing \
     leaderboard only if today's projects add evidence it didn't have, and never repeat one marked [dismissed by the \
     user] without such new evidence. Write everything in English.
-    """ + Prompts.untrustedData
+    """
 
     /// Pass 1: asks for 5 candidate ideas (feature "Killer ideas", medium effort).
     /// - Parameter context: What the prompt is built from.

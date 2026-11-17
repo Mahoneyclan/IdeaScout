@@ -90,8 +90,8 @@ extension KillerEngine {
             if !c.channel.isEmpty { text += "\nSales channel: \(c.channel)" }
             text += "\nWhy now: \(c.whyNow)\nOne-week test: \(c.oneWeekTest)"
             text += Self.offerText(oneJob: c.oneJob, keep: c.keepFeatures, leaveOut: c.leaveOutFeatures,
-                                   price: c.monthlyPrice, competitors: c.competitors, fillsGap: c.fillsGap,
-                                   salesModel: c.salesModel)
+                                   price: FiveTests.capped(c.monthlyPrice, competitors: c.competitors),
+                                   competitors: c.competitors, fillsGap: c.fillsGap, salesModel: c.salesModel)
             if !c.salesModelReason.isEmpty { text += "\nWhy sold this way: \(c.salesModelReason)" }
             let evidence = Self.evidence(for: c, in: items)
             text += "\nEvidence:" + (evidence.isEmpty ? " (none cited)" : "")

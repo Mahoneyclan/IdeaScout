@@ -51,18 +51,18 @@ struct HistoryView: View {
             }
             .overlay {
                 if digests.isEmpty {
-                    ContentUnavailableView("No digests yet", systemImage: "calendar",
-                                           description: Text("Each day's ideas, pain clusters and trends will appear here."))
+                    ContentUnavailableView("No refreshes yet", systemImage: "calendar",
+                                           description: Text("Pull down on the Ideas tab to find today's ideas. Each day's ideas, common complaints and trends then appear here."))
                 }
             }
             .readableList()
             .navigationTitle("History")
-            .safeAreaInset(edge: .bottom) { RefreshBar() }
+            .pullToRefresh()
         }
     }
 }
 
-/// One day in History: the date ("Today" for today), its best idea with Killer/Near-miss, and its
+/// One day in History: the date ("Today" for today), its best idea with Killer/Almost there, and its
 /// pain clusters (or its top trends when there are none).
 struct HistoryRow: View {
     /// The day to summarise.

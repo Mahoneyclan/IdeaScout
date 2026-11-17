@@ -15,8 +15,8 @@ struct KillerEngine {
     let llm: LLMSummarizer
     /// The devil's advocate's AI, when it differs from the writer's ("Mixed"); `nil` uses `llm`.
     var judge: (any LLMClient)?
-    /// Called when the devil's-advocate step starts (for progress on screen).
-    var onCritique: @Sendable () async -> Void = {}
+    /// Called when the devil's-advocate step starts, with pass 1's ideas (shown on screen as drafts).
+    var onCritique: @Sendable ([Candidate]) async -> Void = { _ in }
 
     /// One idea from pass 1, as the AI described it.
     struct Candidate: Equatable, Sendable {
@@ -102,7 +102,7 @@ struct KillerEngine {
         var salesPlan: SalesPlan?
     }
 
-    /// A kept idea with its (evidence-capped) review, judged on the five principles.
+    /// A kept idea with its (evidence-capped) review, judged on the principles.
     struct Result: Equatable, Sendable {
         /// The idea as proposed in pass 1.
         var candidate: Candidate
@@ -122,13 +122,15 @@ struct KillerEngine {
         /// when the critic named none (unless the idea fills a gap, when none is right).
         var competitors: [Competitor] { KillerEngine.mergedCompetitors(critic: review.competitorsFound, generator: candidate.competitors,
                                                                         fillsGap: candidate.fillsGap) }
-        /// The five principles, in the owner's order.
+        /// The recommended price after the 25% cap (owner, 16 Nov 2026), from the current competitors, so it follows
+        /// the web price check.
+        var price: Double { FiveTests.capped(candidate.monthlyPrice, competitors: competitors) }
+        /// The principles, in the owner's order.
         var outcomes: [TestOutcome] {
-            KillerEngine.outcomes(review: review, price: candidate.monthlyPrice, competitors: competitors,
-                                  fillsGap: candidate.fillsGap, tool: tool, payEvidence: payEvidence,
-                                  salesPlan: salesPlan)
+            KillerEngine.outcomes(review: review, price: price, competitors: competitors, tool: tool,
+                                  payEvidence: payEvidence, salesPlan: salesPlan)
         }
-        /// The killer score: the average of the five principles.
+        /// The killer score: the average of the principles.
         var score: Double { FiveTests.score(outcomes) }
     }
 
@@ -165,7 +167,7 @@ struct KillerEngine {
     func run(_ context: Context) async throws -> [Result] {
         let candidates = try await generate(context)
         guard !candidates.isEmpty else { return [] }
-        await onCritique()
+        await onCritique(candidates)
         let reviews = try await critique(candidates, items: context.items, aboutMe: context.aboutMe, tool: context.tool,
                                        appType: context.appType, target: context.target)
         return Self.survivors(candidates: candidates, reviews: reviews, items: context.items, tool: context.tool,
@@ -220,14 +222,13 @@ struct KillerEngine {
         }
     }
 
-    /// The five principles for a review and the idea's prices. With a sales plan, test 5 runs the first-year sums
+    /// The principles for a review and the idea's prices. With a sales plan, test 5 runs the first-year sums
     /// (`PaybackSums`); ideas judged before sales plans keep the older build-cost-only payback.
-    static func outcomes(review r: Review, price: Double, competitors: [Competitor], fillsGap: Bool,
+    static func outcomes(review r: Review, price: Double, competitors: [Competitor],
                          tool: BuilderTool, payEvidence: Int, salesPlan: SalesPlan?) -> [TestOutcome] {
         FiveTests.outcomes(vibeCodable: r.buildability,
                            willPay: FiveTests.willPay(score: r.willingToPay, competitors: competitors, payEvidence: payEvidence),
                            pain: r.pain,
-                           cheaper: FiveTests.cheaper(price: price, competitors: competitors, fillsGap: fillsGap),
                            coversBuild: salesPlan.map {
                                PaybackSums.coversBuild(plan: $0, monthlyPrice: price, customers: r.likelyCustomers,
                                                        buildDays: r.buildDays, tool: tool, channelScore: r.channelScore)
@@ -236,10 +237,12 @@ struct KillerEngine {
     }
 
     /// Sources that count as evidence of pain: complaints and the user's own pain points.
-    static let painEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .fieldNotes, .webComplaints]
-    /// Sources that count as evidence that people pay: complaints, funded startups, top paid apps, paid
-    /// marketplace add-ons, government contracts.
-    static let payEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .ycombinator, .appStore, .atlassian, .ausTender,
+    static let painEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .fieldNotes, .webComplaints,
+                                                .wordpressReviews]
+    /// Sources that count as evidence that people pay: complaints, funded startups (Y Combinator, no longer read but
+    /// still in older refreshes), top paid apps, paid marketplace add-ons, government contracts.
+    static let payEvidence: Set<SourceKind> = [.painPoints, .appReviews, .consumerReviews, .wordpressReviews, .ycombinator, .appStore,
+                                               .atlassian, .ausTender,
                                                .webComplaints, .webPaying]
 
     /// How many different cited items show people paying.

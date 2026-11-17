@@ -21,6 +21,8 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Evidence found by "Reimagine an app"'s web research (13 Nov 2026), never by a scan: complaints about the app
     /// and its rivals, and the paid plans people buy.
     case webComplaints, webPaying
+    /// 1–2 star reviews of popular WordPress.org plugins in commercial categories (17 Nov 2026).
+    case wordpressReviews
 
     /// Identity for SwiftUI lists.
     var id: String { rawValue }
@@ -48,6 +50,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .webPaying: "Paid plans on the web"
         case .atlassian: "Atlassian Marketplace"
         case .ausTender: "AusTender"
+        case .wordpressReviews: "WordPress plugin complaints"
         }
     }
 
@@ -73,6 +76,7 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .webPaying: "creditcard"
         case .atlassian: "puzzlepiece.extension"
         case .ausTender: "building.2"
+        case .wordpressReviews: "w.square"
         }
     }
 
@@ -80,22 +84,24 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     /// so builder-heavy sources can't crowd out evidence of demand.
     var signal: Signal {
         switch self {
-        case .painPoints, .fieldNotes, .appReviews, .consumerReviews, .ausTender, .areaDiscussion, .webComplaints, .webPaying: .demand
+        case .painPoints, .fieldNotes, .appReviews, .consumerReviews, .ausTender, .areaDiscussion, .webComplaints, .webPaying,
+             .wordpressReviews: .demand
         case .ycombinator, .research: .timing
         default: .supply
         }
     }
 
-    /// Whether a daily scan reads it (and Settings lists it); the web research kinds come only from "Reimagine an app".
-    var isScanSource: Bool { self != .webComplaints && self != .webPaying }
+    /// Whether a daily scan reads it (and Settings lists it). The web research kinds come only from "Reimagine an app";
+    /// Y Combinator is no longer read (owner's decision, 17 Nov 2026) but stays in the enum because old items store it.
+    var isScanSource: Bool { ![.webComplaints, .webPaying, .ycombinator].contains(self) }
 
     /// Developer- and game-focused sources start switched off, so ideas lean towards people who pay.
     /// GitHub, Show HN and AI research show what builders make rather than what buyers need, and AusTender's
-    /// government contracts are out of reach for a solo builder, so they start off too.
-    /// A toggle the user has set in Settings always wins.
+    /// government contracts are out of reach for a solo builder, so they start off too. Atlassian Marketplace starts off
+    /// for new installs (owner's decision, 17 Nov 2026). A toggle the user has set in Settings always wins.
     var enabledByDefault: Bool {
         switch self {
-        case .games, .devTo, .lobsters, .huggingFace, .github, .hackerNews, .research, .ausTender: false
+        case .games, .devTo, .lobsters, .huggingFace, .github, .hackerNews, .research, .ausTender, .atlassian, .ycombinator: false
         default: true
         }
     }

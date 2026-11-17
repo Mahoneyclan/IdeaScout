@@ -120,17 +120,20 @@ extension AppSettings {
         return (estimatedImproveCost(price: stepPrice(.writing)) + estimatedImproveCost(price: stepPrice(.judging))) / 2
     }
 
-    /// The upper cost guide for "Reimagine an app": the web research, one idea step (priced like a refresh's, at
-    /// 1.5×) and one idea's price check.
-    /// - Returns: The cost when Claude is chosen, agreed to and has a key; `nil` when it can't run (it needs Claude's
+    /// Upper cost guides for "Reimagine an app", step by step: `research` is steps 1 and 2 (the web research and
+    /// format call, then the directions call on the writing model); `build` is step 3 for one direction (a short web
+    /// check of the group, one idea and its review, priced at 0.6× a refresh's idea step, and one idea's price check).
+    /// - Returns: The costs when Claude is chosen, agreed to and has a key; `nil` when it can't run (it needs Claude's
     ///   web search).
     /// - Note: Reads the Keychain, so call it on demand rather than in every view update.
-    static func undercutCost() -> Double? {
+    static func reimagineCosts() -> (research: Double, build: Double)? {
         guard provider == .claude, hasConsent(.claude), let price = chosenModelPrice() else { return nil }
         let ideas = usesMixedModels
             ? 0.055 * (refreshPriceScale(stepPrice(.writing)) + refreshPriceScale(stepPrice(.judging)))
             : 0.11 * refreshPriceScale(price)
-        return ideas * 1.5 + Undercut.estimatedResearchCost + PriceCheck.estimatedCostPerScan / Double(KillerEngine.maxPerDay)
+        let directions = 0.03 * refreshPriceScale(usesMixedModels ? stepPrice(.writing) : price)
+        return (Undercut.estimatedResearchCost + directions,
+                Reimagine.estimatedGroupCheckCost + ideas * 0.6 + PriceCheck.estimatedCostPerScan / Double(KillerEngine.maxPerDay))
     }
 
     /// A cost for buttons and confirmations: "~$0.02", or "<$0.01" when it would round to nothing.
