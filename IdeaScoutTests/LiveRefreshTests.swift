@@ -30,4 +30,24 @@ struct LiveRefreshTests {
         let judged = LiveRefresh.judged(drafts, results: [result("kept", survives: true), result("Rejected", survives: false)])
         #expect(judged.map(\.status) == [.backed, .rejected("Too small a market."), .dropped])
     }
+
+    /// Step lines in plain words, and a refresh that stops part-way says where.
+    @Test func checklistLinesAndStops() {
+        #expect(LiveRefresh.sourcesLine([.init(label: "A", count: 40), .init(label: "B", count: 2)]) == "42 items from 2 sources")
+        #expect(LiveRefresh.trendsLine(complaints: 1, trends: 3, byKeyword: true).hasPrefix("1 complaint, 3 trends, grouped by keyword"))
+        let drafts = ["A", "B", "C", "D"].map { LiveRefresh.Draft(title: $0, pitch: "", buyer: "") }
+        #expect(LiveRefresh.ideasLine(drafts) == "4 ideas: A, B, C…" && LiveRefresh.ideasLine([]) == "No ideas came back")
+        var judged = drafts
+        judged[0].status = .backed; judged[1].status = .rejected("r"); judged[2].status = .dropped; judged[3].status = .backed
+        #expect(LiveRefresh.verdictLine(judged) == "2 kept, 1 rejected, 1 dropped")
+
+        var live = LiveRefresh(startedAt: .now)
+        live.set(1, .done("x"))
+        live.set(2, .running)
+        live.finish()
+        #expect(live.state(2) == .failed("stopped before it finished") && live.state(5) == .skipped("the refresh stopped early"))
+        #expect(live.summary() == "Stopped at step 2: stopped before it finished")
+        #expect(LiveRefresh.StepState.skipped("no ideas to check").line(running: "") == "Skipped: no ideas to check")
+        #expect(DigestService.plainReason("Killer ideas skipped: daily spending limit reached.") == "daily spending limit reached")
+    }
 }

@@ -1,19 +1,18 @@
 // WelcomeView.swift
-// First-launch welcome (four pages: what IdeaScout does, the free trial, your interest area and coding tool, and
+// First-launch welcome (three pages: what IdeaScout does, your interest area and coding tool, and
 // setting up an AI with guided key steps; usability review, 17 Nov 2026) and the ConsentView shown before any
 // personal data goes to a cloud AI.
 
 import SwiftUI
 
-/// Shown once on first launch: what IdeaScout does, the free trial, what you're interested in, and setting up an AI.
+/// Shown once on first launch: what IdeaScout does, what you're interested in, and setting up an AI.
 struct WelcomeView: View {
-    @Environment(StoreManager.self) private var store
     @AppStorage(AppSettings.Keys.onboarded) private var onboarded = false
     @AppStorage(AppSettings.Keys.aiProvider) private var provider = AIProvider.claude.rawValue
     @AppStorage(AppSettings.Keys.interestArea) private var interestArea = ""
     @AppStorage(AppSettings.Keys.starterKitTool) private var toolRaw = BuilderTool.claudeCode.rawValue
     @AppStorage(AppSettings.Keys.appType) private var appTypeRaw = ""
-    /// 0 = intro, 1 = trial, 2 = about you, 3 = set up your AI.
+    /// 0 = intro, 1 = about you, 2 = set up your AI.
     @State private var page = 0
     /// Shows the consent screen after "Done" when a cloud provider is chosen.
     @State private var showConsent = false
@@ -31,8 +30,7 @@ struct WelcomeView: View {
             Group {
                 switch page {
                 case 0: intro
-                case 1: trial
-                case 2: aboutYou
+                case 1: aboutYou
                 default: aiChoice
                 }
             }
@@ -54,35 +52,14 @@ struct WelcomeView: View {
             Image(systemName: "lightbulb.max.fill").font(.system(size: 64)).foregroundStyle(.indigo)
                 .accessibilityHidden(true)
             Text("Welcome to IdeaScout").font(.largeTitle.bold()).multilineTextAlignment(.center)
-            Text("IdeaScout finds app ideas in your area that you can build yourself with an AI coding tool and sell for a quarter of what competitors charge, or less. A devil's advocate (a second, sceptical AI) tries to knock down every idea first, and each one comes with a starter kit to build it.")
+            Text("IdeaScout finds app ideas in your area that you can build yourself with an AI coding tool and sell for a quarter of what competitors charge, or less. A devil's advocate (a second, sceptical AI) tries to knock down every idea first, and each one comes with a starter kit to build it. IdeaScout is free; you pay your AI provider directly for what you use.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
             Spacer()
             primary("Continue") { page = 1 }
         } }
     }
 
-    /// Page 2: start the free trial (or restore a purchase).
-    private var trial: some View {
-        FillingScrollView { VStack(spacing: 18) {
-            Spacer()
-            Image(systemName: "gift").font(.system(size: 56)).foregroundStyle(.indigo).accessibilityHidden(true)
-            Text("Free for 7 days").font(.title.bold())
-            Text("Then a one-off \(store.unlockPrice) to keep finding new ideas. No subscription. Your history and saved ideas always stay readable.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            if let error = store.purchaseError {
-                Text(error).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
-            }
-            Spacer()
-            if store.access == .notStarted {
-                primary("Start free trial") { Task { await store.startTrial(); if store.access.canRefresh { page = 2 } } }
-            } else {
-                primary("Continue") { page = 2 }
-            }
-            Button("Restore purchases") { Task { await store.restore() } }.frame(minHeight: 44)
-        } }
-    }
-
-    /// Page 3: what the user is interested in and which tool they'll build with, so the first refresh fits them.
+    /// Page 2: what the user is interested in and which tool they'll build with, so the first refresh fits them.
     /// Both can be skipped ("Not sure") and changed later in Settings.
     private var aboutYou: some View {
         Form {
@@ -110,12 +87,12 @@ struct WelcomeView: View {
             }
         }
         .readableList()
-        .safeAreaInset(edge: .bottom) { pinned { primary("Continue") { typing = false; page = 3 } } }
+        .safeAreaInset(edge: .bottom) { pinned { primary("Continue") { typing = false; page = 2 } } }
         .keyboardDone($typing)
         .navigationTitle("About you")
     }
 
-    /// Page 4: set up an AI. Claude is the recommended default with numbered key steps; the others are one tap away.
+    /// Page 3: set up an AI. Claude is the recommended default with numbered key steps; the others are one tap away.
     /// "Done" asks for consent if needed; with no key it says what that means first.
     private var aiChoice: some View {
         Form {

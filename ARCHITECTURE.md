@@ -21,13 +21,13 @@ There is **no server**. Everything runs on the iPhone or iPad; AI calls go direc
 | Day view | `Views/DayView.swift` (`DigestContentView`) | That day's ideas, pain clusters, ranked trends with projects, notes |
 | **Saved** | `Views/IdeasView.swift` | Bookmarked ideas, then starred projects (notes, AI variants, prompt) |
 | **Settings** | `Views/SettingsView.swift`, `AdvancedSettingsViews.swift`, `SettingsControls.swift` | About me, interest area, what you'll build (`builder.appType`: iPhone & iPad app or web app) and the coding tool (`starterKit.tool`, limited to tools that can build that type), My pain points (`fieldNotes`), digest time; Advanced: sources, scan and ranking, AI and costs |
-| Welcome / consent | `Views/WelcomeView.swift` | First launch: intro, trial, AI choice; consent before data goes to a cloud AI |
-| Paywall / About | `Views/StoreViews.swift`, `Views/AboutView.swift` | Trial and unlock; version, privacy, source credits |
+| Welcome / consent | `Views/WelcomeView.swift` | First launch: intro, interest area and coding tool, guided AI key setup; consent before data goes to a cloud AI |
+| Support / About | `Views/StoreViews.swift`, `Views/AboutView.swift` | "Support IdeaScout" tips at the bottom of Settings (hidden when Apple supplies none); version, privacy, source credits |
 
 **iPhone and iPad:** one universal app with the same screens. iPhone is portrait-only; iPad supports every
 orientation, Split View, Slide Over and Stage Manager. `Views/ReadableWidth.swift` keeps wide windows readable:
 lists and forms get extra side space beyond a 700-point column (`readableList()`), bottom-bar buttons are capped
-at 480 points, and the welcome and paywall pages scroll when a window is short (`FillingScrollView`). On iPad the
+at 480 points, and the welcome pages scroll when a window is short (`FillingScrollView`). On iPad the
 tabs can also show as a sidebar.
 
 ## Data model (`Models/StoredModels.swift` and `Models/KillerIdea.swift`, SwiftData; value types in `Models/Values.swift`)
@@ -53,15 +53,12 @@ KillerIdea  – an AI business idea that survived the devil's advocate; updated 
 | Model per scan step | `AI/ScanStep.swift`, `AppSettings.stepClient` | Claude's "Mixed": Haiku reads, Sonnet writes, Opus judges |
 | Provider catalogue | `AI/AIProviders.swift` | Providers, models, prices, countries, API details |
 | `KillerEngine` | `AI/KillerEngine.swift` | Idea generation, devil's advocate, evidence caps |
-| `StoreManager` | `Store/StoreManager.swift` | Free trial and one-off unlock (StoreKit 2) |
+| `TipStore` | `Store/TipStore.swift` | Optional consumable tips (StoreKit 2, behind `TipShop`); the app is free |
 | `UsageTracker` | `Support/UsageTracker.swift` | Cost per call, daily limit |
 
 ## How data flows in one refresh
 ```
 Trigger: app opens (once a day), refresh button, or background refresh
-   │
-   ▼
-StoreManager: trial/unlock allows it? ── no ──▶ message, stop
    │
    ▼
 Fetch all enabled sources in parallel ──▶ remove duplicates and non-products
@@ -112,7 +109,7 @@ of demand evidence ─▶ **step 3** `reimagineBuild`: a 3-search web check of t
 - **Daily spending limit:** checked before the trend and idea steps (default $1.00).
 
 ## Testing seams
-- `DigestService.Dependencies` holds everything a refresh needs from outside (sources, AI, trial state, spending limit, consent, notifications). The app uses `.live`; unit tests pass stand-ins, so the whole refresh runs offline in `RefreshRoutineTests`.
+- `DigestService.Dependencies` holds everything a refresh needs from outside (sources, AI, spending limit, consent, notifications). The app uses `.live`; unit tests pass stand-ins, so the whole refresh runs offline in `RefreshRoutineTests`.
 - `TestMode` (Debug builds only) seals the app for UI tests: in-memory database, separate UserDefaults suite (`AppSettings.defaults`, also applied to `@AppStorage` via `.defaultAppStorage`), separate Keychain service, fake sources and a scripted AI.
 
 ## Threading

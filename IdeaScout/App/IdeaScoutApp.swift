@@ -55,9 +55,9 @@ struct IdeaScoutApp: App {
         WindowGroup {
             RootView()
                 .environment(DigestService.shared)
-                .environment(StoreManager.shared)
+                .environment(TipStore.shared)
                 .defaultAppStorage(AppSettings.defaults)   // @AppStorage uses the UI-test store in test mode
-                .task { await StoreManager.shared.load() }
+                .task { await TipStore.shared.load() }
         }
         .modelContainer(container)
         /// Each time the app goes to the background, ask iOS for the next daily refresh.

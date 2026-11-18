@@ -109,7 +109,6 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    AccessStatusRow()
                     NavigationLink { AboutView() } label: { Text("About & privacy") }
                 }
 
@@ -124,6 +123,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Advanced")
                 }
+                SupportSection()
             }
             .readableList()
             .navigationTitle("Settings")

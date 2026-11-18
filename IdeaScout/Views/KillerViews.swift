@@ -159,7 +159,7 @@ struct LeaderboardView: View {
         NavigationStack {
             List {
                 Section { TodayStatus(today: digests.first { Calendar.current.isDateInToday($0.day) }, ideas: ideas) }
-                if service.isRefreshing { LiveRefreshSections(live: service.live) }
+                RefreshChecklist(live: service.live, isRefreshing: service.isRefreshing)
                 if !service.isRefreshing && ranked.isEmpty {
                     let today = digests.first { Calendar.current.isDateInToday($0.day) }
                     Section {

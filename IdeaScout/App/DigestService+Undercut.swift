@@ -4,7 +4,7 @@
 // star reviews from Apple's public review feed when an App Store link was given) and explain it; 2) offer ways to
 // reimagine it; 3) for the way the user picks, check that group on the web, write one idea, have the devil's advocate
 // judge it and check prices. A backed idea is saved; a rejected one is shown and saved only if the user asks. Same
-// rules as a starter kit: access, consent, the daily spending limit before every paid call. Needs Claude.
+// rules as a starter kit: consent, the daily spending limit before every paid call. Needs Claude.
 
 import Foundation
 import SwiftData
@@ -13,8 +13,6 @@ import SwiftData
 enum UndercutError: LocalizedError, Equatable {
     /// A step is already running; a second tap would pay twice.
     case busy
-    /// The trial hasn't started, or has ended without the unlock.
-    case locked(trialStarted: Bool)
     /// Claude isn't set up (or agreed to); the research needs its web search.
     case needsClaude
     /// The link had no app name and none was typed.
@@ -27,9 +25,6 @@ enum UndercutError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .busy: "IdeaScout is already working on an app."
-        case .locked(let started): started
-            ? "Your free trial has ended. Unlock IdeaScout to reimagine apps."
-            : "Start your free 7-day trial to reimagine apps."
         case .needsClaude: "Reimagining an app needs Claude (it searches the web), with its API key and your OK to "
             + "share with Anthropic. See Settings → Advanced → AI & costs."
         case .noName: "Type the app's name first."
@@ -48,15 +43,13 @@ struct ReimagineBuilt: Sendable {
 
 @MainActor
 extension DigestService {
-    /// Checks access and Claude, and marks a step as running. Call `defer { undercutStep = "" }` after it.
+    /// Checks Claude and the spending limit, and marks a step as running. Call `defer { undercutStep = "" }` after it.
     private func startReimagineStep(_ first: String) async throws -> (writer: LLMSummarizer, searcher: any WebSearchClient & LLMClient) {
         // Money: set before the first await, so a second tap can't start a second paid run.
         guard undercutStep.isEmpty else { throw UndercutError.busy }
         undercutStep = first
         // If a check fails, clear the step here: the caller's `defer` only starts once this returns.
         do {
-            let access = await dependencies.access()
-            guard access.canRefresh else { throw UndercutError.locked(trialStarted: access != .notStarted) }
             guard let llm = dependencies.makeSummarizer() as? LLMSummarizer, llm.client.provider == .claude,
                   let searcher = dependencies.priceChecker() else { throw UndercutError.needsClaude }
             if dependencies.isOverDailyCap() { throw SummarizerError.overDailyLimit }

@@ -213,7 +213,7 @@ struct FiveTestsMergeTests {
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let service = DigestService(dependencies: .init(
             makeFetchers: { [] }, makeSummarizer: { KeywordSummarizer(topics: []) },
-            freeSummarizer: { KeywordSummarizer(topics: []) }, access: { .unlocked }, isOverDailyCap: { false },
+            freeSummarizer: { KeywordSummarizer(topics: []) }, isOverDailyCap: { false },
             needsConsent: { false }, notify: { _, _ in }))
         let older = KillerIdea(key: "invoicechaser", title: "InvoiceChaser")
         older.improvementJSON = "{}"; older.originalVersionJSON = "{}"; older.improvedAt = .now

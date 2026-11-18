@@ -150,20 +150,19 @@ struct IdeaImproverRuleTests {
     }
 }
 
-/// Improving through the service, with stand-ins for the trial, AI and spending limit.
+/// Improving through the service, with stand-ins for the AI and spending limit.
 @MainActor
 struct ImproveServiceTests {
-    enum Block: CaseIterable { case trialEnded, trialNotStarted, noCloudAI, overLimit }
+    enum Block: CaseIterable { case noCloudAI, overLimit }
 
-    private func setUp(llm: ScriptedLLM?, access: StoreManager.Access = .unlocked,
-                       overCap: Bool = false) throws -> (DigestService, KillerIdea) {
+    private func setUp(llm: ScriptedLLM?, overCap: Bool = false) throws -> (DigestService, KillerIdea) {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let service = DigestService(dependencies: .init(
             makeFetchers: { [] },
             makeSummarizer: { llm.map { LLMSummarizer(client: $0) as any Summarizer } ?? KeywordSummarizer(topics: []) },
             freeSummarizer: { KeywordSummarizer(topics: []) },
-            access: { access }, isOverDailyCap: { overCap }, needsConsent: { false }, notify: { _, _ in }))
+            isOverDailyCap: { overCap }, needsConsent: { false }, notify: { _, _ in }))
         service.container = container
         let idea = KillerIdea(key: "invoicechaser", title: "InvoiceChaser")
         version(3).apply(to: idea)
@@ -187,15 +186,12 @@ struct ImproveServiceTests {
 
     @Test(arguments: Block.allCases)
     func blockedBeforeAnyPaidCall(block: Block) async throws {
-        let access: StoreManager.Access = block == .trialEnded ? .expired : block == .trialNotStarted ? .notStarted : .unlocked
         let expected: Error = switch block {
-        case .trialEnded: ImproveError.locked(trialStarted: true)
-        case .trialNotStarted: ImproveError.locked(trialStarted: false)
         case .noCloudAI: ImproveError.needsCloudAI
         case .overLimit: SummarizerError.overDailyLimit
         }
         // The scripted AI has no replies, so reaching it would throw a different error.
-        let (service, idea) = try setUp(llm: block == .noCloudAI ? nil : ScriptedLLM(replies: [:]), access: access,
+        let (service, idea) = try setUp(llm: block == .noCloudAI ? nil : ScriptedLLM(replies: [:]),
                                         overCap: block == .overLimit)
         await #expect { try await service.improve(idea) } throws: { $0.localizedDescription == expected.localizedDescription }
         #expect(idea.improvement == nil && service.improvingIdea == nil)

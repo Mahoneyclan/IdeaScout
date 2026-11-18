@@ -96,7 +96,7 @@ struct UndercutServiceTests {
         let reviewsFeed = Data(#"{"feed":{"entry":[{"id":{"label":"r1"},"title":{"label":"Can't share"},"content":{"label":"No family sharing."},"im:rating":{"label":"1"},"updated":{"label":"2026-11-10T10:00:00-07:00"}}]}}"#.utf8)
         var deps = DigestService.Dependencies(
             makeFetchers: { [] }, makeSummarizer: { LLMSummarizer(client: llm) },
-            freeSummarizer: { KeywordSummarizer(topics: []) }, access: { .unlocked }, isOverDailyCap: { false },
+            freeSummarizer: { KeywordSummarizer(topics: []) }, isOverDailyCap: { false },
             needsConsent: { false }, notify: { _, _ in }, priceChecker: { claude ? searcher as (any WebSearchClient & LLMClient) : nil })
         deps.httpGet = { url in
             #expect(url.absoluteString.hasPrefix("https://itunes.apple.com/au/rss/customerreviews/"), "only Apple's review feed")

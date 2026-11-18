@@ -15,13 +15,11 @@ struct TodayStatus: View {
 
     var body: some View {
         if service.isRefreshing {
+            // The checklist below is the progress; this row just says a refresh is on (same step names).
             let step = service.stage?.rawValue ?? 1
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Step \(step) of \(DigestService.Stage.allCases.count) · \(service.stage?.label ?? "Starting")…")
-                    .font(.subheadline)
-                ProgressView(value: Double(step), total: Double(DigestService.Stage.allCases.count))
-                Text("Takes a few minutes. Keep the app open.").font(.caption).foregroundStyle(.secondary)
-            }
+            Label("Refreshing · step \(step) of 5: " + LiveRefresh.stepNames[step - 1], systemImage: "arrow.clockwise")
+                .font(.subheadline)
+                .frame(minHeight: 44, alignment: .leading)
         } else if let today {
             let found = KillerIdea.seen(on: today.day, in: ideas).count
             NavigationLink {
@@ -55,8 +53,6 @@ struct TodayStatus: View {
 /// is easy to make by accident and a refresh costs money (owner, 17 Nov 2026).
 struct PullToRefresh: ViewModifier {
     @Environment(DigestService.self) private var service
-    @Environment(StoreManager.self) private var store
-    @State private var showPaywall = false
     @State private var showConsent = false
     /// Shows the "Find today's ideas?" pop-up.
     @State private var confirm = false
@@ -86,7 +82,6 @@ struct PullToRefresh: ViewModifier {
                         .disabled(service.isRefreshing)
                 }
             }
-            .sheet(isPresented: $showPaywall) { PaywallView() }
             .sheet(isPresented: $showConsent) {
                 ConsentView(provider: AppSettings.provider) { agreed in if agreed { confirm = true } }
             }
@@ -103,11 +98,10 @@ struct PullToRefresh: ViewModifier {
             }
     }
 
-    /// Asks first: the paywall after the trial, consent before a cloud AI, otherwise the cost pop-up.
+    /// Asks first: consent before a cloud AI, otherwise the cost pop-up.
     private func request() {
         guard !service.isRefreshing else { return }
-        if !store.access.canRefresh { showPaywall = true }
-        else if AppSettings.needsConsent { showConsent = true }
+        if AppSettings.needsConsent { showConsent = true }
         else { confirm = true }
     }
 }

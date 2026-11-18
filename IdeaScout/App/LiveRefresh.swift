@@ -1,11 +1,13 @@
 // LiveRefresh.swift
 // What a running refresh has found so far, shown on the Ideas tab step by step (owner, 16 Nov 2026) instead of
 // only when every step is done: the items read per source, the day's trends and pain clusters, the draft ideas, and
-// the devil's advocate's verdict on each. Held in memory only; the saved digest and ideas are the lasting record.
+// the devil's advocate's verdict on each, and each step's state. Held in memory only; the saved digest and ideas are
+// the lasting record.
 
 import Foundation
 
-/// A refresh's results so far. Filled in by `DigestService` as each step finishes; reset when a refresh starts.
+/// A refresh's results so far. Filled in by `DigestService` as each step finishes; kept after it ends (shown folded
+/// as "How it went") until the next refresh starts.
 struct LiveRefresh: Equatable, Sendable {
     /// How many items one source gave to the AI.
     struct SourceCount: Equatable, Sendable {
@@ -41,6 +43,12 @@ struct LiveRefresh: Equatable, Sendable {
     var trends: [String] = []
     /// Draft ideas, once the idea step has proposed them.
     var drafts: [Draft] = []
+    /// Each step's state, steps 1–5 in order (see LiveRefresh+Steps.swift).
+    var steps: [StepState] = Array(repeating: .waiting, count: 5)
+    /// When the refresh started; `nil` before any refresh this session.
+    var startedAt: Date?
+    /// When it ended (finished or stopped); `nil` while it runs.
+    var finishedAt: Date?
 
     /// All items read.
     var itemCount: Int { sources.reduce(0) { $0 + $1.count } }

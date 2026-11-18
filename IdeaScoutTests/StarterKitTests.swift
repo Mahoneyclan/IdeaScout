@@ -1,6 +1,6 @@
 // StarterKitTests.swift
 // The starter kit: checking and cleaning the AI's reply, the schema and instructions agreeing, the shared text for
-// each coding tool, the cost estimate, and the rules for making one (trial, cloud AI, spending limit, one at a
+// each coding tool, the cost estimate, and the rules for making one (cloud AI, spending limit, one at a
 // time, no lost kit on failure). Offline: the AI is scripted and the database is in memory.
 
 import Foundation
@@ -87,21 +87,20 @@ struct StarterKitSharingTests {
     }
 }
 
-/// Making a kit through the service, with stand-ins for the trial, AI and spending limit.
+/// Making a kit through the service, with stand-ins for the AI and spending limit.
 @MainActor
 struct StarterKitRuleTests {
     /// What blocks a kit before any AI call.
-    enum Block: CaseIterable { case trialEnded, trialNotStarted, noCloudAI, overLimit }
+    enum Block: CaseIterable { case noCloudAI, overLimit }
 
-    private func setUp(llm: ScriptedLLM?, access: StoreManager.Access = .unlocked,
-                       overCap: Bool = false) throws -> (DigestService, KillerIdea) {
+    private func setUp(llm: ScriptedLLM?, overCap: Bool = false) throws -> (DigestService, KillerIdea) {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let service = DigestService(dependencies: .init(
             makeFetchers: { [] },
             makeSummarizer: { llm.map { LLMSummarizer(client: $0) as any Summarizer } ?? KeywordSummarizer(topics: []) },
             freeSummarizer: { KeywordSummarizer(topics: []) },
-            access: { access }, isOverDailyCap: { overCap }, needsConsent: { false }, notify: { _, _ in }))
+            isOverDailyCap: { overCap }, needsConsent: { false }, notify: { _, _ in }))
         service.container = container
         let idea = KillerIdea(key: "invoicechaser", title: "InvoiceChaser")
         container.mainContext.insert(idea)
@@ -121,18 +120,11 @@ struct StarterKitRuleTests {
     @Test(arguments: Block.allCases)
     func blockedBeforeAnyPaidCall(block: Block) async throws {
         let llm = block == .noCloudAI ? nil : ScriptedLLM(replies: [:])
-        let access: StoreManager.Access = switch block {
-        case .trialEnded: .expired
-        case .trialNotStarted: .notStarted
-        default: .unlocked
-        }
         let expected: Error = switch block {
-        case .trialEnded: StarterKitError.locked(trialStarted: true)
-        case .trialNotStarted: StarterKitError.locked(trialStarted: false)
         case .noCloudAI: StarterKitError.needsCloudAI
         case .overLimit: SummarizerError.overDailyLimit
         }
-        let (service, idea) = try setUp(llm: llm, access: access, overCap: block == .overLimit)
+        let (service, idea) = try setUp(llm: llm, overCap: block == .overLimit)
         await #expect { try await service.makeStarterKit(for: idea) } throws: {
             $0.localizedDescription == expected.localizedDescription
         }

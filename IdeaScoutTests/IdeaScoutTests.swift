@@ -1037,33 +1037,22 @@ struct SavedIdeaTests {
     }
 }
 
-/// Trial and unlock rules, consent defaults and StoreKit product IDs.
+/// Consent defaults, and the tips (owner, 17 Nov 2026): IDs match the StoreKit test file, smallest first.
 struct StoreAndConsentTests {
-    @Test func trialLastsSevenDaysThenNeedsTheUnlock() {
-        let start = Date(timeIntervalSince1970: 1_000_000)
-        #expect(StoreManager.access(unlocked: false, trialStart: nil, now: start) == .notStarted)
-        #expect(StoreManager.access(unlocked: false, trialStart: start, now: start) == .trial(daysLeft: 7))
-        #expect(StoreManager.access(unlocked: false, trialStart: start, now: start.addingTimeInterval(6.5 * 86_400)) == .trial(daysLeft: 1))
-        #expect(StoreManager.access(unlocked: false, trialStart: start, now: start.addingTimeInterval(7 * 86_400)) == .expired)
-        #expect(StoreManager.access(unlocked: true, trialStart: start, now: start.addingTimeInterval(30 * 86_400)) == .unlocked)
-        #expect(!StoreManager.Access.expired.canRefresh && !StoreManager.Access.notStarted.canRefresh)
-        #expect(StoreManager.Access.trial(daysLeft: 3).canRefresh && StoreManager.Access.unlocked.canRefresh)
-    }
-
     @Test func appleNeverNeedsConsent() {
         #expect(AppSettings.hasConsent(.apple))
         #expect(AppSettings.Keys.consent(.kimi) != AppSettings.Keys.consent(.claude))
     }
 
-    @Test func storeProductIDsMatchTheTestFile() throws {
+    @Test func tipIDsMatchTheTestFile() throws {
         // The StoreKit test file (bundled into the test target) must offer the same product IDs the app asks for,
-        // and those must match App Store Connect (store/LISTING.md).
-        #expect(StoreManager.trialID == "com.mahoney.IdeaScout.trial7")
-        #expect(StoreManager.unlockID == "com.mahoney.IdeaScout.unlock")
+        // and those must match App Store Connect (store/LISTING.md). They're permanent.
+        #expect(TipStore.catalogue.map(\.id) == ["com.mahoney.IdeaScout.tip.small", "com.mahoney.IdeaScout.tip.medium",
+                                                   "com.mahoney.IdeaScout.tip.large"])
         let bundle = try #require(Bundle.allBundles.first { $0.bundlePath.hasSuffix(".xctest") })
         let url = try #require(bundle.url(forResource: "IdeaScout", withExtension: "storekit"))
         let text = String(decoding: try Data(contentsOf: url), as: UTF8.self)
-        #expect(text.contains(StoreManager.trialID) && text.contains(StoreManager.unlockID))
+        #expect(TipStore.catalogue.allSatisfy { text.contains($0.id) } && !text.contains("trial7"))
     }
 }
 
@@ -1259,7 +1248,7 @@ struct RefreshRoutineTests {
     }
     final class Box { var count = 0 }
 
-    private func harness(llm: ScriptedLLM?, access: StoreManager.Access = .unlocked, overCap: Bool = false,
+    private func harness(llm: ScriptedLLM?, overCap: Bool = false,
                          needsConsent: Bool = false, steps: [ScanStep: ScriptedLLM] = [:],
                          priceChecker: ScriptedPriceChecker? = nil) throws -> Harness {
         let container = try ModelContainer(for: Digest.self, Theme.self, Item.self, Idea.self, KillerIdea.self,
@@ -1274,7 +1263,6 @@ struct RefreshRoutineTests {
             makeFetchers: { fetchers },
             makeSummarizer: { llm.map { LLMSummarizer(client: $0) as any Summarizer } ?? KeywordSummarizer(topics: ["invoice"]) },
             freeSummarizer: { KeywordSummarizer(topics: ["invoice"]) },
-            access: { access },
             isOverDailyCap: { overCap },
             needsConsent: { needsConsent },
             notify: { _, _ in box.count += 1 },
@@ -1303,6 +1291,9 @@ struct RefreshRoutineTests {
         #expect(h.service.live.itemCount > 0 && !h.service.live.sources.isEmpty, "step 1: items read per source")
         #expect(h.service.live.drafts.map(\.title) == ["InvoiceChaser"])
         #expect(h.service.live.drafts.first?.status == .backed, "steps 3-4: the draft shows the devil's advocate's verdict")
+        // The checklist (owner, 18 Nov 2026): every step done, kept after the refresh with a summary.
+        #expect((1...5).allSatisfy { if case .done = h.service.live.state($0) { true } else { false } })
+        #expect(h.service.live.finishedAt != nil && h.service.live.summary().hasPrefix("Finished at"))
 
         let failing = try harness(llm: ScriptedLLM(replies: replies), priceChecker: ScriptedPriceChecker(
             search: .failure(LLMHTTPError(status: 529, retryAfter: nil, detail: "")), formatted: formatted))
@@ -1404,6 +1395,10 @@ struct RefreshRoutineTests {
         let parts = digest.warnings.map(DigestWarning.parts)
         #expect(parts.contains { $0.message.contains("busy") && $0.details?.contains("req_123") == true })
         #expect(digest.warnings.contains { $0.contains("Killer ideas skipped") })
+        // The checklist says what happened: keywords used, the idea steps skipped with the reason.
+        guard case .done(let line) = h.service.live.state(2) else { Issue.record("step 2 should be done"); return }
+        #expect(line.contains("grouped by keyword"))
+        #expect(h.service.live.state(3) == .skipped("the Claude summary failed") && h.service.live.state(5) == .skipped("the Claude summary failed"))
     }
 
     @Test func aWeakerResultNeverReplacesTodaysBetterDigest() async throws {
@@ -1415,13 +1410,6 @@ struct RefreshRoutineTests {
         #expect(all.count == 1 && all.first?.summarizer == "Claude")
         #expect(all.first?.warnings.contains { $0.contains("Kept the earlier Claude digest") } == true)
         #expect(h.service.lastError?.contains("Kept the earlier") == true)
-    }
-
-    @Test func expiredTrialSavesNothingAndExplainsWhy() async throws {
-        let h = try harness(llm: ScriptedLLM(replies: ["Trends": .success(Self.trends)]), access: .expired)
-        await h.service.refresh(force: true)
-        #expect(try digests(h).isEmpty)
-        #expect(h.service.lastError?.contains("trial has ended") == true)
     }
 
     @Test func spendingLimitSwitchesToTheFreeOptionAndSkipsIdeas() async throws {

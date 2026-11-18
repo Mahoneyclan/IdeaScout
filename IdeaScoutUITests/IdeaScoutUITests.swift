@@ -40,8 +40,6 @@ final class IdeaScoutUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.staticTexts["Welcome to IdeaScout"].waitForExistence(timeout: 10))
         app.buttons["Continue"].tap()
-        XCTAssertTrue(app.staticTexts["Free for 7 days"].waitForExistence(timeout: 5))
-        app.buttons["Continue"].tap()
         XCTAssertTrue(app.navigationBars["About you"].waitForExistence(timeout: 5), "should ask about the user's area and tool")
         app.buttons["Continue"].tap()
         XCTAssertTrue(element(app, containing: "Paste it here").waitForExistence(timeout: 5), "key setup should be guided")
@@ -58,9 +56,9 @@ final class IdeaScoutUITests: XCTestCase {
     /// competitor and how the price compares with the 25% cap; refreshing asks first in a pop-up (it costs money).
     func testRefreshShowsTheIdeaAndASecondRefreshAsksFirst() {
         let app = launch("-ui-skip-welcome")
-        let idea = element(app, containing: "InvoiceChaser")
+        let idea = element(app, containing: "NudgeBill")
         XCTAssertTrue(idea.waitForExistence(timeout: 20))
-        XCTAssertTrue(element(app, containing: "Undercuts Chaser").exists, "the card should say which competitor it undercuts")
+        XCTAssertTrue(element(app, containing: "Undercuts DunningDesk").exists, "the card should say which competitor it undercuts")
         idea.tap()
         let payback = element(app, containing: "Sales cover the build cost")
         for _ in 0..<5 where !payback.exists { app.swipeUp() }

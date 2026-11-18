@@ -1,6 +1,6 @@
 // DigestService+StarterKit.swift
 // Makes a starter kit for one idea on demand: one paid cloud AI call, never part of a refresh. Follows the same
-// rules as a refresh: the trial or unlock, consent, a cloud AI with a key, and the daily spending limit.
+// rules as a refresh: consent, a cloud AI with a key, and the daily spending limit.
 
 import Foundation
 import SwiftData
@@ -9,17 +9,12 @@ import SwiftData
 enum StarterKitError: LocalizedError, Equatable {
     /// A kit is already being made; a second tap would pay twice.
     case busy
-    /// The trial hasn't started, or has ended without the unlock.
-    case locked(trialStarted: Bool)
     /// No cloud AI is set up (or agreed to); Apple's on-device model and keyword mode can't make kits.
     case needsCloudAI
 
     var errorDescription: String? {
         switch self {
         case .busy: "A starter kit is already being made."
-        case .locked(let started): started
-            ? "Your free trial has ended. Unlock IdeaScout to make new starter kits."
-            : "Start your free 7-day trial to make starter kits."
         case .needsCloudAI: "Starter kits need a cloud AI (for example Claude or ChatGPT) with its API key, and your OK "
             + "to share with it. See Settings → Advanced → AI & costs."
         }
@@ -38,8 +33,6 @@ extension DigestService {
         makingStarterKitFor = idea.key
         defer { makingStarterKitFor = nil }
 
-        let access = await dependencies.access()
-        guard access.canRefresh else { throw StarterKitError.locked(trialStarted: access != .notStarted) }
         guard let llm = dependencies.makeSummarizer() as? LLMSummarizer else { throw StarterKitError.needsCloudAI }
         if dependencies.isOverDailyCap() { throw SummarizerError.overDailyLimit }
 

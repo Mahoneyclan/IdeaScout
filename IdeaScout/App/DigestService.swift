@@ -1,6 +1,5 @@
 // DigestService.swift
 // Runs a refresh and saves the result. The steps, in order:
-//  1. Check the trial/unlock (StoreManager); stop with a message if refreshes aren't allowed.
 //  2. Fetch every enabled source in parallel (the files in Sources/); remove duplicates and noise.
 //  3. Choose up to N items by signal: 40% demand, 40% supply, 20% timing (selectBySignal).
 //  4. Pick the AI (AppSettings.makeSummarizer), respecting consent and the daily spending limit.
@@ -26,7 +25,7 @@ final class DigestService {
     static let shared = DigestService(dependencies: TestMode.isUITesting ? TestMode.dependencies : .live)
 
     /// Everything a refresh depends on outside this class. The app uses `.live`; tests pass stand-ins
-    /// (fake sources, a scripted AI, a fixed trial state) so every refresh rule can be tested offline.
+    /// (fake sources, a scripted AI) so every refresh rule can be tested offline.
     struct Dependencies {
         /// The sources to fetch, in priority order (earlier sources keep their label on duplicates).
         var makeFetchers: @MainActor () -> [any ItemFetcher]
@@ -34,8 +33,6 @@ final class DigestService {
         var makeSummarizer: @MainActor () -> any Summarizer
         /// The free AI to switch to when the daily spending limit is reached.
         var freeSummarizer: @MainActor () -> any Summarizer
-        /// The current trial/unlock state.
-        var access: @MainActor () async -> StoreManager.Access
         /// Whether today's AI spending has reached the limit.
         var isOverDailyCap: @MainActor () -> Bool
         /// Whether a cloud provider is chosen with a key but no consent.
@@ -56,10 +53,6 @@ final class DigestService {
             freeSummarizer: {
                 AppleSummarizer.isAvailable ? AppleSummarizer() as any Summarizer : KeywordSummarizer(topics: AppSettings.topics)
             },
-            access: {
-                await StoreManager.shared.ensureLoaded()
-                return StoreManager.shared.access
-            },
             isOverDailyCap: { AppSettings.isOverDailyCap },
             needsConsent: { AppSettings.needsConsent },
             notify: { themes, items in await Notifier.digestReady(themes: themes, items: items) },
@@ -67,7 +60,7 @@ final class DigestService {
             priceChecker: { AppSettings.priceCheckClient() })
     }
 
-    /// What this instance uses for sources, AI, trial state and notifications.
+    /// What this instance uses for sources, AI and notifications.
     @ObservationIgnored let dependencies: Dependencies
 
     /// Creates the service. The app uses one shared instance; tests create their own.
@@ -85,22 +78,12 @@ final class DigestService {
     /// What the running (or last) refresh has found so far, shown step by step on the Ideas tab.
     private(set) var live = LiveRefresh()
 
-    /// Refresh steps shown as "Step n of 4". Raw values are the step numbers.
+    /// The five refresh steps; raw values are the step numbers in the checklist (names in LiveRefresh+Steps.swift).
     enum Stage: Int, CaseIterable {
         /// Steps 1–5: fetch sources, trend step, idea step (pass 1), devil's advocate (pass 2), web price check.
         case fetching = 1, trends, ideas, critique, priceCheck
-        /// Plain-English step name.
-        var label: String {
-            switch self {
-            case .fetching: "Fetching sources"
-            case .trends: "Reading items and finding trends"
-            case .ideas: "Generating ideas"
-            case .critique: "Devil's advocate"
-            case .priceCheck: "Checking competitor prices on the web"
-            }
-        }
     }
-    /// Why the last refresh didn't produce a new digest (trial ended, nothing found, kept an earlier
+    /// Why the last refresh didn't produce a new digest (nothing found, kept an earlier
     /// digest…), shown on the Ideas tab. Cleared when a refresh starts.
     var lastError: String?
     /// The key of the idea whose starter kit is being made, or `nil`. Only one kit is made at a time.
@@ -157,31 +140,27 @@ final class DigestService {
             return
         }
 
-        // After the free trial, new refreshes need the one-off unlock. Saved history stays readable.
-        let access = await dependencies.access()
-        guard access.canRefresh else {
-            lastError = access == .notStarted
-                ? "Start your free 7-day trial to find new ideas."
-                : "Your free trial has ended. Unlock IdeaScout to keep finding new ideas."
-            return
-        }
-
         isRefreshing = true
-        stage = .fetching
-        live = LiveRefresh()
+        live = LiveRefresh(startedAt: .now)
+        begin(.fetching)
         lastError = nil
         CloudSync.noteScanStarted()
-        defer { isRefreshing = false; stage = nil }
+        // The checklist stays on screen after this, folded as "How it went", until the next refresh.
+        defer { isRefreshing = false; stage = nil; live.finish() }
 
         let (items, fetchWarnings) = await collectItems()
         if Task.isCancelled { return }
         guard !items.isEmpty else {
             lastError = fetchWarnings.isEmpty ? "No new projects found. Try again later." : fetchWarnings.joined(separator: "\n")
+            live.set(1, .failed(fetchWarnings.isEmpty ? "nothing new was found. Try again later."
+                                                     : "couldn't read any sources. Check your internet and try again."))
+            live.skip(from: 2, "nothing to work with")
             return
         }
         live.sources = LiveRefresh.counts(items)
+        live.set(1, .done(LiveRefresh.sourcesLine(live.sources)))
 
-        stage = .trends
+        begin(.trends)
         guard let trends = await findTrends(in: items, warnings: fetchWarnings) else { return }   // cancelled
 
         // Never replace a better digest from earlier today (e.g. cloud AI) with a weaker one (e.g. keywords).
@@ -193,6 +172,8 @@ final class DigestService {
             kept.warnings.append(note)
             context.saveOrReport("the refresh note")
             lastError = note
+            live.set(2, .failed("the AI didn't answer, so the earlier refresh was kept"))
+            live.skip(from: 3, "the earlier refresh was kept")
             return
         }
 
@@ -202,6 +183,8 @@ final class DigestService {
         let digest = saveDigest(builtThemes, day: today, summarizer: trends.summarizer.name, warnings: trends.warnings, in: context)
         live.painClusters = builtThemes.filter(\.isPainCluster).map(\.title)
         live.trends = builtThemes.filter { !$0.isPainCluster && !$0.isCatchAll }.map(\.title)
+        live.set(2, .done(LiveRefresh.trendsLine(complaints: live.painClusters.count, trends: live.trends.count,
+                                                 byKeyword: trends.summarizer is KeywordSummarizer)))
 
         await addIdeas(to: digest, trends: trends, themes: builtThemes, context: context)
         if let message = context.saveOrReport("today's ideas") { lastError = message }
@@ -330,30 +313,50 @@ final class DigestService {
             } else if !trends.hadCloudAI {
                 digest.warnings.append("Killer ideas need a cloud AI (e.g. Claude or ChatGPT): choose one and add its API key in Settings → AI & costs.")
             }
+            live.skip(from: 3, trends.hadCloudAI ? (trends.killerNote.map(Self.plainReason) ?? "the AI wasn't available")
+                                                 : "ideas need a cloud AI. Set one up in Settings")
             return
         }
         if dependencies.isOverDailyCap() {
             digest.warnings.append("Killer ideas skipped: today's AI spending limit (\(Self.capText)) was reached during the trend step.")
+            live.skip(from: 3, "today's spending limit is reached")
             return
         }
         do {
             let leaderboard = topKillerIdeas(context: context, limit: 10).map(Self.leaderboardLine)
-            stage = .ideas
-            // `onCritique` is called from the engine off the main actor; it hops back to update `stage` and show the
-            // draft ideas, which drive the progress row ("Step … · Devil's advocate") and the live results.
+            begin(.ideas)
+            // `onCritique` is called from the engine off the main actor; it hops back to finish step 3 with the draft
+            // ideas and start step 4 in the checklist.
             let service = self
             let writer = dependencies.stepClient(.writing).map { LLMSummarizer(client: $0) } ?? llm
             let results = try await KillerEngine(llm: writer, judge: dependencies.stepClient(.judging), onCritique: { drafts in
-                await MainActor.run { service.stage = .critique; service.live.drafts = LiveRefresh.drafts(drafts) }
+                await MainActor.run {
+                    service.live.drafts = LiveRefresh.drafts(drafts)
+                    service.live.set(3, .done(LiveRefresh.ideasLine(service.live.drafts)))
+                    service.begin(.critique)
+                }
             }).run(
                 .init(themes: builtThemes, items: trends.batch, aboutMe: AppSettings.aboutMe, leaderboard: leaderboard,
                       interestArea: AppSettings.interestArea, tool: AppSettings.builderTool, appType: AppSettings.appType,
                       painClusters: builtThemes.filter(\.isPainCluster).map {
                           "\($0.title) (buyer: \($0.buyer); today: \($0.workaround); pays: \($0.paySignals); \($0.items.count) items)"
                       }))
-            live.drafts = LiveRefresh.judged(live.drafts, results: results)
-            let checked = await checkPrices(results, onStart: { service.stage = .priceCheck })
+            if live.drafts.isEmpty {   // the idea step proposed nothing, so the devil's advocate never ran
+                live.set(3, .done(LiveRefresh.ideasLine([])))
+                live.skip(from: 4, "no ideas to check")
+            } else {
+                live.drafts = LiveRefresh.judged(live.drafts, results: results)
+                live.set(4, .done(LiveRefresh.verdictLine(live.drafts)))
+            }
+            let checked = await checkPrices(results, onStart: { service.begin(.priceCheck) })
             if let warning = checked.warning { digest.warnings.append(warning) }
+            switch live.state(5) {
+            case .waiting: live.set(5, .skipped(results.isEmpty ? "no ideas to check" : "only Claude can search the web"))
+            case .running:
+                live.set(5, checked.warning == nil ? .done("Checked prices for \(results.count) idea\(results.count == 1 ? "" : "s")")
+                                                   : .failed("some prices weren't checked"))
+            default: break
+            }
             mergeKillerIdeas(checked.results, items: trends.batch, context: context)
             if results.isEmpty {
                 digest.warnings.append("The devil's advocate rejected every idea today.")
@@ -364,8 +367,28 @@ final class DigestService {
             if !(Self.isCancellation(error) || Task.isCancelled) {
                 let failure = DigestWarning.describe(error)
                 digest.warnings.append(DigestWarning.make("Killer ideas failed: \(failure.message)", details: failure.details))
+                if let step = live.runningStep {
+                    live.set(step, .failed(failure.message))
+                    live.skip(from: step + 1, "an earlier step didn't work")
+                }
             }
         }
+    }
+
+    /// Starts a refresh step: the progress `stage` and the checklist's running step move together.
+    private func begin(_ next: Stage) {
+        stage = next
+        live.set(next.rawValue, .running)
+    }
+
+    /// A digest note such as "Killer ideas skipped: daily spending limit reached." as a short reason for the checklist.
+    nonisolated static func plainReason(_ note: String) -> String {
+        var text = note
+        for prefix in ["Killer ideas skipped: ", "Killer ideas skipped because "] where text.hasPrefix(prefix) {
+            text = String(text.dropFirst(prefix.count))
+        }
+        while text.hasSuffix(".") { text.removeLast() }
+        return text.prefix(1).lowercased() + text.dropFirst()
     }
 
     /// The daily spending limit as currency text, for warnings.

@@ -1,6 +1,6 @@
 // DigestService+Improve.swift
 // "Improve this idea" on demand: a paid re-score of the original, then up to three rounds of a paid rewrite and a
-// paid devil's-advocate review, never part of a refresh. Same rules as a starter kit: the trial or unlock, a cloud
+// paid devil's-advocate review, never part of a refresh. Same rules as a starter kit: a cloud
 // AI with a key and consent, the daily spending limit. The idea itself only changes when the user keeps a version; undo puts the original back.
 
 import Foundation
@@ -10,17 +10,12 @@ import SwiftData
 enum ImproveError: LocalizedError, Equatable {
     /// An improvement is already running; a second tap would pay twice.
     case busy
-    /// The trial hasn't started, or has ended without the unlock.
-    case locked(trialStarted: Bool)
     /// No cloud AI is set up (or agreed to).
     case needsCloudAI
 
     var errorDescription: String? {
         switch self {
         case .busy: "An idea is already being improved."
-        case .locked(let started): started
-            ? "Your free trial has ended. Unlock IdeaScout to improve ideas."
-            : "Start your free 7-day trial to improve ideas."
         case .needsCloudAI: "Improving an idea needs a cloud AI (for example Claude or ChatGPT) with its API key, and "
             + "your OK to share with it. See Settings → Advanced → AI & costs."
         }
@@ -40,8 +35,6 @@ extension DigestService {
         improvingIdea = idea.key
         defer { improvingIdea = nil; improveStep = "" }
 
-        let access = await dependencies.access()
-        guard access.canRefresh else { throw ImproveError.locked(trialStarted: access != .notStarted) }
         guard let llm = dependencies.makeSummarizer() as? LLMSummarizer else { throw ImproveError.needsCloudAI }
         if dependencies.isOverDailyCap() { throw SummarizerError.overDailyLimit }
 

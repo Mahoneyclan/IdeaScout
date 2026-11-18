@@ -1,7 +1,7 @@
 // TestMode.swift
 // A sealed mode for automated screen (UI) tests, available only in Debug builds. Started by launch
 // arguments from IdeaScoutUITests. It keeps tests away from the owner's real data and from the network:
-// an in-memory database, a separate settings store and Keychain area, fixed trial state, fake sources
+// an in-memory database, a separate settings store and Keychain area, fake sources
 // and a scripted AI. Release builds compile `isUITesting` to `false` and leave out the fake sources,
 // the scripted AI and the dummy key, so none of this can be reached or found in the App Store build.
 
@@ -21,8 +21,8 @@ enum TestMode {
     enum Argument {
         /// Skip the welcome screens, with a Claude key and consent already set.
         static let skipWelcome = "-ui-skip-welcome"
-        /// Start with the free trial already over.
-        static let trialExpired = "-ui-trial-expired"
+        /// App Store screenshots: sample tips, and a second refresh that pauses so its progress can be captured.
+        static let screenshots = "-ui-screenshots"
     }
 
     /// Whether the app was launched with `argument`.
@@ -51,16 +51,19 @@ enum TestMode {
             AppSettings.setConsent(.claude, true)
             Keychain.set("ui-test-key-0000", for: .claudeAPIKey)
         }
+        ReimagineStore.deleteAll()
+        if has(Argument.screenshots), let run = TestModeScripts.sampleRun() { ReimagineStore.save(run) }
         #endif
     }
 
     #if DEBUG
-    /// Refresh dependencies for test mode: two fake sources, the scripted AI below, and a fixed trial state.
+    /// Refresh dependencies for test mode: two fake sources, and the scripted AI below.
     @MainActor static var dependencies: DigestService.Dependencies {
         DigestService.Dependencies(
             makeFetchers: {
-                [FixedFetcher(kind: .painPoints, items: [sample("p1", .painPoints, "I wish there was an invoice chaser")]),
-                 FixedFetcher(kind: .github, items: [sample("g1", .github, "invoice bot"), sample("g2", .github, "billing agent")])]
+                [FixedFetcher(kind: .painPoints, items: [sample("p1", .painPoints, "I wish there was a simple way to chase invoices")]),
+                 FixedFetcher(kind: .appReviews, items: [sample("r1", .appReviews, "Too expensive for a one-person business")]),
+                 FixedFetcher(kind: .github, items: [sample("g1", .github, "invoice bot"), sample("g2", .github, "roster helper")])]
             },
             makeSummarizer: {
                 AppSettings.hasConsent(.claude) && Keychain.get(.claudeAPIKey) != nil
@@ -68,10 +71,13 @@ enum TestMode {
                     : KeywordSummarizer(topics: ["invoice"])
             },
             freeSummarizer: { KeywordSummarizer(topics: ["invoice"]) },
-            access: { StoreManager.shared.access },
             isOverDailyCap: { false },
             needsConsent: { AppSettings.needsConsent },
-            notify: { _, _ in })
+            notify: { _, _ in },
+            priceChecker: {
+                AppSettings.hasConsent(.claude) && Keychain.get(.claudeAPIKey) != nil ? ScriptedClient() : nil
+            },
+            httpGet: { _ in Data(#"{"feed":{"entry":[]}}"#.utf8) })
     }
 
     private static func sample(_ key: String, _ source: SourceKind, _ title: String) -> FetchedItem {
@@ -94,9 +100,25 @@ enum TestMode {
     }
 
     /// An AI that answers every request from a script, offline.
-    private struct ScriptedClient: LLMClient {
+    private struct ScriptedClient: LLMClient, WebSearchClient {
         let provider = AIProvider.claude
         let model = "ui-test"
+        /// Counts devil's-advocate calls, so only a second refresh pauses for the screenshots.
+        static let critiques = Counter()
+
+        /// A thread-safe counter for test mode.
+        final class Counter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            func increment() -> Int { lock.lock(); defer { lock.unlock() }; value += 1; return value }
+        }
+
+        /// Returns the made-up pricing pages as the search's sources (no real web search).
+        func searchWeb(system: String, prompt: String, maxSearches: Int, blockedDomains: [String],
+                       feature: String) async throws -> WebSearchReply {
+            // The text echoes the question, so the scripted price check can answer for the right idea.
+            WebSearchReply(text: "Scripted research for: " + prompt, sources: Set(TestModeScripts.pricingPages))
+        }
 
         /// Returns the scripted reply for the feature, in Claude's format.
         /// - Parameters:
@@ -104,18 +126,16 @@ enum TestMode {
         ///   - prompt: Ignored.
         ///   - schema: Ignored.
         ///   - effort: Ignored.
-        ///   - feature: Picks the reply: "Trends", "Starter kit", "Improve idea", "Killer ideas", or the
-        ///     review for anything else (the improved idea's review scores the same, so the run stops after one round).
+        ///   - feature: Picks the reply from `TestModeScripts` (the improved idea's review scores the same, so an
+        ///     improvement run stops after one round).
         /// - Returns: The reply in Claude's message format.
         /// - Throws: Only if the fixed reply can't be serialised, which doesn't happen.
         func complete(system: String, prompt: String, schema: [String: Any], effort: String, feature: String) async throws -> Data {
-            let json = switch feature {
-            case "Trends": #"{"themes":[{"title":"Invoice automation","summary":"Tools that chase unpaid invoices.","opportunities":["Chaser for trades"],"item_numbers":[2,3],"novelty":4,"novelty_reason":"r","viability":4,"viability_reason":"r","opportunity_gap":4,"opportunity_gap_reason":"r"}],"translations":[],"pain_clusters":[{"title":"Chasing invoices","buyer":"Bookkeeper","workaround":"Email","pay_signals":"none seen","summary":"s","item_numbers":[1]}],"noise_numbers":[]}"#
-            case "Starter kit": #"{"spec":"A web app that chases unpaid invoices for small trades businesses.","screens":[{"name":"Invoices","purpose":"See which invoices are overdue."}],"data_model":[{"entity":"Invoice","fields":["amount (number)","due date (date)"],"notes":"Belongs to one business."}],"stack":[{"part":"Website","choice":"Next.js on Vercel","why":"Free tier."}],"monthly_cost":"About $25, mostly email sending.","leave_out":["Payments: link to the existing invoice instead."],"first_slice":"Import invoices and list the overdue ones.","done_when":["Overdue invoices are listed."],"project_rules":["Keep keys out of the code."]}"#
-            case "Improve idea": #"{"pitch":"Chases unpaid invoices for plumbers, inside Xero.","buyer":"Plumbing business owners","pricing":"$7/month","replaces":"Manual follow-up emails","channel":"Xero App Store","why_now":"w","one_week_test":"t","one_job":"Chase overdue invoices","keep_features":["Reminders"],"leave_out_features":["Payroll"],"price_per_month_usd":7,"changes":"Narrowed to plumbers."}"#
-            case "Killer ideas": #"{"ideas":[{"title":"InvoiceChaser","pitch":"Chases unpaid invoices automatically.","buyer":"Small trades businesses","pricing":"$9/month","why_now":"w","one_week_test":"t","replaces":"Manual follow-up emails","channel":"Xero App Store","evidence_numbers":[1],"same_as":"","one_job":"Chase overdue invoices","keep_features":["Reminders","Overdue list"],"leave_out_features":["Payroll","Quotes"],"competitors":[{"name":"Chaser","cheapest_plan":"Starter","price_per_month_usd":40,"is_free":false}],"fills_gap":false,"price_per_month_usd":9,"sales_model":"subscription","sales_model_reason":"It sends reminder emails every month."}]}"#
-            default: #"{"reviews":[{"title":"InvoiceChaser","survives":true,"objection":"o","competitors":"none found","verdict":"v","pain":4,"willing_to_pay":4,"timing":4,"gap":4,"fit":4,"buildability":4,"channel_score":4,"evidence_needed":"e","build_days":10,"likely_customers":40,"competitors_found":[{"name":"Chaser","cheapest_plan":"Starter","price_per_month_usd":40,"is_free":false}],"follow_risk":"Unlikely.","copy_risk":"The Xero listing.","keep_paying":"Monthly use.","sales_model":"subscription","sales_model_reason":"Email sending costs money every month.","running_cost_per_customer_usd":0.5,"other_yearly_costs_usd":0,"monthly_churn_percent":5}]}"#
+            // Screenshots: a second refresh pauses at the devil's advocate, so the step-by-step progress can be captured.
+            if feature == "Devil's advocate" && has(Argument.screenshots) {
+                if ScriptedClient.critiques.increment() > 1 { try await Task.sleep(for: .seconds(25)) }
             }
+            let json = TestModeScripts.reply(feature: feature, system: system, prompt: prompt)
             return try JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": json]], "stop_reason": "end_turn"])
         }
     }
