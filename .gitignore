@@ -14,3 +14,8 @@ docs/scorecards/
 
 # Local exports of the owner's own app data (never committed)
 local-data/
+
+# The owner's private working notes (never public)
+CLAUDE.md
+docs/
+store/LISTING.md

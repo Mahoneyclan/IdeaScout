@@ -1,5 +1,39 @@
 # IdeaScout
 
+## About the app
+
+IdeaScout is a free iPhone and iPad app for people who want to build and sell a small app of their own with an AI coding tool.
+
+- Every day it reads public complaints and listings (App Store and WordPress plugin reviews, Hacker News and more) and suggests app ideas in your area, each with a buyer, a price at most a quarter of the competition's, and where to find customers.
+- A second, sceptical AI tries to knock every idea down first. Each idea shows why it passes four simple tests, and comes with a starter kit you can paste into your coding tool.
+- "Reimagine an app" explains an app you name, then suggests gaps beside it that you could fill.
+- It uses the AI you choose, with your own key, shows the cost before every paid step and has a daily spending limit.
+
+## Get help
+
+Questions, problems or ideas? Email **[mahoneyclanapps+ideascout@gmail.com](mailto:mahoneyclanapps+ideascout@gmail.com)**.
+
+If you're reporting a problem, please include:
+
+- what you were doing and what happened
+- your iPhone or iPad model and iOS version
+- the app version (shown in the app's Settings or About screen, or in the App Store)
+- a screenshot, if it helps
+
+**Please note:** I'm a novice developer and make this app as a hobby, in my spare time. I'm happy to help and I read every message, but replies and fixes may take a while, and some problems may be beyond what I can fix.
+
+## Support the app
+
+My apps are free. I make them as a hobby, so I can't promise regular updates or new features. If an app is useful to you and you'd like to say thanks, you can shout me a coffee from the Support section in the app's Settings. It's completely optional, and the app works the same either way.
+
+## Privacy
+
+See the [privacy policy](PRIVACY.md).
+
+---
+
+# How it works (for developers)
+
 An iPhone and iPad app. IdeaScout finds the killer app idea in your interest area that you can vibe-code yourself and sell for a quarter of what competitors charge, or less. It must make money even if only a small group of customers ever buys it. Growth is a bonus, not the goal. Each idea comes with a starter kit to build it.
 
 An idea is killer only if it passes these tests:
@@ -139,19 +173,19 @@ IdeaScout/
   PrivacyInfo.xcprivacy, IdeaScout.storekit (test only, not shipped)
 IdeaScoutTests/    Unit tests (Swift Testing)
 IdeaScoutUITests/  Screen tests (XCUITest)
-docs/         Privacy policy, App Store kit, data-source terms check
+PRIVACY.md    The privacy policy
+store/        App Store screenshots
 project.yml   XcodeGen project definition
 ARCHITECTURE.md  How the app fits together
 SECURITY.md   What data is held, how it's protected, remaining risks
-CLAUDE.md     Conventions for working on this repo
 ```
 
 ## Status and open items
 
-Version 1.0 is feature-complete. All 129 tests pass (124 unit, 5 screen) with no compiler warnings; the tests cover 83% of the non-screen code. The latest internal quality review (31 Oct 2026, round 2 of the review loop) scored 79.0 / 100; progress is tracked in `docs/review/PROGRESS.md`.
+Version 1.0 is feature-complete. All 129 tests pass (124 unit, 5 screen) with no compiler warnings; the tests cover 83% of the non-screen code. The latest internal quality review (31 Oct 2026, round 2 of the review loop) scored 79.0 / 100.
 
 Still to do:
-- **Before App Store release (owner):** choose a support email and host the privacy policy publicly, then fill in `AppInfo` in `AboutView.swift`; create the two in-app purchases in App Store Connect; archive, TestFlight and submit.
+- **Before App Store release (owner):** create the three coffee tips in App Store Connect; archive, TestFlight and submit.
 - **Reddit** as a source, once Reddit approves API access.
 - **Model list upkeep:** a future admin routine to update providers, models and prices automatically (today they're hand-maintained in `AI/AIProviders.swift`).
 - **Code quality backlog:** split the seven files over 300 lines; Swift 6 strict concurrency; typed JSON schemas for AI replies. The killer-idea leaderboard loads every saved idea to rank it, because its score is calculated rather than stored; that's fast at today's volumes (a few ideas a day), and storing the score would add a new database field.
