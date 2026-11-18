@@ -44,8 +44,6 @@ An idea is killer only if it passes these tests:
 
 The devil's advocate also asks: would the competitors follow, what stops another vibe coder copying it, and will customers keep paying? Each idea says which features to keep and which to leave out compared with the competitors, to size and price it. The recommended price is at most 25% of the cheapest competitor's comparable plan: a fixed rule applied in code, not a scored test (owner, 16 Nov 2026; it replaced the half-price test).
 
-(The idea engine is being reworked to match this purpose; the sections below describe how it works today.)
-
 Native Swift / SwiftUI / SwiftData. No backend: everything runs on the phone.
 
 ## What it does
@@ -85,7 +83,7 @@ All output is in English. Non-English items are translated by Claude, or filtere
 | Games *(off by default)* | itch.io, Steam, HN, GitHub and Hugging Face game projects |
 | Lobsters *(off by default)* | "Show" posts |
 
-Developer and game sources, GitHub, Show HN, AI research and AusTender start switched off: builder-side sources show what's already made rather than what buyers need, and government contracts are out of reach for a solo builder. Atlassian Marketplace starts off on new installs (it shows what enterprise teams buy, which is rarely a solo builder's market); if you'd already set the app up, your choice is kept. Turn any of them back on in Settings. Vibe-code showcases, the App Store and the complaint sources stay on, and the AI treats what other builders have made as competition, not inspiration. Y Combinator is no longer read (17 Nov 2026): its company data came from an unofficial copy with no confirmed licence.
+Developer and game sources, GitHub, Show HN, AI research and AusTender start switched off: builder-side sources show what's already made rather than what buyers need, and government contracts are out of reach for a solo builder. Atlassian Marketplace starts off on new installs (it shows what enterprise teams buy, which is rarely a solo builder's market); if you'd already set the app up, your choice is kept. Turn any of them back on in Settings. Vibe-code showcases, the App Store and the complaint sources stay on, and the AI treats what other builders have made as competition, not inspiration.
 
 Sources are grouped as **demand** (complaints, your challenges, government spending), **supply** (things being built) and **timing** (new startups and research). Claude reads about 40% demand, 40% supply and 20% timing, with unused share going to demand first. Claude also groups demand items into **pain clusters** (one problem, one buyer) that the idea step must draw on, and flags noise so it's left out of "Other projects".
 
@@ -100,7 +98,7 @@ Sources are grouped as **demand** (complaints, your challenges, government spend
 - **Free**, with no trial, unlock or locked features (owner, 15 and 17 Nov 2026). An optional **"Shout me a coffee"** section at the bottom of Settings offers three consumable tips (StoreKit 2): small coffee, large coffee, coffee and cake. They unlock nothing, and the section hides itself when Apple can't supply the products. `IdeaScout/IdeaScout.storekit` lets the tips be tested from Xcode without real money.
 - A **welcome flow** on first launch (what the app does, your interest area and coding tool, and guided AI key setup with a Paste button and a plain warning if you finish without a key), and a **consent screen** before any data goes to a cloud AI (asked per provider, withdrawable in Settings).
 - **About & privacy** screen with data-source credits; `PrivacyInfo.xcprivacy` privacy manifest; export-compliance flag set.
-- Submission drafts in `docs/`: privacy policy, App Store listing, App Privacy answers, review notes, in-app purchase setup, and a data-source terms check.
+- The privacy policy is [`PRIVACY.md`](PRIVACY.md); App Store screenshots are in `store/screenshots/`.
 
 ## Reliability
 
@@ -182,7 +180,7 @@ SECURITY.md   What data is held, how it's protected, remaining risks
 
 ## Status and open items
 
-Version 1.0 is feature-complete. All 129 tests pass (124 unit, 5 screen) with no compiler warnings; the tests cover 83% of the non-screen code. The latest internal quality review (31 Oct 2026, round 2 of the review loop) scored 79.0 / 100.
+Version 1.0 is feature-complete and free. All 226 unit tests and the 3 screen tests pass, with no compiler warnings.
 
 Still to do:
 - **Before App Store release (owner):** create the three coffee tips in App Store Connect; archive, TestFlight and submit.

@@ -73,7 +73,7 @@ Removing data: **Settings → About & privacy → Delete all my data** erases th
 | User text and public content are processed by the chosen AI provider under **its** retention policy; five providers are China-based | Medium (user choice) | Disclosed per provider with consent and a confidential-data warning; users can choose a US provider or Apple on-device |
 | Prompt injection can still skew an individual idea | Low | Mitigated by the untrusted-data rule, the devil's-advocate pass and evidence caps; no data exposure possible |
 | About me, interest area and pain points are in UserDefaults, included in the user's own (encrypted) backups | Low | Not secrets; "Delete all my data" removes them |
-| Apple App Store and WordPress.org review feeds have no explicit commercial-use terms | Low–Medium (legal) | See `docs/source-terms.md`; short excerpts with links only. Y Combinator data is no longer read (17 Nov 2026) |
+| Apple App Store and WordPress.org review feeds have no explicit commercial-use terms | Low–Medium (legal) | Short excerpts with links only. |
 | Share sheet "Copy" of a prompt containing About me is a normal copy | Low | The user chooses to share; the app's own Copy button is local-only and expires |
 | The starter kit has only a Share button; its Copy is a normal copy that reaches the user's Mac and doesn't expire | Low | Owner's choice (10 Nov 2026), so kits reach Claude Code and Cursor on a Mac; the kit holds no About me or keys |
 | A Claude answer declined part-way (then served by a fallback model) isn't fully counted by the cost tracker | Low | Rare; same provider; the answering model's cost is counted |
